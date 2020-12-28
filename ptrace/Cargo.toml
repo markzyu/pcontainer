@@ -11,4 +11,6 @@ spawn-ptrace  = "0.1.2"
 nix = "0.19.1"
 
 [dev-dependencies]
+libc = "0.2.81"
+mockall = "0.9.0"
 ntest = "0.7.2"
