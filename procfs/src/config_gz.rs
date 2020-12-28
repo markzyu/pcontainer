@@ -66,16 +66,18 @@ impl ConfigGz {
 
 #[cfg(test)]
 mod tests {
+    use crate::config_gz;
+
     #[test]
     fn config_gz_line_maybe_value() {
-        let testCases: Vec<(crate::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
-          (crate::ConfigGzLine{content: b"".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEF=ab".to_vec()}, Some((b"ab", 14))),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEFG=cd \t ".to_vec()}, Some((b"cd", 15))),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"xy", 14))),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEF= xy \t # def".to_vec()}, Some((b"xy", 14))),
+        let testCases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
+          (config_gz::ConfigGzLine{content: b"".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF=ab".to_vec()}, Some((b"ab", 14))),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEFG=cd \t ".to_vec()}, Some((b"cd", 15))),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"xy", 14))),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF= xy \t # def".to_vec()}, Some((b"xy", 14))),
         ];
         for (line, expect) in testCases {
           assert_eq!(line.maybeValue(), expect);
@@ -84,14 +86,14 @@ mod tests {
 
     #[test]
     fn config_gz_line_maybe_name() {
-        let testCases: Vec<(crate::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
-          (crate::ConfigGzLine{content: b"".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEF=ab".to_vec()}, Some((b"CONFIG_ABC_DEF", 14))),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEFG=cd \t ".to_vec()}, Some((b"CONFIG_ABC_DEFG", 15))),
-          (crate::ConfigGzLine{content: b" CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
-          (crate::ConfigGzLine{content: b"CONFIG_ABC_DEF = xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
+        let testCases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
+          (config_gz::ConfigGzLine{content: b"".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF=ab".to_vec()}, Some((b"CONFIG_ABC_DEF", 14))),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEFG=cd \t ".to_vec()}, Some((b"CONFIG_ABC_DEFG", 15))),
+          (config_gz::ConfigGzLine{content: b" CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
+          (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF = xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
         ];
         for (line, expect) in testCases {
           assert_eq!(line.maybeName(), expect);
