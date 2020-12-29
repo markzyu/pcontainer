@@ -41,12 +41,6 @@ pub struct SysOverrideList {
 }
 
 impl SysOverrideList {
-    pub fn new() -> SysOverrideList {
-        SysOverrideList {
-            overrides: HashMap::new(),
-        }
-    }
-
     pub fn add_override(&mut self, val: SysOverrideBox) -> Lock<SysOverrideBox> {
         let mut old_vec: OverrideBySysNum;
         let mut new_vec: OverrideBySysNum = Vec::new();
@@ -194,7 +188,7 @@ mod tests {
         let fake = TestSysOverride {
             result: result.clone(),
         };
-        let mut list = crate::SysOverrideList::new();
+        let mut list = crate::SysOverrideList::default();
 
         list.add_override(Box::new(fake));
         _reset_syscall_result(result.clone());
