@@ -8,11 +8,9 @@ edition = "2018"
 
 [dependencies]
 spawn-ptrace  = "0.1.2"
-mockers_derive = "0.21.0"
+lazy_static = "1.4.0"
 nix = "0.19.1"
 
 [dev-dependencies]
-lazy_static = "1.4.0"
 libc = "0.2.81"
-mockers = "0.21.0"
 ntest = "0.7.2"
