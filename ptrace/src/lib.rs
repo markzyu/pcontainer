@@ -35,13 +35,16 @@ type SysOverrideBox = Box<dyn SysOverride>;
 type Lock<T> = Arc<RwLock<T>>;
 type OverrideBySysNum = Vec<Lock<SysOverrideBox>>;
 
+#[derive(Default)]
 pub struct SysOverrideList {
     overrides: HashMap<SysNum, OverrideBySysNum>,
 }
 
 impl SysOverrideList {
     pub fn new() -> SysOverrideList {
-        SysOverrideList{overrides: HashMap::new()}
+        SysOverrideList {
+            overrides: HashMap::new(),
+        }
     }
 
     pub fn add_override(&mut self, val: SysOverrideBox) -> Lock<SysOverrideBox> {
@@ -54,29 +57,36 @@ impl SysOverrideList {
             if !self.overrides.contains_key(&n) {
                 old_vec = new_vec;
                 new_vec = Vec::new();
-                self.overrides.insert(n.clone(), old_vec);
+                self.overrides.insert(*n, old_vec);
             }
 
-            self.overrides.get_mut(&n).unwrap().push(Arc::clone(&override_arc));
+            self.overrides
+                .get_mut(&n)
+                .unwrap()
+                .push(Arc::clone(&override_arc));
         }
         override_arc
     }
 
     pub fn _summarize_errors(&self, errors: Vec<AnyErr>, msg: String) -> AnyResult<()> {
-        if errors.len() == 0 {
+        if errors.is_empty() {
             Ok(())
         } else {
-            Err(Box::new(PTraceError{reason: format!("{}: {:?}", msg, errors)}))
+            Err(Box::new(PTraceError {
+                reason: format!("{}: {:?}", msg, errors),
+            }))
         }
     }
 
     pub fn on_syscall(&mut self, n: &SysNum, child: Option<i32>) -> AnyResult<()> {
         if let Some(vec) = self.overrides.get(&n) {
-            let results = vec.iter().map(|val| val.read().unwrap().on_syscall(&n, child.clone()));
+            let results = vec
+                .iter()
+                .map(|val| val.read().unwrap().on_syscall(&n, child));
             self._summarize_errors(
-              results.filter_map(|x| x.err()).collect(),
-              format!("Errors(s) starting syscall {}", n),
-           )
+                results.filter_map(|x| x.err()).collect(),
+                format!("Errors(s) starting syscall {}", n),
+            )
         } else {
             Ok(())
         }
@@ -146,45 +156,62 @@ mod tests {
     }
 
     const MOCK_SYSCALLS1: &'static [crate::SysNum] = &[libc::SYS_read, libc::SYS_write];
-		use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, RwLock};
 
-		struct TestSysOverride {
-				result: Arc<RwLock<Option<crate::SysNum>>>,
-		}
-		impl crate::SysOverride for TestSysOverride {
-				fn get_syscalls(&self) -> &[crate::SysNum] {
-						MOCK_SYSCALLS1
-				}
-				fn on_syscall(&self, n: &crate::SysNum, _child: Option<i32>) -> crate::AnyResult<()> {
-						let mut maybe = self.result.write().unwrap();
-						maybe.replace(n.clone());
-						Ok(())
-				}
-		}
+    struct TestSysOverride {
+        result: Arc<RwLock<Option<crate::SysNum>>>,
+    }
+    impl crate::SysOverride for TestSysOverride {
+        fn get_syscalls(&self) -> &[crate::SysNum] {
+            MOCK_SYSCALLS1
+        }
+        fn on_syscall(&self, n: &crate::SysNum, _child: Option<i32>) -> crate::AnyResult<()> {
+            let mut maybe = self.result.write().unwrap();
+            maybe.replace(n.clone());
+            Ok(())
+        }
+    }
 
-		fn _reset_syscall_result(result: Arc<RwLock<Option<crate::SysNum>>>) {
-				let mut maybe = result.write().unwrap();
-				maybe.take();
-		}
+    fn _reset_syscall_result(result: Arc<RwLock<Option<crate::SysNum>>>) {
+        let mut maybe = result.write().unwrap();
+        maybe.take();
+    }
 
-		fn _run_syscall_and_assert(result: Arc<RwLock<Option<crate::SysNum>>>, call_num: &crate::SysNum, want_sys_num: Option<crate::SysNum>, list: &mut crate::SysOverrideList) {
+    fn _run_syscall_and_assert(
+        result: Arc<RwLock<Option<crate::SysNum>>>,
+        call_num: &crate::SysNum,
+        want_sys_num: Option<crate::SysNum>,
+        list: &mut crate::SysOverrideList,
+    ) {
         list.on_syscall(&call_num, None).unwrap();
-				let maybe = result.read().unwrap();
-				assert!(*maybe == want_sys_num);
-		}
+        let maybe = result.read().unwrap();
+        assert!(*maybe == want_sys_num);
+    }
 
     #[test]
     fn test_add_override_and_call() {
-				let result = Arc::new(RwLock::new(None));
-				let fake = TestSysOverride{result: result.clone()};
+        let result = Arc::new(RwLock::new(None));
+        let fake = TestSysOverride {
+            result: result.clone(),
+        };
         let mut list = crate::SysOverrideList::new();
 
         list.add_override(Box::new(fake));
-				_reset_syscall_result(result.clone());
-				_run_syscall_and_assert(result.clone(), &libc::SYS_openat, None, &mut list);
+        _reset_syscall_result(result.clone());
+        _run_syscall_and_assert(result.clone(), &libc::SYS_openat, None, &mut list);
 
-				_reset_syscall_result(result.clone());
-				_run_syscall_and_assert(result.clone(), &libc::SYS_write, Some(libc::SYS_write.clone()), &mut list);
-				_run_syscall_and_assert(result.clone(), &libc::SYS_read, Some(libc::SYS_read.clone()), &mut list);
+        _reset_syscall_result(result.clone());
+        _run_syscall_and_assert(
+            result.clone(),
+            &libc::SYS_write,
+            Some(libc::SYS_write.clone()),
+            &mut list,
+        );
+        _run_syscall_and_assert(
+            result.clone(),
+            &libc::SYS_read,
+            Some(libc::SYS_read.clone()),
+            &mut list,
+        );
     }
 }
