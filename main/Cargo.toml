@@ -9,4 +9,5 @@ edition = "2018"
 [dependencies]
 procfs = {path = "../procfs"}
 ptrace = {path = "../ptrace"}
+libc = "0.2.80"
 nix = "0.19.1"
