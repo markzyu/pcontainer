@@ -120,17 +120,13 @@ pub fn wait(child: &process::Child) -> AnyResult<wait::WaitStatus> {
 }
 
 pub fn wait_hang(child: &process::Child) -> AnyResult<wait::WaitStatus> {
-    Ok(wait::waitpid(
-        pid(&child)?,
-        None,
-    )?)
+    Ok(wait::waitpid(pid(&child)?, None)?)
 }
 
-
 bitflags::bitflags! {
-	pub struct LibcConst: libc::c_int {
-		const NT_PRSTATUS = 1 as libc::c_int;
-	}
+    pub struct LibcConst: libc::c_int {
+        const NT_PRSTATUS = 1 as libc::c_int;
+    }
 }
 
 /// This is copied from https://github.com/nix-rust/nix/blob/master/src/sys/ptrace/linux.rs
@@ -141,13 +137,15 @@ bitflags::bitflags! {
 pub fn ptrace_get_data<T>(request: sys::ptrace::Request, pid: nix::unistd::Pid) -> AnyResult<T> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
-        libc::ptrace(request as sys::ptrace::RequestType,
-                     libc::pid_t::from(pid),
-                     LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
-                     data.as_mut_ptr() as *mut _ as *mut libc::c_void)
+        libc::ptrace(
+            request as sys::ptrace::RequestType,
+            libc::pid_t::from(pid),
+            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            data.as_mut_ptr() as *mut _ as *mut libc::c_void,
+        )
     };
     nix::errno::Errno::result(res)?;
-    Ok(unsafe{ data.assume_init() })
+    Ok(unsafe { data.assume_init() })
 }
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
@@ -156,25 +154,25 @@ pub fn ptrace_get_data<T>(request: sys::ptrace::Request, pid: nix::unistd::Pid) 
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
-		pub arg0: i64,
-		pub arg1: i64,
-		pub arg2: i64,
-		unknown_x3: i64,
-		unknown_x4: i64,
-		unknown_x5: i64,
-		unknown_x6: i64,
-		unknown_x7: i64,
-		pub syscall_num: i64,
-		unknown_x9: i64,
-		unknown_x10: i64,
-		unknown_x11: i64,
-		unknown_x12: i64,
-		unknown_x13: i64,
-		unknown_x14: i64,
-		unknown_x15: i64,
-		unknown_x16: i64,
-		unknown_x17: i64,
-		unknown_x18: i64,
+    pub arg0: i64,
+    pub arg1: i64,
+    pub arg2: i64,
+    unknown_x3: i64,
+    unknown_x4: i64,
+    unknown_x5: i64,
+    unknown_x6: i64,
+    unknown_x7: i64,
+    pub syscall_num: i64,
+    unknown_x9: i64,
+    unknown_x10: i64,
+    unknown_x11: i64,
+    unknown_x12: i64,
+    unknown_x13: i64,
+    unknown_x14: i64,
+    unknown_x15: i64,
+    unknown_x16: i64,
+    unknown_x17: i64,
+    unknown_x18: i64,
 }
 
 #[cfg(target_arch = "arm")]
@@ -182,24 +180,24 @@ pub struct GenericPurposeRegs {
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
-		pub arg0: i32,
-		pub arg1: i32,
-		pub arg2: i32,
-		unknown_x3: i32,
-		unknown_x4: i32,
-		unknown_x5: i32,
-		unknown_x6: i32,
-		pub syscall_num: i32,
-		unknown_x8: i32,
-		unknown_x9: i32,
-		unknown_x10: i32,
-		unknown_x11: i32,
-		unknown_x12: i32,
-		unknown_x13: i32,
-		unknown_x14: i32,
-		unknown_x15: i32,
-		unknown_x16: i32,
-		unknown_x17: i32,
+    pub arg0: i32,
+    pub arg1: i32,
+    pub arg2: i32,
+    unknown_x3: i32,
+    unknown_x4: i32,
+    unknown_x5: i32,
+    unknown_x6: i32,
+    pub syscall_num: i32,
+    unknown_x8: i32,
+    unknown_x9: i32,
+    unknown_x10: i32,
+    unknown_x11: i32,
+    unknown_x12: i32,
+    unknown_x13: i32,
+    unknown_x14: i32,
+    unknown_x15: i32,
+    unknown_x16: i32,
+    unknown_x17: i32,
 }
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
@@ -211,13 +209,15 @@ pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
             iov_base: data.as_mut_ptr() as *mut _ as *mut libc::c_void,
             iov_len: std::mem::size_of::<GenericPurposeRegs>(),
         };
-        libc::ptrace(sys::ptrace::Request::PTRACE_GETREGSET as u32,
-                     libc::pid_t::from(pid),
-                     LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
-                     &mut iov as *mut _ as *mut libc::c_void)
+        libc::ptrace(
+            sys::ptrace::Request::PTRACE_GETREGSET as u32,
+            libc::pid_t::from(pid),
+            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            &mut iov as *mut _ as *mut libc::c_void,
+        )
     };
     nix::errno::Errno::result(res)?;
-    Ok(unsafe{ data.assume_init() })
+    Ok(unsafe { data.assume_init() })
 }
 
 /// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
@@ -225,13 +225,15 @@ pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
 pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
-        libc::ptrace(12 as u32,
-                     libc::pid_t::from(pid),
-                     std::ptr::null_mut::<i32>(),
-                     data.as_mut_ptr() as *mut _ as *mut libc::c_void)
+        libc::ptrace(
+            12 as u32,
+            libc::pid_t::from(pid),
+            std::ptr::null_mut::<i32>(),
+            data.as_mut_ptr() as *mut _ as *mut libc::c_void,
+        )
     };
     nix::errno::Errno::result(res)?;
-    Ok(unsafe{ data.assume_init() })
+    Ok(unsafe { data.assume_init() })
 }
 
 #[cfg(test)]
