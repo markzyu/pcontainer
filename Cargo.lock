@@ -51,6 +51,7 @@ dependencies = [
 name = "dockify"
 version = "0.1.0"
 dependencies = [
+ "executor",
  "libc",
  "nix 0.19.1",
  "procfs",
