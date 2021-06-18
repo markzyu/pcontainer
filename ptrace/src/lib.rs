@@ -92,15 +92,15 @@ impl SysOverrideList {
 }
 
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
-    match status {
-        wait::WaitStatus::PtraceEvent(_, _, _) => true,
-        wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP) => true,
-        _ => false,
-    }
+    matches!(
+        status,
+        wait::WaitStatus::PtraceEvent(_, _, _)
+            | wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP)
+    )
 }
 
 pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
-    matches!(status, wait::WaitStatus::StillAlive)
+    !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
 pub fn start(cmd: &mut process::Command) -> AnyResult<process::Child> {
