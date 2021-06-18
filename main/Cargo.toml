@@ -13,3 +13,5 @@ ptrace = {path = "../ptrace"}
 lazy_static = "1.4.0"
 libc = "0.2.80"
 nix = "0.19.1"
+tracing = "0.1.26"
+tracing-subscriber = "0.2"

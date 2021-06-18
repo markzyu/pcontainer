@@ -99,6 +99,13 @@ pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
     )
 }
 
+pub fn is_syscall_stop(status: &wait::WaitStatus) -> bool {
+    matches!(
+        status,
+        wait::WaitStatus::PtraceEvent(_, _, _) | wait::WaitStatus::PtraceSyscall(_)
+    )
+}
+
 pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
@@ -155,7 +162,7 @@ pub fn ptrace_get_data<T>(request: sys::ptrace::Request, pid: nix::unistd::Pid) 
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
 #[cfg(target_arch = "aarch64")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
@@ -181,7 +188,7 @@ pub struct GenericPurposeRegs {
 }
 
 #[cfg(target_arch = "arm")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
@@ -203,6 +210,13 @@ pub struct GenericPurposeRegs {
     unknown_x15: i32,
     unknown_x16: i32,
     unknown_x17: i32,
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+impl GenericPurposeRegs {
+    pub fn syscall_retval(&self) -> SysNum {
+        self.arg0
+    }
 }
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
@@ -239,6 +253,40 @@ pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
     };
     nix::errno::Errno::result(res)?;
     Ok(unsafe { data.assume_init() })
+}
+
+/// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
+#[cfg(target_arch = "aarch64")]
+pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> AnyResult<()> {
+    let res = unsafe {
+        let mut iov = libc::iovec {
+            iov_base: &mut data as *mut _ as *mut libc::c_void,
+            iov_len: std::mem::size_of::<GenericPurposeRegs>(),
+        };
+        libc::ptrace(
+            sys::ptrace::Request::PTRACE_SETREGSET as u32,
+            libc::pid_t::from(pid),
+            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            &mut iov as *mut _ as *mut libc::c_void,
+        )
+    };
+    nix::errno::Errno::result(res)?;
+    Ok(())
+}
+
+/// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
+#[cfg(target_arch = "arm")]
+pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> AnyResult<()> {
+    let res = unsafe {
+        libc::ptrace(
+            13 as u32,
+            libc::pid_t::from(pid),
+            std::ptr::null_mut::<i32>(),
+            &mut data as *mut _ as *mut libc::c_void,
+        )
+    };
+    nix::errno::Errno::result(res)?;
+    Ok(())
 }
 
 #[cfg(test)]
