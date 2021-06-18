@@ -275,13 +275,11 @@ name = "ptrace"
 version = "0.1.0"
 dependencies = [
  "bitflags",
- "lazy_static",
  "libc",
  "nix 0.19.1",
  "ntest",
  "spawn-ptrace",
  "thiserror",
- "tracing",
 ]
 
 [[package]]

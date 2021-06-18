@@ -2,25 +2,19 @@ use nix::sys;
 use nix::sys::wait;
 use spawn_ptrace::CommandPtraceSpawn;
 use std::convert::TryInto;
-use std::fmt;
 use std::process;
+use thiserror::Error;
 
-type AnyErr = Box<dyn std::error::Error>;
-type AnyResult<V> = Result<V, AnyErr>;
+#[derive(Debug, Error)]
+pub enum PtraceError {
+    #[error("Cannot run initial command: {0}")]
+    StartInitCmd(std::io::Error),
 
-#[derive(Debug, Clone)]
-pub struct PTraceError {
-    reason: String,
-}
-impl fmt::Display for PTraceError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PTrace Error: {}", self.reason)
-    }
-}
-impl std::error::Error for PTraceError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
+    #[error("Failed to parse pid {0}: {1}")]
+    ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
+
+    #[error("OS Error: {0}")]
+    LinuxOSErr(#[from] nix::Error),
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -47,34 +41,37 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
-pub fn start(cmd: &mut process::Command) -> AnyResult<process::Child> {
-    Ok(cmd.spawn_ptrace()?)
+pub fn start(cmd: &mut process::Command) -> Result<process::Child, PtraceError> {
+    cmd.spawn_ptrace().map_err(PtraceError::StartInitCmd)
 }
 
-pub fn pid(child: &process::Child) -> AnyResult<nix::unistd::Pid> {
-    let pid: i32 = child.id().try_into()?;
+pub fn pid(child: &process::Child) -> Result<nix::unistd::Pid, PtraceError> {
+    let raw_id: u64 = child.id().into();
+    let pid: libc::pid_t = raw_id
+        .try_into()
+        .map_err(|e| PtraceError::ParsePid(raw_id, e))?;
     Ok(nix::unistd::Pid::from_raw(pid))
 }
 
-pub fn waitpid(pid: nix::unistd::Pid) -> AnyResult<wait::WaitStatus> {
+pub fn waitpid(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
     Ok(wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG))?)
 }
 
-pub fn wait(child: &process::Child) -> AnyResult<wait::WaitStatus> {
+pub fn wait(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
     waitpid(pid(&child)?)
 }
 
-pub fn waitpid_hang(pid: nix::unistd::Pid) -> AnyResult<wait::WaitStatus> {
+pub fn waitpid_hang(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
     Ok(wait::waitpid(pid, None)?)
 }
 
-pub fn wait_hang(child: &process::Child) -> AnyResult<wait::WaitStatus> {
+pub fn wait_hang(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
     waitpid_hang(pid(&child)?)
 }
 
 bitflags::bitflags! {
     pub struct LibcConst: libc::c_int {
-        const NT_PRSTATUS = 1 as libc::c_int;
+        const NT_PRSTATUS = 1_i32;
     }
 }
 
@@ -83,7 +80,10 @@ bitflags::bitflags! {
 /// Some ptrace get requests populate structs or larger elements than `c_long`
 /// and therefore use the data field to return values. This function handles these
 /// requests.
-pub fn ptrace_get_data<T>(request: sys::ptrace::Request, pid: nix::unistd::Pid) -> AnyResult<T> {
+pub fn ptrace_get_data<T>(
+    request: sys::ptrace::Request,
+    pid: nix::unistd::Pid,
+) -> Result<T, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         libc::ptrace(
@@ -158,7 +158,7 @@ impl GenericPurposeRegs {
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
 #[cfg(target_arch = "aarch64")]
-pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
+pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         let mut iov = libc::iovec {
@@ -178,7 +178,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
 
 /// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
 #[cfg(target_arch = "arm")]
-pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
+pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         libc::ptrace(
@@ -194,7 +194,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
 #[cfg(target_arch = "aarch64")]
-pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> AnyResult<()> {
+pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
     let res = unsafe {
         let mut iov = libc::iovec {
             iov_base: &mut data as *mut _ as *mut libc::c_void,
@@ -213,7 +213,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> AnyResult
 
 /// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
 #[cfg(target_arch = "arm")]
-pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> AnyResult<()> {
+pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
     let res = unsafe {
         libc::ptrace(
             13 as u32,

@@ -22,6 +22,15 @@ lazy_static! {
 pub enum CLIError {
     #[error("Unexpected internal error from ptrace() executor: {0}")]
     InternalExecutor(#[from] executor::PtraceExecutorError),
+
+    #[error("Ptrace error: {0}")]
+    Ptrace(#[from] ptrace::PtraceError),
+
+    #[error("OS Error: {0}")]
+    LinuxOSErr(#[from] nix::Error),
+
+    #[error("Interger conversion error")]
+    IntoInt,
 }
 
 pub fn event_thread(
@@ -29,8 +38,8 @@ pub fn event_thread(
     ptrace_client: executor::PtraceClient,
 ) -> Result<(), CLIError> {
     ptrace_client.execute(move || {
-        sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD).unwrap()
-    })?;
+        sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
+    })??;
 
     let mut last_syscall: Option<String> = None;
     let mut last_syscall_times: u64 = 0;
@@ -38,8 +47,8 @@ pub fn event_thread(
         let span = span!(Level::TRACE, "event_loop", ?pid);
         let _span_enter = span.enter();
 
-        ptrace_client.execute(move || sys::ptrace::syscall(pid, None).unwrap())?;
-        let status = ptrace::waitpid_hang(pid).unwrap();
+        ptrace_client.execute(move || sys::ptrace::syscall(pid, None))??;
+        let status = ptrace::waitpid_hang(pid)?;
         event!(Level::TRACE, "child status {:?}", &status);
 
         if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
@@ -50,7 +59,7 @@ pub fn event_thread(
             continue;
         }
 
-        let regs = ptrace_client.execute(move || ptrace::getregs(pid).unwrap())?;
+        let regs = ptrace_client.execute(move || ptrace::getregs(pid))??;
         let unknown: String = "Unknown syscall".into();
         let name = SYSCALL_NAMES.get(&regs.syscall_num).unwrap_or(&unknown);
 
@@ -76,10 +85,11 @@ pub fn event_thread(
         // Before clone()
         if name == "clone" && last_syscall_times % 2 == 1 {
             let mut new_regs = regs.clone();
-            let new_flag: ptrace::SysNum = libc::CLONE_PTRACE.try_into().unwrap();
+            let new_flag: ptrace::SysNum =
+                libc::CLONE_PTRACE.try_into().or(Err(CLIError::IntoInt))?;
             new_regs.arg0 |= new_flag;
-            ptrace_client.execute(move || ptrace::setregs(pid, new_regs.clone()).unwrap())?;
-            let confirm_regs = ptrace_client.execute(move || ptrace::getregs(pid).unwrap())?;
+            ptrace_client.execute(move || ptrace::setregs(pid, new_regs.clone()))??;
+            let confirm_regs = ptrace_client.execute(move || ptrace::getregs(pid))??;
             event!(
                 Level::DEBUG,
                 "Clone new arg: {:x}, {:x}, {:x}",
@@ -93,7 +103,7 @@ pub fn event_thread(
             let raw_pid = regs.syscall_retval();
             if raw_pid > 0 {
                 let child_pid: nix::unistd::Pid =
-                    nix::unistd::Pid::from_raw(raw_pid.try_into().unwrap());
+                    nix::unistd::Pid::from_raw(raw_pid.try_into().or(Err(CLIError::IntoInt))?);
                 event!(Level::INFO, "Clone pid {}", child_pid);
                 let new_ptrace_client = ptrace_client.clone();
                 thread::spawn(move || {
@@ -110,9 +120,9 @@ fn main() -> Result<(), CLIError> {
     let (proc1_client, ptrace_loop) = executor::new_ptrace_executor();
 
     let mut cmd = std::process::Command::new("bash");
-    let child = ptrace::start(&mut cmd).unwrap();
+    let child = ptrace::start(&mut cmd)?;
 
-    let pid1 = ptrace::pid(&child).unwrap();
+    let pid1 = ptrace::pid(&child)?;
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
     thread::spawn(move || {
         let proc1_client2 = proc1_client.clone();
