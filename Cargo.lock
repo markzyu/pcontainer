@@ -73,11 +73,9 @@ name = "dockify"
 version = "0.1.0"
 dependencies = [
  "executor",
- "lazy_static",
- "libc",
- "nix 0.19.1",
  "procfs",
  "ptrace",
+ "sysaug",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -372,6 +370,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
+]
+
+[[package]]
+name = "sysaug"
+version = "0.1.0"
+dependencies = [
+ "executor",
+ "lazy_static",
+ "libc",
+ "nix 0.19.1",
+ "ptrace",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
