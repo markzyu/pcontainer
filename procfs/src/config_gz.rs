@@ -1,7 +1,7 @@
 use flate2::bufread::GzDecoder;
-use std::error;
 use std::io;
 use std::io::BufRead;
+use thiserror::Error;
 
 #[derive(Debug)]
 pub struct ConfigGzLine {
@@ -12,6 +12,15 @@ pub struct ConfigGzLine {
 pub struct ConfigGz {
     pub lines: Vec<ConfigGzLine>,
     override_lines: Vec<ConfigGzLine>,
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigGzError {
+    #[error("/proc/config.gz is not a valid gzip: {0}")]
+    InvalidGzip(std::io::Error),
+
+    #[error("/proc/config.gz doesn't exist: {0}")]
+    NoGzip(std::io::Error),
 }
 
 const WHITESPACES: &[u8] = b" \t\n\r";
@@ -49,15 +58,19 @@ impl ConfigGzLine {
 }
 
 impl ConfigGz {
-    pub fn init_from_host_os(&mut self) -> Result<(), Box<dyn error::Error>> {
-        let f = io::BufReader::new(std::fs::File::open("/proc/config.gz")?);
+    pub fn init_from_host_os(&mut self) -> Result<(), ConfigGzError> {
+        let f = io::BufReader::new(
+            std::fs::File::open("/proc/config.gz").map_err(ConfigGzError::NoGzip)?,
+        );
         let mut gunzip = io::BufReader::new(GzDecoder::new(f));
 
         let mut line_buf = vec![];
         self.lines.clear();
         loop {
             line_buf.clear();
-            let nbytes_read = gunzip.read_until(b'\n', &mut line_buf)?;
+            let nbytes_read = gunzip
+                .read_until(b'\n', &mut line_buf)
+                .map_err(ConfigGzError::InvalidGzip)?;
             if nbytes_read == 0 {
                 break;
             }
