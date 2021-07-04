@@ -13,6 +13,9 @@ pub enum SysAugError {
     #[error("OS Error: {0}")]
     LinuxOSErr(#[from] nix::Error),
 
+    #[error("Not a valid absolute path: {0}")]
+    AbsolutePath(std::path::PathBuf),
+
     #[error("Interger conversion error")]
     IntoInt,
 }

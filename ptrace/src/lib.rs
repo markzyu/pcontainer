@@ -2,8 +2,11 @@ use nix::sys;
 use nix::sys::wait;
 use spawn_ptrace::CommandPtraceSpawn;
 use std::convert::TryInto;
+use std::num::TryFromIntError;
 use std::process;
 use thiserror::Error;
+
+const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 
 #[derive(Debug, Error)]
 pub enum PtraceError {
@@ -15,6 +18,9 @@ pub enum PtraceError {
 
     #[error("OS Error: {0}")]
     LinuxOSErr(#[from] nix::Error),
+
+    #[error("Integer conversion error: {0}")]
+    FromInt(TryFromIntError),
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -98,6 +104,7 @@ pub fn ptrace_get_data<T>(
 }
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
+/// https://android.googlesource.com/kernel/common/+/60ffc30d5652810dd34ea2eec41504222f5d5791/arch/arm64/include/asm/ptrace.h (user_pt_regs)
 #[cfg(target_arch = "aarch64")]
 #[derive(Debug, Clone)]
 #[repr(C)]
@@ -122,6 +129,21 @@ pub struct GenericPurposeRegs {
     unknown_x16: i64,
     unknown_x17: i64,
     unknown_x18: i64,
+    unknown_x19: i64,
+    unknown_x20: i64,
+    unknown_x21: i64,
+    unknown_x22: i64,
+    unknown_x23: i64,
+    unknown_x24: i64,
+    unknown_x25: i64,
+    unknown_x26: i64,
+    unknown_x27: i64,
+    unknown_x28: i64,
+    unknown_x29: i64,
+    unknown_x30: i64,
+    pub sp: i64,
+    pub pc: i64,
+    pstate: i64,
 }
 
 #[cfg(target_arch = "arm")]
@@ -142,11 +164,11 @@ pub struct GenericPurposeRegs {
     unknown_x10: i32,
     unknown_x11: i32,
     unknown_x12: i32,
-    unknown_x13: i32,
+    pub sp: i32,
     unknown_x14: i32,
-    unknown_x15: i32,
+    pub pc: i32,
     unknown_x16: i32,
-    unknown_x17: i32,
+    pub orig_r0: i32,
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
@@ -226,6 +248,61 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
     Ok(())
 }
 
+pub fn bytes_to_clongs(bytes: &[u8]) -> Vec<libc::c_long> {
+    let mut result: Vec<libc::c_long> = Vec::new();
+    let clong_size = std::mem::size_of::<libc::c_long>();
+    let iter = bytes.chunks_exact(clong_size);
+    for chunk in iter {
+        result.push(libc::c_long::from_ne_bytes(chunk.try_into().unwrap()));
+    }
+
+    let mut remainder_vec: Vec<u8> = Vec::new();
+    remainder_vec.resize(clong_size, 0);
+    for (i, byte) in bytes.iter().skip(result.len() * clong_size).enumerate() {
+        remainder_vec[i] = *byte;
+    }
+    result.push(libc::c_long::from_ne_bytes(
+        (&remainder_vec[..]).try_into().unwrap(),
+    ));
+    result
+}
+
+pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<libc::c_long, PtraceError> {
+    let clongs = bytes_to_clongs(bytes);
+    let clong_size: usize = std::mem::size_of::<libc::c_long>();
+    let size = clongs.len() * clong_size;
+    let regs = getregs(pid)?;
+    let sp: usize = regs.sp.try_into().map_err(PtraceError::FromInt)?;
+    let start: usize = sp - (STACK_SAFE_ZONE_SIZE + size);
+    let mut addr: usize = start;
+    for value in clongs.iter() {
+        unsafe {
+            sys::ptrace::write(pid, addr as *mut libc::c_void, *value as *mut libc::c_void)?;
+        }
+        addr += clong_size;
+    }
+    start.try_into().map_err(PtraceError::FromInt)
+}
+
+pub fn read_bytes_until_zero(
+    pid: nix::unistd::Pid,
+    addr: libc::c_long,
+) -> Result<Vec<u8>, PtraceError> {
+    let mut result: Vec<u8> = Vec::new();
+    let mut curr_addr = addr;
+    let clong_size: libc::c_long = std::mem::size_of::<libc::c_long>().try_into().unwrap();
+    loop {
+        let machine_word = sys::ptrace::read(pid, curr_addr as *mut libc::c_void)?;
+        for byte in machine_word.to_ne_bytes().iter() {
+            result.push(*byte);
+            if *byte == b'\0' {
+                return Ok(result);
+            }
+        }
+        curr_addr += clong_size;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nix::sys::ptrace;
@@ -237,6 +314,22 @@ mod tests {
     fn _start_cmd() -> std::process::Child {
         let mut cmd = std::process::Command::new("ls");
         crate::start(&mut cmd).unwrap()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_convert_bytes_to_clongs_exact() {
+        let bytes: &[u8] = b"abcdefghijklmnop";
+        let expect: Vec<libc::c_long> = vec![7523094288207667809, 8101815670912281193];
+        assert!(matches!(crate::bytes_to_clongs(bytes), expect));
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn test_convert_bytes_to_clongs_remainder() {
+        let bytes: &[u8] = b"abcdefghijklmnop9";
+        let expect: Vec<libc::c_long> = vec![7523094288207667809, 8101815670912281193, 57];
+        assert!(matches!(crate::bytes_to_clongs(bytes), expect));
     }
 
     #[test]

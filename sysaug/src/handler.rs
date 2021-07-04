@@ -1,8 +1,11 @@
 use crate::clone::AugmentClone;
 use crate::common::{AugmentSyscall, SysAugError, SyscallCounter};
+use crate::paths::AugmentPaths;
 use lazy_static::lazy_static;
 use nix::sys;
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 use tracing::{event, span, Level};
 
 lazy_static! {
@@ -29,6 +32,8 @@ impl TraceeHandler {
 
     pub fn event_loop(&self) -> Result<(), SysAugError> {
         let pid = self.pid;
+
+        thread::sleep(Duration::from_millis(1));
         self.ptrace_client.execute(move || {
             sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
         })??;
@@ -37,6 +42,7 @@ impl TraceeHandler {
             pid,
             ptrace_client: self.ptrace_client.clone(),
         };
+        let augment_paths = AugmentPaths::new(pid, self.ptrace_client.clone());
 
         let mut last_syscall = SyscallCounter::new();
         loop {
@@ -73,6 +79,7 @@ impl TraceeHandler {
                 );
             }
             augment_clone.dispatch(&last_syscall, &regs)?;
+            augment_paths.dispatch(&last_syscall, &regs)?;
         }
         Ok(())
     }
