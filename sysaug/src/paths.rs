@@ -9,22 +9,22 @@ use tracing::{event, Level};
 lazy_static! {
     static ref SYSCALL_NAMES: HashSet<ptrace::SysNum> = {
         let mut ans = HashSet::new();
-        ans.insert(libc::SYS_acct);
-        ans.insert(libc::SYS_chdir);
-        ans.insert(libc::SYS_chroot);
-        ans.insert(libc::SYS_getxattr);
-        ans.insert(libc::SYS_listxattr);
-        ans.insert(libc::SYS_removexattr);
-        ans.insert(libc::SYS_setxattr);
-        ans.insert(libc::SYS_statfs);
-        ans.insert(libc::SYS_swapoff);
-        ans.insert(libc::SYS_swapon);
-        ans.insert(libc::SYS_truncate);
-        ans.insert(libc::SYS_umount2);
-        ans.insert(libc::SYS_lgetxattr);
-        ans.insert(libc::SYS_llistxattr);
+        ans.insert(libc::SYS_acct as usize);
+        ans.insert(libc::SYS_chdir as usize);
+        ans.insert(libc::SYS_chroot as usize);
+        ans.insert(libc::SYS_getxattr as usize);
+        ans.insert(libc::SYS_listxattr as usize);
+        ans.insert(libc::SYS_removexattr as usize);
+        ans.insert(libc::SYS_setxattr as usize);
+        ans.insert(libc::SYS_statfs as usize);
+        ans.insert(libc::SYS_swapoff as usize);
+        ans.insert(libc::SYS_swapon as usize);
+        ans.insert(libc::SYS_truncate as usize);
+        ans.insert(libc::SYS_umount2 as usize);
+        ans.insert(libc::SYS_lgetxattr as usize);
+        ans.insert(libc::SYS_llistxattr as usize);
 
-        ans.insert(libc::SYS_execve);
+        ans.insert(libc::SYS_execve as usize);
         add_xplat_syscalls(&mut ans);
         ans
     };
@@ -32,27 +32,27 @@ lazy_static! {
 
 #[cfg(target_arch = "arm")]
 fn add_xplat_syscalls(ans: &mut HashSet<ptrace::SysNum>) {
-    ans.insert(libc::SYS_access);
-    ans.insert(libc::SYS_chmod);
-    ans.insert(libc::SYS_chown);
-    ans.insert(libc::SYS_chown32);
-    ans.insert(libc::SYS_mknod);
-    ans.insert(libc::SYS_creat);
-    ans.insert(libc::SYS_stat);
-    ans.insert(libc::SYS_stat64);
-    ans.insert(libc::SYS_statfs64);
-    ans.insert(libc::SYS_truncate64);
-    ans.insert(libc::SYS_uselib);
-    ans.insert(libc::SYS_utimes);
-    ans.insert(libc::SYS_open);
-    ans.insert(libc::SYS_readlink);
-    ans.insert(libc::SYS_lchown);
-    ans.insert(libc::SYS_lchown32);
-    ans.insert(libc::SYS_lstat);
-    ans.insert(libc::SYS_lstat64);
-    ans.insert(libc::SYS_unlink);
-    ans.insert(libc::SYS_rmdir);
-    ans.insert(libc::SYS_mkdir);
+    ans.insert(libc::SYS_access as usize);
+    ans.insert(libc::SYS_chmod as usize);
+    ans.insert(libc::SYS_chown as usize);
+    ans.insert(libc::SYS_chown32 as usize);
+    ans.insert(libc::SYS_mknod as usize);
+    ans.insert(libc::SYS_creat as usize);
+    ans.insert(libc::SYS_stat as usize);
+    ans.insert(libc::SYS_stat64 as usize);
+    ans.insert(libc::SYS_statfs64 as usize);
+    ans.insert(libc::SYS_truncate64 as usize);
+    ans.insert(libc::SYS_uselib as usize);
+    ans.insert(libc::SYS_utimes as usize);
+    ans.insert(libc::SYS_open as usize);
+    ans.insert(libc::SYS_readlink as usize);
+    ans.insert(libc::SYS_lchown as usize);
+    ans.insert(libc::SYS_lchown32 as usize);
+    ans.insert(libc::SYS_lstat as usize);
+    ans.insert(libc::SYS_lstat64 as usize);
+    ans.insert(libc::SYS_unlink as usize);
+    ans.insert(libc::SYS_rmdir as usize);
+    ans.insert(libc::SYS_mkdir as usize);
 }
 
 #[cfg(target_arch = "aarch64")]

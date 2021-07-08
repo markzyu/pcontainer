@@ -11,7 +11,7 @@ use tracing::{event, Level};
 lazy_static! {
     static ref SYSCALL_NAMES: HashSet<ptrace::SysNum> = {
         let mut ans = HashSet::new();
-        ans.insert(libc::SYS_clone);
+        ans.insert(libc::SYS_clone as usize);
         ans
     };
 }

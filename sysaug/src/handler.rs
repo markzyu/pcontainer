@@ -11,11 +11,11 @@ use tracing::{event, span, Level};
 lazy_static! {
     static ref SYSCALL_NAMES: HashMap<ptrace::SysNum, String> = {
         let mut map = HashMap::new();
-        map.insert(libc::SYS_openat, "openat".into());
-        map.insert(libc::SYS_close, "close".into());
-        map.insert(libc::SYS_read, "read".into());
-        map.insert(libc::SYS_write, "write".into());
-        map.insert(libc::SYS_clone, "clone".into());
+        map.insert(libc::SYS_openat as usize, "openat".into());
+        map.insert(libc::SYS_close as usize, "close".into());
+        map.insert(libc::SYS_read as usize, "read".into());
+        map.insert(libc::SYS_write as usize, "write".into());
+        map.insert(libc::SYS_clone as usize, "clone".into());
         map
     };
 }
