@@ -1,24 +1,10 @@
 use crate::clone::AugmentClone;
 use crate::common::{AugmentSyscall, SysAugError, SyscallCounter};
 use crate::paths::AugmentPaths;
-use lazy_static::lazy_static;
 use nix::sys;
-use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 use tracing::{event, span, Level};
-
-lazy_static! {
-    static ref SYSCALL_NAMES: HashMap<usize, String> = {
-        let mut map = HashMap::new();
-        map.insert(libc::SYS_openat as usize, "openat".into());
-        map.insert(libc::SYS_close as usize, "close".into());
-        map.insert(libc::SYS_read as usize, "read".into());
-        map.insert(libc::SYS_write as usize, "write".into());
-        map.insert(libc::SYS_clone as usize, "clone".into());
-        map
-    };
-}
 
 pub struct TraceeHandler {
     pid: nix::unistd::Pid,
@@ -63,15 +49,13 @@ impl TraceeHandler {
             }
 
             let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-            let unknown: String = "Unknown syscall".into();
-            let name = SYSCALL_NAMES.get(&regs.syscall_num).unwrap_or(&unknown);
-
             last_syscall.count(regs.syscall_num);
+
             if last_syscall.times % 2 == 1 {
                 event!(
                     Level::DEBUG,
-                    "Syscall {} {} ({:x}, {:x}, {:x})",
-                    name,
+                    "Syscall {:x} #{} ({:x}, {:x}, {:x})",
+                    regs.syscall_num,
                     times = &last_syscall.times,
                     arg0 = regs.arg0,
                     arg1 = regs.arg1,
