@@ -1,4 +1,5 @@
 use std::thread;
+use sysaug::ModProvider;
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -21,14 +22,17 @@ fn main() -> Result<(), CLIError> {
     let mut cmd = std::process::Command::new("bash");
     let child = ptrace::start(&mut cmd)?;
 
+    let mods: Vec<ModProvider> = vec![mods::ChrootMod::new_box, mods::TraceChildMod::new_box];
+
     let pid1 = ptrace::pid(&child)?;
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
+
+    let new_tracee_handler = sysaug::TraceeHandler::new(pid1, proc1_client.clone(), mods)?;
     thread::spawn(move || {
         let proc1_client2 = proc1_client.clone();
-        let new_tracee_handler = sysaug::TraceeHandler::new(pid1, proc1_client);
         let result = new_tracee_handler.event_loop();
         proc1_client2.stop();
-        result.unwrap();
+        result.expect("Handling tracee");
     });
 
     ptrace_loop.serve()?;

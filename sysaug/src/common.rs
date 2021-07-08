@@ -1,5 +1,8 @@
+use crate::handler::TraceeHandler;
+use crate::mods;
 use ptrace::GenericPurposeRegs;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,6 +21,33 @@ pub enum SysAugError {
 
     #[error("Interger conversion error")]
     IntoInt,
+
+    #[error("Cannot lock/unlock tracee handler")]
+    LockTraceeHandler,
+
+    #[error("{kind} error from '{mod_name}' mod: {message}")]
+    Mod {
+        kind: String,
+        message: String,
+        mod_name: String,
+    },
+}
+
+pub type ModProvider = fn(Arc<TraceeHandler>) -> Box<dyn mods::Mod>;
+pub type ModBox = Box<dyn mods::Mod + Send + Sync>;
+pub type ModsByFeature = HashMap<mods::ModFeature, Vec<ModBox>>;
+
+#[allow(dead_code)]
+pub fn clone_mods_by_feature(src: &ModsByFeature) -> ModsByFeature {
+    let mut ans: ModsByFeature = HashMap::new();
+    for (feature, arr) in src.iter() {
+        let mut arr2 = Vec::new();
+        for m in arr.iter() {
+            arr2.push(m.clone_box());
+        }
+        ans.insert(feature.clone(), arr2);
+    }
+    ans
 }
 
 pub trait AugmentSyscall {
@@ -25,7 +55,7 @@ pub trait AugmentSyscall {
     fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
     fn valid_calls(&self) -> &HashSet<usize>;
 
-    fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self;
+    fn new(handler: Arc<TraceeHandler>) -> Self;
 
     fn dispatch(
         &self,

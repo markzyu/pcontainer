@@ -73,6 +73,7 @@ name = "dockify"
 version = "0.1.0"
 dependencies = [
  "executor",
+ "mods",
  "procfs",
  "ptrace",
  "sysaug",
@@ -145,6 +146,17 @@ checksum = "0f2d26ec3309788e423cfbf68ad1800f061638098d76a83681af979dc4eda19d"
 dependencies = [
  "adler",
  "autocfg",
+]
+
+[[package]]
+name = "mods"
+version = "0.1.0"
+dependencies = [
+ "executor",
+ "lazy_static",
+ "nix 0.19.1",
+ "sysaug",
+ "tracing",
 ]
 
 [[package]]
