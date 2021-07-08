@@ -27,8 +27,6 @@ pub enum PtraceError {
     IntOverflow(usize, &'static str, usize),
 }
 
-pub type SysNum = usize;
-
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
     matches!(
         status,
@@ -174,7 +172,7 @@ pub struct GenericPurposeRegs {
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 impl GenericPurposeRegs {
-    pub fn syscall_retval(&self) -> SysNum {
+    pub fn syscall_retval(&self) -> usize {
         self.arg0
     }
 }

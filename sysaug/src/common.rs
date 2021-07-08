@@ -23,7 +23,7 @@ pub enum SysAugError {
 pub trait AugmentSyscall {
     fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
     fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn valid_calls(&self) -> &HashSet<ptrace::SysNum>;
+    fn valid_calls(&self) -> &HashSet<usize>;
 
     fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self;
 
@@ -48,12 +48,12 @@ pub trait AugmentSyscall {
 }
 
 pub struct SyscallCounter {
-    pub syscall: Option<ptrace::SysNum>,
+    pub syscall: Option<usize>,
     pub times: u64,
 }
 
 impl SyscallCounter {
-    pub fn count(&mut self, syscall_name: ptrace::SysNum) {
+    pub fn count(&mut self, syscall_name: usize) {
         let curr_syscall = Some(syscall_name);
         if self.syscall != curr_syscall {
             self.syscall = curr_syscall;
