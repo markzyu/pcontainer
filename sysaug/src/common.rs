@@ -15,8 +15,11 @@ pub enum SysAugError {
     #[error("Ptrace error: {0}")]
     Ptrace(#[from] ptrace::PtraceError),
 
-    #[error("OS Error: {0}")]
-    LinuxOSErr(#[from] nix::Error),
+    #[error("PTRACE_SETOPTIONS error: {0}")]
+    PtraceSetOptions(nix::Error),
+
+    #[error("PTRACE_SYSCALL error: {0}")]
+    PtraceSyscall(nix::Error),
 
     #[error("Not a valid absolute path: {0}")]
     AbsolutePath(std::path::PathBuf),
