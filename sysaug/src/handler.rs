@@ -6,14 +6,21 @@ use crate::mods::ModFeature;
 use crate::paths::AugmentPaths;
 use nix::sys;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{event, span, Level};
+
+#[derive(Default)]
+pub struct TraceeHandlerStates {
+    pub path_prefix: RwLock<Option<PathBuf>>,
+}
 
 pub struct TraceeHandler {
     pub mods: RwLock<ModsByFeature>,
     mod_providers: Vec<ModProvider>,
     pub pid: nix::unistd::Pid,
     pub ptrace_client: executor::PtraceClient,
+    pub states: TraceeHandlerStates,
 }
 
 macro_rules! new_augment {
@@ -27,12 +34,14 @@ impl TraceeHandler {
         pid: nix::unistd::Pid,
         ptrace_client: executor::PtraceClient,
         mods: Vec<ModProvider>,
+        states: Option<TraceeHandlerStates>,
     ) -> Result<Arc<TraceeHandler>, SysAugError> {
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
+            states: states.unwrap_or_default(),
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();
@@ -59,6 +68,7 @@ impl TraceeHandler {
             child_pid,
             self.ptrace_client.clone(),
             self.mod_providers.clone(),
+            Some(self.states.clone()?),
         )
     }
 
@@ -113,7 +123,7 @@ impl TraceeHandler {
                 continue;
             }
 
-            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
             last_syscall.count(regs.syscall_num);
 
             if last_syscall.times % 2 == 1 {
@@ -132,9 +142,22 @@ impl TraceeHandler {
             //  (1) Whether any augment supports this syscall. If not, skip it
             //  (2) Which augment supports this sycall. !!! No two augments can share the same syscall
             //  (3) Which "SyscallInfo" to use. (instead of being specific to AugmentPaths, share it)
-            augment_clone.dispatch(&last_syscall, &regs)?;
-            augment_paths.dispatch(&last_syscall, &regs)?;
+            augment_clone.dispatch(&last_syscall, &mut regs)?;
+            augment_paths.dispatch(&last_syscall, &mut regs)?;
         }
         Ok(())
+    }
+}
+
+fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
+    let val = lock.read().or(Err(SysAugError::LockTraceeHandler))?;
+    Ok(RwLock::new(val.clone()))
+}
+
+impl TraceeHandlerStates {
+    fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
+        Ok(TraceeHandlerStates {
+            path_prefix: clone_locked(&self.path_prefix)?,
+        })
     }
 }

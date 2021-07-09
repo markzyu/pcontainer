@@ -26,7 +26,7 @@ impl common::AugmentSyscall for AugmentClone {
         &*SYSCALL_NAMES
     }
 
-    fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let mut new_regs = regs.clone();
         let pid2 = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
@@ -47,7 +47,7 @@ impl common::AugmentSyscall for AugmentClone {
         Ok(())
     }
 
-    fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let raw_pid = regs.syscall_retval();
         self.handler
             .call_mods(mods::ModFeature::OnCloneComplete, |m| {

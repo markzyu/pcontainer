@@ -7,6 +7,7 @@ use std::path::Path;
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ModFeature {
     OnFilePath,
+    OnFileRealPath,
     OnChroot,
     OnCloneComplete,
 }
@@ -33,8 +34,14 @@ pub trait Mod {
     }
 
     // Don't use this to override/change paths.
-    // TraceeHandler should provide a setter for path_prefix.
-    fn on_file_path(&self, _raw_path: &[u8]) -> Result<(), SysAugError> {
+    // Instead, set TraceeHandlerStates.path_prefix
+    fn on_file_path(&self, _raw_path: &Path) -> Result<(), SysAugError> {
+        Ok(())
+    }
+
+    // Don't use this to override/change paths.
+    // Instead, set TraceeHandlerStates.path_prefix
+    fn on_file_real_path(&self, _raw_path: &Path) -> Result<(), SysAugError> {
         Ok(())
     }
 
