@@ -2,8 +2,10 @@ use crate::handler::TraceeHandler;
 use crate::mods;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::{event, Level};
 
 #[derive(Debug, Error)]
 pub enum SysAugError {
@@ -48,6 +50,11 @@ pub fn clone_mods_by_feature(src: &ModsByFeature) -> ModsByFeature {
         ans.insert(feature.clone(), arr2);
     }
     ans
+}
+
+pub fn display_err<E: Display>(e: E) -> E {
+    event!(Level::ERROR, "Error: {}", e);
+    e
 }
 
 pub trait AugmentSyscall {

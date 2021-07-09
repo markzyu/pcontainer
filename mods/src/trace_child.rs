@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::convert::TryInto;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModFeature};
-use sysaug::{SysAugError, TraceeHandler};
+use sysaug::{display_err, SysAugError, TraceeHandler};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -44,7 +44,7 @@ impl Mod for TraceChildMod {
 
             let new_tracee_handler = self.handler.fork(child_pid)?;
             std::thread::spawn(move || {
-                new_tracee_handler.event_loop().expect("Handling tracee");
+                new_tracee_handler.event_loop().map_err(display_err).unwrap();
             });
         }
         Ok(())

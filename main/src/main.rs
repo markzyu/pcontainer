@@ -1,5 +1,5 @@
 use std::thread;
-use sysaug::ModProvider;
+use sysaug::{display_err, ModProvider};
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -32,7 +32,7 @@ fn main() -> Result<(), CLIError> {
         let proc1_client2 = proc1_client.clone();
         let result = new_tracee_handler.event_loop();
         proc1_client2.stop();
-        result.expect("Handling tracee");
+        result.map_err(display_err).unwrap()
     });
 
     ptrace_loop.serve()?;
