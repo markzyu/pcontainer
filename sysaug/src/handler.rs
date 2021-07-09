@@ -7,8 +7,6 @@ use crate::paths::AugmentPaths;
 use nix::sys;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::Duration;
 use tracing::{event, span, Level};
 
 pub struct TraceeHandler {
@@ -78,29 +76,37 @@ impl TraceeHandler {
     }
 
     pub fn event_loop(self: Arc<TraceeHandler>) -> Result<(), SysAugError> {
-        let pid = self.pid;
-
-        thread::sleep(Duration::from_millis(1));
-        self.ptrace_client.execute(move || {
-            sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
-        })?.map_err(SysAugError::PtraceSetOptions)?;
-
         let augment_clone = new_augment!(AugmentClone, self);
         let augment_paths = new_augment!(AugmentPaths, self);
 
+        let mut did_set_options = false;
         let mut last_syscall = SyscallCounter::new();
+        let pid = self.pid;
         loop {
             let span = span!(Level::TRACE, "event_loop", ?pid);
             let _span_enter = span.enter();
 
-            self.ptrace_client
-                .execute(move || sys::ptrace::syscall(pid, None))?
-                .map_err(SysAugError::PtraceSyscall)?;
+            if did_set_options {
+                self.ptrace_client
+                    .execute(move || sys::ptrace::syscall(pid, None))?
+                    .map_err(SysAugError::PtraceSyscall)?;
+            }
+
             let status = ptrace::waitpid_hang(pid)?;
             event!(Level::TRACE, "child status {:?}", &status);
 
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 break;
+            }
+
+            if !did_set_options {
+                self.ptrace_client
+                    .execute(move || {
+                        sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
+                    })?
+                    .map_err(SysAugError::PtraceSetOptions)?;
+                did_set_options = true;
+                continue;
             }
 
             if !ptrace::is_syscall_stop(&status) {

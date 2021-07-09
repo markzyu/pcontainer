@@ -1,11 +1,12 @@
 use lazy_static::lazy_static;
 use nix::sys;
 use nix::sys::wait;
-use spawn_ptrace::CommandPtraceSpawn;
 use std::convert::TryInto;
+use std::os::unix::process::CommandExt;
 use std::process;
 use thiserror::Error;
 
+const NT_PRSTATUS: libc::c_int = 1;
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 
 lazy_static! {
@@ -47,7 +48,14 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
 }
 
 pub fn start(cmd: &mut process::Command) -> Result<process::Child, PtraceError> {
-    cmd.spawn_ptrace().map_err(PtraceError::StartInitCmd)
+    unsafe {
+        cmd.pre_exec(|| {
+            nix::sys::ptrace::traceme()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        })
+        .spawn()
+        .map_err(PtraceError::StartInitCmd)
+    }
 }
 
 pub fn pid(child: &process::Child) -> Result<nix::unistd::Pid, PtraceError> {
@@ -74,12 +82,6 @@ pub fn wait_hang(child: &process::Child) -> Result<wait::WaitStatus, PtraceError
     waitpid_hang(pid(&child)?)
 }
 
-bitflags::bitflags! {
-    pub struct LibcConst: libc::c_int {
-        const NT_PRSTATUS = 1_i32;
-    }
-}
-
 /// This is copied from https://github.com/nix-rust/nix/blob/master/src/sys/ptrace/linux.rs
 /// Function for ptrace requests that return values from the data field.
 /// Some ptrace get requests populate structs or larger elements than `c_long`
@@ -94,7 +96,7 @@ pub fn ptrace_get_data<T>(
         libc::ptrace(
             request as sys::ptrace::RequestType,
             libc::pid_t::from(pid),
-            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            NT_PRSTATUS as *mut libc::c_void,
             data.as_mut_ptr() as *mut _ as *mut libc::c_void,
         )
     };
@@ -189,7 +191,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
         libc::ptrace(
             sys::ptrace::Request::PTRACE_GETREGSET as u32,
             libc::pid_t::from(pid),
-            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            NT_PRSTATUS as *mut libc::c_void,
             &mut iov as *mut _ as *mut libc::c_void,
         )
     };
@@ -224,7 +226,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
         libc::ptrace(
             sys::ptrace::Request::PTRACE_SETREGSET as u32,
             libc::pid_t::from(pid),
-            LibcConst::NT_PRSTATUS.bits() as *mut libc::c_void,
+            NT_PRSTATUS as *mut libc::c_void,
             &mut iov as *mut _ as *mut libc::c_void,
         )
     };

@@ -44,7 +44,10 @@ impl Mod for TraceChildMod {
 
             let new_tracee_handler = self.handler.fork(child_pid)?;
             std::thread::spawn(move || {
-                new_tracee_handler.event_loop().map_err(display_err).unwrap();
+                new_tracee_handler
+                    .event_loop()
+                    .map_err(display_err)
+                    .unwrap();
             });
         }
         Ok(())
