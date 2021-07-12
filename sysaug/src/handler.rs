@@ -19,6 +19,7 @@ pub struct TraceeHandler {
     pub mods: RwLock<ModsByFeature>,
     mod_providers: Vec<ModProvider>,
     pub pid: nix::unistd::Pid,
+    pub ptrace_client: executor::PtraceClient,
     pub states: TraceeHandlerStates,
 }
 
@@ -31,11 +32,13 @@ macro_rules! new_augment {
 impl TraceeHandler {
     pub fn new(
         pid: nix::unistd::Pid,
+        ptrace_client: executor::PtraceClient,
         mods: Vec<ModProvider>,
         states: Option<TraceeHandlerStates>,
     ) -> Result<Arc<TraceeHandler>, SysAugError> {
         let ans = Arc::new(TraceeHandler {
             pid,
+            ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
             states: states.unwrap_or_default(),
@@ -63,6 +66,7 @@ impl TraceeHandler {
     pub fn fork(&self, child_pid: nix::unistd::Pid) -> Result<Arc<TraceeHandler>, SysAugError> {
         TraceeHandler::new(
             child_pid,
+            self.ptrace_client.clone(),
             self.mod_providers.clone(),
             Some(self.states.clone()?),
         )
@@ -93,8 +97,9 @@ impl TraceeHandler {
             let _span_enter = span.enter();
 
             if did_set_options {
-                sys::ptrace::syscall(pid, None)
-                .map_err(SysAugError::PtraceSyscall)?;
+                self.ptrace_client
+                    .execute(move || sys::ptrace::syscall(pid, None))?
+                    .map_err(SysAugError::PtraceSyscall)?;
             }
 
             let status = ptrace::waitpid_hang(pid)?;
@@ -105,7 +110,10 @@ impl TraceeHandler {
             }
 
             if !did_set_options {
-                sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
+                self.ptrace_client
+                    .execute(move || {
+                        sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
+                    })?
                     .map_err(SysAugError::PtraceSetOptions)?;
                 did_set_options = true;
                 continue;
@@ -115,7 +123,7 @@ impl TraceeHandler {
                 continue;
             }
 
-            let mut regs = ptrace::getregs(pid)?;
+            let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
             last_syscall.count(regs.syscall_num);
 
             if last_syscall.times % 2 == 1 {
