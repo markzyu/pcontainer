@@ -90,11 +90,11 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_syscall!(libc::SYS_newfstatat, 2, ans);
 }
 
-pub struct AugmentPaths {
-    pub handler: Arc<TraceeHandler>,
+pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
+    pub handler: Arc<TraceeHandler<PtraceClient>>,
 }
 
-impl common::AugmentSyscall for AugmentPaths {
+impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPaths<PtraceClient> {
     fn valid_calls(&self) -> &HashSet<usize> {
         &*SYSCALL_NAMES
     }
@@ -164,8 +164,10 @@ impl common::AugmentSyscall for AugmentPaths {
     fn after_call(&self, _regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         Ok(())
     }
+}
 
-    fn new(handler: Arc<TraceeHandler>) -> Self {
+impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
+    pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
         AugmentPaths { handler }
     }
 }

@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModFeature};
-use sysaug::TraceeHandler;
+use sysaug::TraceeHandlerStates;
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -13,19 +13,19 @@ lazy_static! {
 }
 
 pub struct ChrootMod {
-    handler: Arc<TraceeHandler>,
+    states: Arc<TraceeHandlerStates>,
 }
 
 impl ChrootMod {
-    pub fn new_box(handler: Arc<TraceeHandler>) -> Box<dyn Mod> {
-        Box::new(ChrootMod { handler })
+    pub fn new_box(states: Arc<TraceeHandlerStates>) -> Box<dyn Mod> {
+        Box::new(ChrootMod { states })
     }
 }
 
 impl Mod for ChrootMod {
     fn clone_box(&self) -> Box<dyn Mod + Send + Sync> {
         Box::new(ChrootMod {
-            handler: Arc::clone(&self.handler),
+            states: Arc::clone(&self.states),
         })
     }
 

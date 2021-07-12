@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModFeature};
-use sysaug::{SysAugError, TraceeHandler};
+use sysaug::{SysAugError, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -16,19 +16,19 @@ lazy_static! {
 }
 
 pub struct StraceMod {
-    handler: Arc<TraceeHandler>,
+    states: Arc<TraceeHandlerStates>,
 }
 
 impl StraceMod {
-    pub fn new_box(handler: Arc<TraceeHandler>) -> Box<dyn Mod> {
-        Box::new(StraceMod { handler })
+    pub fn new_box(states: Arc<TraceeHandlerStates>) -> Box<dyn Mod> {
+        Box::new(StraceMod { states })
     }
 }
 
 impl Mod for StraceMod {
     fn clone_box(&self) -> Box<dyn Mod + Send + Sync> {
         Box::new(StraceMod {
-            handler: Arc::clone(&self.handler),
+            states: Arc::clone(&self.states),
         })
     }
 

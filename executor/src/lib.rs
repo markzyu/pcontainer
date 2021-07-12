@@ -1,3 +1,5 @@
+use nix::{sys, unistd};
+use std::convert::TryInto;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SendError, SyncSender};
 use std::sync::Arc;
@@ -7,15 +9,43 @@ use thiserror::Error;
 pub type SharedBool = Arc<AtomicBool>;
 pub type PtraceRequest = Box<dyn Fn() -> Result<(), PtraceExecutorError> + Send>;
 
-pub struct PtraceServer {
+pub trait PtraceServer {
+    fn serve(&self) -> Result<(), PtraceExecutorError>;
+}
+
+pub trait PtraceClient: Clone + Send + Sync + 'static {
+    fn attach_to(&self, _pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+        Ok(())
+    }
+
+    fn set_clone_flags(
+        &self,
+        _pid: unistd::Pid,
+        _regs: &mut ptrace::GenericPurposeRegs,
+    ) -> Result<(), PtraceExecutorError> {
+        Ok(())
+    }
+
+    fn stop(&self);
+    fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
+    where
+        F: Fn() -> T,
+        F: Send + 'static,
+        T: Send + 'static;
+}
+
+pub struct MainThreadServer {
     recv_req: Receiver<PtraceRequest>,
     should_serve: SharedBool,
 }
 
-pub struct PtraceClient {
+pub struct MainThreadClient {
     send_req: SyncSender<PtraceRequest>,
     should_serve: SharedBool,
 }
+
+#[derive(Clone)]
+pub struct LocalPtraceClient {}
 
 #[derive(Debug, Error)]
 pub enum PtraceExecutorError {
@@ -30,28 +60,45 @@ pub enum PtraceExecutorError {
 
     #[error("Failed to enqueue ptrace() result: {0}")]
     ResultEnqueue(String),
+
+    #[error("PTRACE_ATTACH error: {0}")]
+    Attach(nix::Error),
+
+    #[error("{0}")]
+    PtraceError(#[from] ptrace::PtraceError),
+
+    #[error("Interger conversion error")]
+    IntoInt,
 }
 
-pub fn new_ptrace_executor() -> (PtraceClient, PtraceServer) {
+/// Run ptrace() syscalls on main thread only (requires tracees to be attached through PTRACE_TRACEME)
+pub fn new_main_thread_executor() -> (MainThreadClient, MainThreadServer) {
     let (send, recv) = sync_channel(1);
     let should_serve = Arc::new(AtomicBool::new(false));
-    let client = PtraceClient {
+    let client = MainThreadClient {
         send_req: send,
         should_serve: Arc::clone(&should_serve),
     };
-    let server = PtraceServer {
+    let server = MainThreadServer {
         recv_req: recv,
         should_serve: Arc::clone(&should_serve),
     };
     (client, server)
 }
 
-impl PtraceServer {
+/// Run ptrace() syscalls on any thread (requires tracees to be attached through PTRACE_ATTACH)
+pub fn new_local_executor() -> LocalPtraceClient {
+    LocalPtraceClient {}
+}
+
+impl MainThreadServer {
     fn read_should_serve(&self) -> bool {
         self.should_serve.load(Ordering::Relaxed)
     }
+}
 
-    pub fn serve(&self) -> Result<(), PtraceExecutorError> {
+impl PtraceServer for MainThreadServer {
+    fn serve(&self) -> Result<(), PtraceExecutorError> {
         self.should_serve.store(true, Ordering::Relaxed);
         while self.read_should_serve() {
             let item = self.recv_req.recv_timeout(Duration::from_millis(100));
@@ -69,25 +116,41 @@ impl PtraceServer {
     }
 }
 
-impl Clone for PtraceClient {
-    fn clone(&self) -> PtraceClient {
-        PtraceClient {
+impl Clone for MainThreadClient {
+    fn clone(&self) -> MainThreadClient {
+        MainThreadClient {
             send_req: self.send_req.clone(),
             should_serve: Arc::clone(&self.should_serve),
         }
     }
 }
 
-impl PtraceClient {
-    pub fn stop(&self) {
-        self.should_serve.store(false, Ordering::Relaxed);
-    }
-
+impl MainThreadClient {
     fn send(&self, req: PtraceRequest) -> Result<(), PtraceExecutorError> {
         Ok(self.send_req.clone().send(req)?)
     }
+}
 
-    pub fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
+impl PtraceClient for MainThreadClient {
+    fn stop(&self) {
+        self.should_serve.store(false, Ordering::Relaxed);
+    }
+
+    fn set_clone_flags(
+        &self,
+        pid: unistd::Pid,
+        regs: &mut ptrace::GenericPurposeRegs,
+    ) -> Result<(), PtraceExecutorError> {
+        let new_flag: usize = libc::CLONE_PTRACE
+            .try_into()
+            .or(Err(PtraceExecutorError::IntoInt))?;
+        regs.arg0 |= new_flag;
+        let regs2 = regs.clone();
+        self.execute(move || ptrace::setregs(pid, regs2.clone()))??;
+        Ok(())
+    }
+
+    fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
     where
         F: Fn() -> T,
         F: Send + 'static,
@@ -105,6 +168,24 @@ impl PtraceClient {
 
         // Return results
         recv.recv().map_err(PtraceExecutorError::ResultDequeue)
+    }
+}
+
+impl PtraceClient for LocalPtraceClient {
+    fn attach_to(&self, pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+        sys::ptrace::attach(pid).map_err(PtraceExecutorError::Attach)
+    }
+
+    fn stop(&self) {}
+
+    #[inline(always)]
+    fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
+    where
+        F: Fn() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
+        Ok(f())
     }
 }
 

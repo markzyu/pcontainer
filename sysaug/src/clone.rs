@@ -7,7 +7,6 @@ use ptrace::GenericPurposeRegs;
 use std::collections::HashSet;
 use std::convert::TryInto;
 use std::sync::Arc;
-use tracing::{event, Level};
 
 lazy_static! {
     static ref SYSCALL_NAMES: HashSet<usize> = {
@@ -17,45 +16,45 @@ lazy_static! {
     };
 }
 
-pub struct AugmentClone {
-    pub handler: Arc<TraceeHandler>,
+pub struct AugmentClone<PtraceClient: executor::PtraceClient> {
+    pub handler: Arc<TraceeHandler<PtraceClient>>,
 }
 
-impl common::AugmentSyscall for AugmentClone {
+impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClone<PtraceClient> {
     fn valid_calls(&self) -> &HashSet<usize> {
         &*SYSCALL_NAMES
     }
 
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
-        let mut new_regs = regs.clone();
         let pid2 = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
-
-        let new_flag: usize = libc::CLONE_PTRACE
-            .try_into()
-            .or(Err(SysAugError::IntoInt))?;
-        new_regs.arg0 |= new_flag;
-        ptrace_client.execute(move || ptrace::setregs(pid2, new_regs.clone()))??;
-        let confirm_regs = ptrace_client.execute(move || ptrace::getregs(pid2))??;
-        event!(
-            Level::DEBUG,
-            "Clone new arg: {:x}, {:x}, {:x}",
-            confirm_regs.arg0,
-            confirm_regs.arg1,
-            confirm_regs.arg2,
-        );
+        self.handler.ptrace_client.set_clone_flags(pid2, regs)?;
         Ok(())
     }
 
     fn after_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let raw_pid = regs.syscall_retval();
-        self.handler
-            .call_mods(mods::ModFeature::OnCloneComplete, |m| {
-                m.on_clone_complete(raw_pid as isize)
-            })
-    }
+        if raw_pid > 0 {
+            let child_pid: nix::unistd::Pid =
+                nix::unistd::Pid::from_raw(raw_pid.try_into().or(Err(SysAugError::IntoInt))?);
 
-    fn new(handler: Arc<TraceeHandler>) -> Self {
+            let new_tracee_handler = self.handler.fork(child_pid)?;
+            std::thread::spawn(move || {
+                new_tracee_handler
+                    .event_loop()
+                    .map_err(common::display_err)
+                    .unwrap();
+            });
+            self.handler
+                .call_mods(mods::ModFeature::OnCloneComplete, |m| {
+                    m.on_clone_complete(raw_pid as isize)
+                })?;
+        }
+        Ok(())
+    }
+}
+
+impl<PtraceClient: executor::PtraceClient> AugmentClone<PtraceClient> {
+    pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
         AugmentClone { handler }
     }
 }
