@@ -101,7 +101,6 @@ impl common::AugmentSyscall for AugmentPaths {
 
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
 
         let syscall = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
@@ -114,8 +113,7 @@ impl common::AugmentSyscall for AugmentPaths {
             }
 
             let arg_i = **ref_arg_i;
-            let path_bytes =
-                ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
+            let path_bytes = ptrace::read_bytes_until_zero(pid, arg_i)?;
             let path_osstr: &OsStr = OsStrExt::from_bytes(&path_bytes);
             let orig_path: &Path = Path::new(path_osstr);
 
@@ -141,10 +139,8 @@ impl common::AugmentSyscall for AugmentPaths {
                 }
             }
             if let Some(new_path_val) = new_path {
-                let addr = ptrace_client.execute(move || {
-                    let final_bytes: &[u8] = new_path_val.as_os_str().as_bytes();
-                    ptrace::bytes_to_stack(pid, final_bytes)
-                })??;
+                let final_bytes: &[u8] = new_path_val.as_os_str().as_bytes();
+                let addr = ptrace::bytes_to_stack(pid, final_bytes)?;
                 **ref_arg_i = addr;
                 need_write_regs = true;
             } else {
@@ -156,7 +152,7 @@ impl common::AugmentSyscall for AugmentPaths {
         }
         if need_write_regs {
             let regs2 = regs.clone();
-            ptrace_client.execute(move || ptrace::setregs(pid, regs2.clone()))??;
+            ptrace::setregs(pid, regs2.clone())?;
         }
         Ok(())
     }

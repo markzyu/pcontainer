@@ -29,14 +29,13 @@ impl common::AugmentSyscall for AugmentClone {
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let mut new_regs = regs.clone();
         let pid2 = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
 
         let new_flag: usize = libc::CLONE_PTRACE
             .try_into()
             .or(Err(SysAugError::IntoInt))?;
         new_regs.arg0 |= new_flag;
-        ptrace_client.execute(move || ptrace::setregs(pid2, new_regs.clone()))??;
-        let confirm_regs = ptrace_client.execute(move || ptrace::getregs(pid2))??;
+        ptrace::setregs(pid2, new_regs.clone())?;
+        let confirm_regs = ptrace::getregs(pid2)?;
         event!(
             Level::DEBUG,
             "Clone new arg: {:x}, {:x}, {:x}",
