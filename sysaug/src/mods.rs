@@ -35,13 +35,13 @@ pub trait Mod {
 
     // Don't use this to override/change paths.
     // Instead, set TraceeHandlerStates.path_prefix
-    fn on_file_path(&self, _raw_path: &Path) -> Result<(), SysAugError> {
+    fn on_file_path(&self, _raw_path: &Path, _syscall: usize) -> Result<(), SysAugError> {
         Ok(())
     }
 
     // Don't use this to override/change paths.
     // Instead, set TraceeHandlerStates.path_prefix
-    fn on_file_real_path(&self, _raw_path: &Path) -> Result<(), SysAugError> {
+    fn on_file_real_path(&self, _raw_path: &Path, _syscall: usize) -> Result<(), SysAugError> {
         Ok(())
     }
 

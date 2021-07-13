@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{event, span, Level};
 
-#[derive(Default)]
 pub struct TraceeHandlerStates {
     pub path_prefix: RwLock<Option<PathBuf>>,
+    pub pid: nix::unistd::Pid,
 }
 
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
@@ -36,12 +36,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         mods: Vec<ModProvider>,
         states: Option<Arc<TraceeHandlerStates>>,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
+        let default_states = states.unwrap_or_default();
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
-            states: states.unwrap_or_default(),
+            states: Arc::new(TraceeHandlerStates {
+                path_prefix: clone_locked(&default_states.path_prefix)?,
+                pid,
+            }),
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();
@@ -159,10 +163,20 @@ fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
     Ok(RwLock::new(val.clone()))
 }
 
+impl Default for TraceeHandlerStates {
+    fn default() -> TraceeHandlerStates {
+        TraceeHandlerStates {
+            path_prefix: RwLock::default(),
+            pid: nix::unistd::Pid::from_raw(0),
+        }
+    }
+}
+
 impl TraceeHandlerStates {
     pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
             path_prefix: clone_locked(&self.path_prefix)?,
+            pid: self.pid,
         })
     }
 }
