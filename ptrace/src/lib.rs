@@ -185,6 +185,10 @@ impl GenericPurposeRegs {
     pub fn syscall_retval(&self) -> usize {
         self.arg0
     }
+
+    pub fn set_syscall_retval(&mut self, val: usize) {
+        self.arg0 = val
+    }
 }
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp

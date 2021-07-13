@@ -1,11 +1,12 @@
-use crate::clone::AugmentClone;
+use crate::aug_clone::AugmentClone;
+use crate::aug_paths::AugmentPaths;
+use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     AugmentSyscall, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
 };
 use crate::mods::ModFeature;
-use crate::paths::AugmentPaths;
 use nix::sys;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{event, span, Level};
@@ -21,6 +22,9 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub pid: nix::unistd::Pid,
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
+
+    // ignore the next sigstop for the following pids
+    pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
 }
 
 macro_rules! new_augment {
@@ -42,6 +46,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
+            ignore_sigstops: RwLock::new(HashSet::new()),
             states: Arc::new(TraceeHandlerStates {
                 path_prefix: clone_locked(&default_states.path_prefix)?,
                 pid,
@@ -95,6 +100,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
         let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
         let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
+        let augment_waitpid = new_augment!(AugmentWaitpid<PtraceClient>, self);
 
         let mut did_set_options = false;
         let mut last_syscall = SyscallCounter::new();
@@ -129,6 +135,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             if !ptrace::is_syscall_stop(&status) {
+                event!(Level::INFO, "Non-syscall ptrace stop: child status {:?}", &status);
                 continue;
             }
 
@@ -153,6 +160,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             //  (3) Which "SyscallInfo" to use. (instead of being specific to AugmentPaths, share it)
             augment_clone.dispatch(&last_syscall, &mut regs)?;
             augment_paths.dispatch(&last_syscall, &mut regs)?;
+            augment_waitpid.dispatch(&last_syscall, &mut regs)?;
         }
         Ok(())
     }
