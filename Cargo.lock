@@ -129,6 +129,7 @@ dependencies = [
  "nix",
  "ptrace",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -38,7 +38,12 @@ impl Mod for StraceMod {
 
     fn on_file_path(&self, path: &Path, syscall: usize) -> Result<(), SysAugError> {
         if syscall == libc::SYS_execve as usize {
-            event!(Level::INFO, "Execve pid {:?} input Path: {:?}", self.states.pid, path);
+            event!(
+                Level::INFO,
+                "Execve pid {:?} input Path: {:?}",
+                self.states.pid,
+                path
+            );
         } else {
             event!(Level::DEBUG, "Input Path: {:?}", path);
         }
@@ -47,7 +52,12 @@ impl Mod for StraceMod {
 
     fn on_file_real_path(&self, path: &Path, syscall: usize) -> Result<(), SysAugError> {
         if syscall == libc::SYS_execve as usize {
-            event!(Level::INFO, "Execve pid {:?} real Path: {:?}", self.states.pid, path);
+            event!(
+                Level::INFO,
+                "Execve pid {:?} real Path: {:?}",
+                self.states.pid,
+                path
+            );
         } else {
             event!(Level::DEBUG, "Real Path: {:?}", path);
         }
