@@ -27,6 +27,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
 
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         event!(Level::INFO, "before waitpid({}, {:x}, {:x})", regs.arg0 as isize, regs.arg1, regs.arg2);
+        let mut maybe_orig_regs = self.handler.orig_request_regs.write().or(Err(SysAugError::LockTraceeHandler))?;
+        maybe_orig_regs.replace(regs.clone());
         Ok(())
     }
 
@@ -38,12 +40,14 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
                 nix::unistd::Pid::from_raw(retval.try_into().or(Err(SysAugError::IntoInt))?);
             let mut ignores = self.handler.ignore_sigstops.write().or(Err(SysAugError::LockTraceeHandler))?;
             if ignores.remove(&child_pid) {
-                regs.set_syscall_retval(0);
+                // Restart system call with orignal arguments, stack pointer, etc.
+                event!(Level::INFO, "restarting waitpid()");
+                let mut maybe_orig_regs = self.handler.orig_request_regs.write().or(Err(SysAugError::LockTraceeHandler))?;
                 let pid2 = self.handler.pid;
-                let regs2 = regs.clone();
+                let orig_regs = maybe_orig_regs.take().unwrap();
                 self.handler
                     .ptrace_client
-                    .execute(move || ptrace::setregs(pid2, regs2.clone()))??;
+                    .execute(move || ptrace::setregs(pid2, orig_regs.clone()))??;
             }
         }
         Ok(())

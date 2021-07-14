@@ -6,6 +6,7 @@ use crate::common::{
 };
 use crate::mods::ModFeature;
 use nix::sys;
+use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -24,6 +25,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub states: Arc<TraceeHandlerStates>,
 
     // ignore the next sigstop for the following pids
+    pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
 }
 
@@ -46,6 +48,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
+            orig_request_regs: RwLock::new(None),
             ignore_sigstops: RwLock::new(HashSet::new()),
             states: Arc::new(TraceeHandlerStates {
                 path_prefix: clone_locked(&default_states.path_prefix)?,
