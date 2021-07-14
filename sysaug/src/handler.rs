@@ -2,9 +2,10 @@ use crate::aug_clone::AugmentClone;
 use crate::aug_paths::AugmentPaths;
 use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
-    AugmentSyscall, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
+    AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
 };
 use crate::mods::ModFeature;
+use lazy_static::lazy_static;
 use nix::sys;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
@@ -27,6 +28,16 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     // ignore the next sigstop for the following pids
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
+}
+
+lazy_static! {
+    static ref SYSCALL_TO_AUG: HashMap<&'static usize, &'static Augments> = {
+        let mut ans = HashMap::new();
+        ans.extend(AugmentClone::<executor::LocalPtraceClient>::valid_calls());
+        ans.extend(AugmentPaths::<executor::LocalPtraceClient>::valid_calls());
+        ans.extend(AugmentWaitpid::<executor::LocalPtraceClient>::valid_calls());
+        ans
+    };
 }
 
 macro_rules! new_augment {
@@ -138,11 +149,15 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             if !ptrace::is_syscall_stop(&status) {
-                event!(Level::INFO, "Non-syscall ptrace stop: child status {:?}", &status);
+                event!(
+                    Level::INFO,
+                    "Non-syscall ptrace stop: child status {:?}",
+                    &status
+                );
                 continue;
             }
 
-            let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
             last_syscall.count(regs.syscall_num);
 
             if last_syscall.times % 2 == 1 {
@@ -157,13 +172,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 );
             }
 
-            // TODO: precalculate HashMap.get to determine:
-            //  (1) Whether any augment supports this syscall. If not, skip it
-            //  (2) Which augment supports this sycall. !!! No two augments can share the same syscall
-            //  (3) Which "SyscallInfo" to use. (instead of being specific to AugmentPaths, share it)
-            augment_clone.dispatch(&last_syscall, &mut regs)?;
-            augment_paths.dispatch(&last_syscall, &mut regs)?;
-            augment_waitpid.dispatch(&last_syscall, &mut regs)?;
+            match SYSCALL_TO_AUG.get(&regs.syscall_num) {
+                Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs)?,
+                Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs)?,
+                Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs)?,
+                None => (),
+            }
         }
         Ok(())
     }

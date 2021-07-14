@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::{event, Level};
 
 pub type SharedBool = Arc<AtomicBool>;
-pub type PtraceRequest = Box<dyn Fn() -> Result<(), PtraceExecutorError> + Send>;
+pub type PtraceRequest = Box<dyn FnOnce() -> Result<(), PtraceExecutorError> + Send>;
 
 pub trait PtraceServer {
     fn serve(&self) -> Result<(), PtraceExecutorError>;
@@ -19,14 +19,18 @@ pub trait PtraceClient: Clone + Send + Sync + 'static {
         Ok(())
     }
 
-    fn prep_attach_to(&self, _pid: unistd::Pid, _ignore_sigstops: &RwLock<HashSet<unistd::Pid>>) -> Result<(), PtraceExecutorError> {
+    fn prep_attach_to(
+        &self,
+        _pid: unistd::Pid,
+        _ignore_sigstops: &RwLock<HashSet<unistd::Pid>>,
+    ) -> Result<(), PtraceExecutorError> {
         Ok(())
     }
 
     fn stop(&self);
     fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
     where
-        F: Fn() -> T,
+        F: FnOnce() -> T,
         F: Send + 'static,
         T: Send + 'static;
 }
@@ -141,7 +145,7 @@ impl PtraceClient for MainThreadClient {
 
     fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
     where
-        F: Fn() -> T,
+        F: FnOnce() -> T,
         F: Send + 'static,
         T: Send + 'static,
     {
@@ -166,7 +170,11 @@ impl PtraceClient for LocalPtraceClient {
         sys::ptrace::attach(pid).map_err(PtraceExecutorError::Attach)
     }
 
-    fn prep_attach_to(&self, pid: unistd::Pid, locked_ignores: &RwLock<HashSet<unistd::Pid>>) -> Result<(), PtraceExecutorError> {
+    fn prep_attach_to(
+        &self,
+        pid: unistd::Pid,
+        locked_ignores: &RwLock<HashSet<unistd::Pid>>,
+    ) -> Result<(), PtraceExecutorError> {
         event!(
             Level::INFO,
             "LocalPtraceClient prepping to attach to {:?}",
@@ -180,7 +188,9 @@ impl PtraceClient for LocalPtraceClient {
             return Err(PtraceExecutorError::TransferWaitpid(status));
         }
 
-        let mut ignore_sigstops = locked_ignores.write().or(Err(PtraceExecutorError::TransferLock))?;
+        let mut ignore_sigstops = locked_ignores
+            .write()
+            .or(Err(PtraceExecutorError::TransferLock))?;
         ignore_sigstops.insert(pid);
         sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP)
             .map_err(PtraceExecutorError::TransferDetach)
@@ -191,7 +201,7 @@ impl PtraceClient for LocalPtraceClient {
     #[inline(always)]
     fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
     where
-        F: Fn() -> T,
+        F: FnOnce() -> T,
         F: Send + 'static,
         T: Send + 'static,
     {

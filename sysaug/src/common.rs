@@ -1,7 +1,7 @@
 use crate::handler::TraceeHandlerStates;
 use crate::mods;
 use ptrace::GenericPurposeRegs;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use thiserror::Error;
@@ -61,28 +61,27 @@ pub fn display_err<E: Display>(e: E) -> E {
 }
 
 pub trait AugmentSyscall {
-    fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn after_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn valid_calls(&self) -> &HashSet<usize>;
+    fn before_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError>;
+    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError>;
+    fn valid_calls() -> &'static HashMap<usize, Augments>;
 
     fn dispatch(
         &self,
         last_syscall: &SyscallCounter,
-        regs: &mut GenericPurposeRegs,
+        regs: GenericPurposeRegs,
     ) -> Result<(), SysAugError> {
-        if let Some(syscall) = last_syscall.syscall.as_ref() {
-            if !self.valid_calls().contains(syscall) {
-                return Ok(());
-            }
-        }
         if last_syscall.times % 2 == 1 {
-            self.before_call(regs)?;
+            self.before_call(regs)
+        } else {
+            self.after_call(regs)
         }
-        if last_syscall.times % 2 == 0 {
-            self.after_call(regs)?;
-        }
-        Ok(())
     }
+}
+
+pub enum Augments {
+    Clone,
+    Paths,
+    Waitpid,
 }
 
 pub struct SyscallCounter {
