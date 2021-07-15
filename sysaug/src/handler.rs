@@ -1,10 +1,11 @@
 use crate::aug_clone::AugmentClone;
 use crate::aug_paths::AugmentPaths;
+use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
 };
-use crate::mods::ModFeature;
+use crate::mods::{ModAction, ModFeature};
 use lazy_static::lazy_static;
 use nix::sys;
 use ptrace::GenericPurposeRegs;
@@ -14,6 +15,7 @@ use std::sync::{Arc, RwLock};
 use tracing::{event, span, Level};
 
 pub struct TraceeHandlerStates {
+    pub override_uid: RwLock<Option<usize>>,
     pub path_prefix: RwLock<Option<PathBuf>>,
     pub pid: nix::unistd::Pid,
 }
@@ -28,7 +30,11 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     // ignore the next sigstop for the following pids
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
+    pub skip_syscall_retval: RwLock<Option<usize>>,
 }
+
+// We promise not to modify this system call
+const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;
 
 lazy_static! {
     static ref SYSCALL_TO_AUG: HashMap<&'static usize, &'static Augments> = {
@@ -36,6 +42,7 @@ lazy_static! {
         ans.extend(AugmentClone::<executor::LocalPtraceClient>::valid_calls());
         ans.extend(AugmentPaths::<executor::LocalPtraceClient>::valid_calls());
         ans.extend(AugmentWaitpid::<executor::LocalPtraceClient>::valid_calls());
+        ans.remove(&NO_MOD_SYSCALL);
         ans
     };
 }
@@ -59,12 +66,10 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ptrace_client,
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
-            orig_request_regs: RwLock::new(None),
-            ignore_sigstops: RwLock::new(HashSet::new()),
-            states: Arc::new(TraceeHandlerStates {
-                path_prefix: clone_locked(&default_states.path_prefix)?,
-                pid,
-            }),
+            orig_request_regs: RwLock::default(),
+            ignore_sigstops: RwLock::default(),
+            skip_syscall_retval: RwLock::default(),
+            states: Arc::new((*default_states).clone()?),
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();
@@ -100,12 +105,21 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn call_mods<F>(&self, feature: ModFeature, func: F) -> Result<(), SysAugError>
     where
-        F: Fn(&ModBox) -> Result<(), SysAugError>,
+        F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
     {
         let mod_map = self.mods.read().or(Err(SysAugError::LockTraceeHandler))?;
         if let Some(mods_) = mod_map.get(&feature) {
             for m in mods_.iter() {
-                func(m)?;
+                match func(m)? {
+                    ModAction::SkipSyscall(retval) => {
+                        let mut maybe_retval = self
+                            .skip_syscall_retval
+                            .write()
+                            .or(Err(SysAugError::LockTraceeHandler))?;
+                        maybe_retval.replace(retval);
+                    }
+                    ModAction::None => (),
+                }
             }
         }
         Ok(())
@@ -114,6 +128,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
         let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
         let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
+        let augment_perms = new_augment!(AugmentPerms<PtraceClient>, self);
         let augment_waitpid = new_augment!(AugmentWaitpid<PtraceClient>, self);
 
         let mut did_set_options = false;
@@ -175,8 +190,34 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             match SYSCALL_TO_AUG.get(&regs.syscall_num) {
                 Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs)?,
                 Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs)?,
+                Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs)?,
                 Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs)?,
                 None => (),
+            }
+
+            if last_syscall.times % 2 == 1 {
+                let maybe_skip = self
+                    .skip_syscall_retval
+                    .read()
+                    .or(Err(SysAugError::LockTraceeHandler))?;
+                if maybe_skip.is_some() {
+                    let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                    regs.syscall_num = NO_MOD_SYSCALL;
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
+                    last_syscall.count(NO_MOD_SYSCALL);
+                }
+            } else if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
+                let mut maybe_skip = self
+                    .skip_syscall_retval
+                    .write()
+                    .or(Err(SysAugError::LockTraceeHandler))?;
+                if let Some(retval) = maybe_skip.take() {
+                    let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                    regs.set_syscall_retval(retval);
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
+                }
             }
         }
         Ok(())
@@ -191,6 +232,7 @@ fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
 impl Default for TraceeHandlerStates {
     fn default() -> TraceeHandlerStates {
         TraceeHandlerStates {
+            override_uid: RwLock::default(),
             path_prefix: RwLock::default(),
             pid: nix::unistd::Pid::from_raw(0),
         }
@@ -200,6 +242,7 @@ impl Default for TraceeHandlerStates {
 impl TraceeHandlerStates {
     pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
+            override_uid: clone_locked(&self.override_uid)?,
             path_prefix: clone_locked(&self.path_prefix)?,
             pid: self.pid,
         })

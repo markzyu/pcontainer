@@ -7,9 +7,9 @@
 // Later, we could even allow dynamically loading mods, and exposing mod
 // configuraitons through procfs.
 mod chroot;
+mod perms;
 mod strace;
-mod trace_child;
 
 pub use crate::chroot::ChrootMod;
+pub use crate::perms::PermsMod;
 pub use crate::strace::StraceMod;
-pub use crate::trace_child::TraceChildMod;
