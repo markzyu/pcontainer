@@ -2,6 +2,7 @@ use crate::common;
 use crate::common::SysAugError;
 use crate::handler::TraceeHandler;
 use lazy_static::lazy_static;
+use nix::sys;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -50,30 +51,49 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
     }
 
     fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+        let pid = self.handler.pid;
         let retval = regs.syscall_retval() as isize;
         event!(Level::INFO, "after waitpid() = {}", retval);
-        if retval > 0 {
-            let child_pid: nix::unistd::Pid =
-                nix::unistd::Pid::from_raw(retval.try_into().or(Err(SysAugError::IntoInt))?);
-            let mut ignores = self
+        if retval <= 0 {
+            return Ok(());
+        }
+
+        let child_pid: nix::unistd::Pid =
+            nix::unistd::Pid::from_raw(retval.try_into().or(Err(SysAugError::IntoInt))?);
+        let raw_child_status = self
+            .handler
+            .ptrace_client
+            .execute(move || sys::ptrace::read(pid, regs.arg1 as *mut libc::c_void))?
+            .map_err(SysAugError::PtraceRead)? as i32;
+        let child_status = sys::wait::WaitStatus::from_raw(child_pid, raw_child_status)
+            .map_err(SysAugError::ParseWaitStatus)?;
+        let mut ignores = self
+            .handler
+            .ignore_sigstops
+            .write()
+            .or(Err(SysAugError::LockTraceeHandler))?;
+        event!(Level::INFO, "Child status: {:?}", child_status);
+        if !matches!(
+            child_status,
+            sys::wait::WaitStatus::Stopped(_, sys::signal::Signal::SIGSTOP)
+        ) {
+            ignores.remove(&child_pid);
+            return Ok(());
+        }
+
+        if ignores.remove(&child_pid) {
+            // Restart system call with orignal arguments, stack pointer, etc.
+            event!(Level::INFO, "restarting waitpid()");
+            let mut maybe_orig_regs = self
                 .handler
-                .ignore_sigstops
+                .orig_request_regs
                 .write()
                 .or(Err(SysAugError::LockTraceeHandler))?;
-            if ignores.remove(&child_pid) {
-                // Restart system call with orignal arguments, stack pointer, etc.
-                event!(Level::INFO, "restarting waitpid()");
-                let mut maybe_orig_regs = self
-                    .handler
-                    .orig_request_regs
-                    .write()
-                    .or(Err(SysAugError::LockTraceeHandler))?;
-                let pid2 = self.handler.pid;
-                let orig_regs = maybe_orig_regs.take().unwrap();
-                self.handler
-                    .ptrace_client
-                    .execute(move || ptrace::setregs(pid2, orig_regs))??;
-            }
+            let pid2 = self.handler.pid;
+            let orig_regs = maybe_orig_regs.take().unwrap();
+            self.handler
+                .ptrace_client
+                .execute(move || ptrace::setregs(pid2, orig_regs))??;
         }
         Ok(())
     }
