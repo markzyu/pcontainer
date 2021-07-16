@@ -30,6 +30,9 @@ pub enum SysAugError {
     #[error("Cannot lock/unlock tracee handler")]
     LockTraceeHandler,
 
+    #[error("Tracee process exited/crashed unexpectedly")]
+    TraceeCrashed,
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,
