@@ -8,11 +8,12 @@ use crate::common::{
 use crate::mods::{ModAction, ModFeature};
 use lazy_static::lazy_static;
 use nix::sys;
+use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use tracing::{event, span, Level};
+use tracing::{event, info, span, Level};
 
 pub struct TraceeHandlerStates {
     pub override_uid: RwLock<Option<usize>>,
@@ -30,6 +31,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     // ignore the next sigstop for the following pids
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
+    pub signal_tracee: RwLock<Option<sys::signal::Signal>>,
     pub skip_syscall_retval: RwLock<Option<usize>>,
 }
 
@@ -68,6 +70,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             mod_providers: mods,
             orig_request_regs: RwLock::default(),
             ignore_sigstops: RwLock::default(),
+            signal_tracee: RwLock::default(),
             skip_syscall_retval: RwLock::default(),
             states: Arc::new((*default_states).clone()?),
         });
@@ -155,8 +158,15 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let span = span!(Level::TRACE, "event_loop", ?pid);
             let _span_enter = span.enter();
 
+            let maybe_signal = {
+                let mut lock = self
+                    .signal_tracee
+                    .write()
+                    .or(Err(SysAugError::LockTraceeHandler))?;
+                lock.take()
+            };
             self.ptrace_client
-                .execute(move || sys::ptrace::syscall(pid, None))?
+                .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceSyscall)?;
 
             let status = ptrace::waitpid_hang(pid)?;
@@ -165,38 +175,57 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 return Ok(());
             }
-            if !ptrace::is_syscall_stop(&status) {
-                event!(
-                    Level::INFO,
-                    "Non-syscall ptrace stop: child status {:?}",
-                    &status
-                );
-                continue;
-            }
+            match &status {
+                // Decide whether to deliver signal to tracee
+                &WaitStatus::Stopped(pid2, signal) => {
+                    if pid2 != pid || signal == sys::signal::Signal::SIGTRAP {
+                        continue;
+                    }
+                    info!("Will deliver signal {:?} to {:?}", &signal, &pid);
+                    let mut maybe_signal = self
+                        .signal_tracee
+                        .write()
+                        .or(Err(SysAugError::LockTraceeHandler))?;
+                    maybe_signal.replace(signal);
+                }
+                // Killed by signal
+                &WaitStatus::Signaled(pid2, signal, _) => {
+                    if pid2 != pid {
+                        continue;
+                    }
+                    info!("Process {:?} killed by signal {:?}", &pid, &signal);
+                    return Ok(());
+                }
+                // SYSTEM CALL
+                &WaitStatus::PtraceEvent(_, _, _) | &WaitStatus::PtraceSyscall(_) => {
+                    let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                    last_syscall.count(regs.syscall_num);
 
-            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-            last_syscall.count(regs.syscall_num);
+                    if last_syscall.times % 2 == 1 {
+                        event!(
+                            Level::DEBUG,
+                            "Syscall {:x} #{} ({:x}, {:x}, {:x})",
+                            regs.syscall_num,
+                            times = &last_syscall.times,
+                            arg0 = regs.arg0,
+                            arg1 = regs.arg1,
+                            arg2 = regs.arg2,
+                        );
+                    }
 
-            if last_syscall.times % 2 == 1 {
-                event!(
-                    Level::DEBUG,
-                    "Syscall {:x} #{} ({:x}, {:x}, {:x})",
-                    regs.syscall_num,
-                    times = &last_syscall.times,
-                    arg0 = regs.arg0,
-                    arg1 = regs.arg1,
-                    arg2 = regs.arg2,
-                );
+                    match SYSCALL_TO_AUG.get(&regs.syscall_num) {
+                        Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs)?,
+                        Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs)?,
+                        Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs)?,
+                        Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs)?,
+                        None => (),
+                    }
+                    self.maybe_skip_syscall(&mut last_syscall)?;
+                }
+                _ => {
+                    event!(Level::INFO, "Unexpected ptrace stop: {:?}", &status);
+                }
             }
-
-            match SYSCALL_TO_AUG.get(&regs.syscall_num) {
-                Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs)?,
-                Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs)?,
-                Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs)?,
-                Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs)?,
-                None => (),
-            }
-            self.maybe_skip_syscall(&mut last_syscall)?;
         }
     }
 
