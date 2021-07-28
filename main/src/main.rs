@@ -46,7 +46,7 @@ fn main() -> Result<(), CLIError> {
     let args = CLIArgs::parse();
 
     // Setup mods
-    let mut mods: Vec<ModProvider> = vec![mods::ChrootMod::new_box];
+    let mut mods: Vec<ModProvider> = vec![mods::ChrootMod::new_box, mods::PermsMod::new_box];
     if args.strace {
         mods.push(mods::StraceMod::new_box);
     }
