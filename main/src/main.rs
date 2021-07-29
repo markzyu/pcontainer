@@ -88,6 +88,7 @@ fn actual_main<PtraceClient: executor::PtraceClient>(
     let new_tracee_handler =
         sysaug::TraceeHandler::new(pid1, ptrace_client.clone(), mods, Some(Arc::new(states)))?;
     Ok(thread::spawn(move || {
+        let _span = new_tracee_handler.trace_span().entered();
         let ptrace_client2 = ptrace_client.clone();
         let result = new_tracee_handler.event_loop();
         ptrace_client2.stop();

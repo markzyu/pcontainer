@@ -6,6 +6,7 @@ use std::convert::TryInto;
 use std::os::unix::process::CommandExt;
 use std::process;
 use thiserror::Error;
+use tracing::{event, Level};
 
 const NT_PRSTATUS: libc::c_int = 1;
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
@@ -22,8 +23,20 @@ pub enum PtraceError {
     #[error("Failed to parse pid {0}: {1}")]
     ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
 
-    #[error("OS Error: {0}")]
-    LinuxOSErr(#[from] nix::Error),
+    #[error("Cannot get tracee's CPU registers: {0}")]
+    GetRegs(nix::Error),
+
+    #[error("Cannot set tracee's CPU registers: {0}")]
+    SetRegs(nix::Error),
+
+    #[error("Cannot read tracee memory: {0}")]
+    Read(nix::Error),
+
+    #[error("Cannot write tracee memory: {0}")]
+    Write(nix::Error),
+
+    #[error("Failed to wait/waitpid for tracee: {0}")]
+    Waitpid(nix::Error),
 
     #[error("Integer overflow: {0} {1} {2}")]
     IntOverflow(usize, &'static str, usize),
@@ -75,7 +88,7 @@ pub fn pid(child: &process::Child) -> Result<nix::unistd::Pid, PtraceError> {
 }
 
 pub fn waitpid(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
-    Ok(wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG))?)
+    Ok(wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG)).map_err(PtraceError::Waitpid)?)
 }
 
 pub fn wait(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
@@ -83,33 +96,11 @@ pub fn wait(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
 }
 
 pub fn waitpid_hang(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
-    Ok(wait::waitpid(pid, None)?)
+    Ok(wait::waitpid(pid, None).map_err(PtraceError::Waitpid)?)
 }
 
 pub fn wait_hang(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
     waitpid_hang(pid(&child)?)
-}
-
-/// This is copied from https://github.com/nix-rust/nix/blob/master/src/sys/ptrace/linux.rs
-/// Function for ptrace requests that return values from the data field.
-/// Some ptrace get requests populate structs or larger elements than `c_long`
-/// and therefore use the data field to return values. This function handles these
-/// requests.
-pub fn ptrace_get_data<T>(
-    request: sys::ptrace::Request,
-    pid: nix::unistd::Pid,
-) -> Result<T, PtraceError> {
-    let mut data = std::mem::MaybeUninit::uninit();
-    let res = unsafe {
-        libc::ptrace(
-            request as sys::ptrace::RequestType,
-            libc::pid_t::from(pid),
-            NT_PRSTATUS as *mut libc::c_void,
-            data.as_mut_ptr() as *mut _ as *mut libc::c_void,
-        )
-    };
-    nix::errno::Errno::result(res)?;
-    Ok(unsafe { data.assume_init() })
 }
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
@@ -207,7 +198,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
             &mut iov as *mut _ as *mut libc::c_void,
         )
     };
-    nix::errno::Errno::result(res)?;
+    nix::errno::Errno::result(res).map_err(PtraceError::GetRegs)?;
     Ok(unsafe { data.assume_init() })
 }
 
@@ -223,7 +214,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
             data.as_mut_ptr() as *mut _ as *mut libc::c_void,
         )
     };
-    nix::errno::Errno::result(res)?;
+    nix::errno::Errno::result(res).map_err(PtraceError::GetRegs)?;
     Ok(unsafe { data.assume_init() })
 }
 
@@ -242,7 +233,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
             &mut iov as *mut _ as *mut libc::c_void,
         )
     };
-    nix::errno::Errno::result(res)?;
+    nix::errno::Errno::result(res).map_err(PtraceError::SetRegs)?;
     Ok(())
 }
 
@@ -257,7 +248,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
             &mut data as *mut _ as *mut libc::c_void,
         )
     };
-    nix::errno::Errno::result(res)?;
+    nix::errno::Errno::result(res).map_err(PtraceError::SetRegs)?;
     Ok(())
 }
 
@@ -304,7 +295,8 @@ pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, Ptra
     let mut addr = start;
     for value in usizes.iter() {
         unsafe {
-            sys::ptrace::write(pid, addr as *mut libc::c_void, *value as *mut libc::c_void)?;
+            sys::ptrace::write(pid, addr as *mut libc::c_void, *value as *mut libc::c_void)
+                .map_err(PtraceError::Write)?;
         }
         addr = checked_add(addr, *USIZE_SIZE)?;
     }
@@ -315,7 +307,9 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
     loop {
-        let machine_word = sys::ptrace::read(pid, curr_addr as *mut libc::c_void)?;
+        event!(Level::DEBUG, "PTRACE_READ addr: {:x}", curr_addr);
+        let machine_word =
+            sys::ptrace::read(pid, curr_addr as *mut libc::c_void).map_err(PtraceError::Read)?;
         for byte in machine_word.to_ne_bytes().iter() {
             if *byte == b'\0' {
                 return Ok(result);

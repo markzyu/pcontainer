@@ -57,6 +57,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
 
             let new_tracee_handler = self.handler.fork(child_pid)?;
             std::thread::spawn(move || {
+                let _span = new_tracee_handler.trace_span().entered();
                 new_tracee_handler
                     .event_loop()
                     .map_err(common::display_err)

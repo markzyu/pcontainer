@@ -93,6 +93,7 @@ pub trait AugmentSyscall {
     }
 }
 
+#[derive(Debug)]
 pub enum Augments {
     Clone,
     Paths,
@@ -100,6 +101,7 @@ pub enum Augments {
     Waitpid,
 }
 
+#[derive(Debug)]
 pub struct SyscallCounter {
     pub syscall: Option<usize>,
     pub times: u64,
