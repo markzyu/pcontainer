@@ -250,9 +250,17 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         )
                     }
                     .entered();
+                    event!(Level::TRACE, "syscall event");
 
                     let which_aug = SYSCALL_TO_AUG.get(&regs.syscall_num);
-                    let _span2 = span!(Level::INFO, "sysaug", "{:?}", which_aug).entered();
+                    let _span2 = span!(
+                        Level::INFO,
+                        "sysaug",
+                        "{:?} {:?}",
+                        &regs.syscall_num,
+                        which_aug
+                    )
+                    .entered();
                     match which_aug {
                         Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs),
                         Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs),
@@ -272,30 +280,19 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     fn maybe_skip_syscall(&self, last_syscall: &mut SyscallCounter) -> Result<(), SysAugError> {
         let pid = self.pid;
-        if last_syscall.times % 2 == 1 {
-            let maybe_skip = self
-                .skip_syscall_retval
-                .read()
-                .or(Err(SysAugError::LockTraceeHandler))?;
-            if maybe_skip.is_some() {
-                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-
-                event!(
-                    Level::INFO,
-                    "Replacing syscall {} with {}",
-                    regs.syscall_num,
-                    NO_MOD_SYSCALL
-                );
-                regs.syscall_num = NO_MOD_SYSCALL;
-                self.ptrace_client
-                    .execute(move || ptrace::setregs(pid, regs))??;
-                last_syscall.count(NO_MOD_SYSCALL);
-            }
-        } else if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
+        if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
             let mut maybe_skip = self
                 .skip_syscall_retval
                 .write()
                 .or(Err(SysAugError::LockTraceeHandler))?;
+            event!(
+                Level::INFO,
+                "In NO_MOD_SYSCALL, times: {}",
+                &last_syscall.times,
+            );
+            if last_syscall.times % 2 == 1 {
+                return Ok(());
+            }
             if let Some(retval) = maybe_skip.take() {
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
 
@@ -308,6 +305,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 regs.set_syscall_retval(retval);
                 self.ptrace_client
                     .execute(move || ptrace::setregs(pid, regs))??;
+            }
+        } else if last_syscall.times % 2 == 1 {
+            let maybe_skip = self
+                .skip_syscall_retval
+                .read()
+                .or(Err(SysAugError::LockTraceeHandler))?;
+            if maybe_skip.is_some() {
+                self.ptrace_client
+                    .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
+                last_syscall.count(NO_MOD_SYSCALL);
             }
         }
         Ok(())

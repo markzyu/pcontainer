@@ -28,6 +28,10 @@ pub struct CLIArgs {
     /// Make your applications think they can sudo when they cannot. Not compatible with --root
     #[clap(long)]
     pub sudo: bool,
+
+    /// Override the command to execute
+    #[clap(long, default_value = "bash")]
+    pub cmd: String,
 }
 
 #[derive(Debug, Error)]
@@ -95,7 +99,7 @@ fn actual_main<PtraceClient: executor::PtraceClient>(
 ) -> Result<thread::JoinHandle<()>, CLIError> {
     // Spawn first tracee
     let pid1 = {
-        let mut cmd = std::process::Command::new("bash");
+        let mut cmd = std::process::Command::new(&args.cmd);
         ptrace::start(&mut cmd, args.fix_attach)?
     };
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
