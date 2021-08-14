@@ -5,7 +5,7 @@ use crate::mods;
 use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tracing::{event, Level};
 
 struct SyscallInfo {
@@ -14,15 +14,18 @@ struct SyscallInfo {
 
     // true -> setuid/getuid, false -> setgid/getgid
     is_uid: bool,
+
+    is_gid: bool,
 }
 
 macro_rules! define_syscall {
-    ($name:expr, $is_setter:expr, $is_uid:expr, $ans:ident) => {
+    ($name:expr, $is_setter:expr, $type:expr, $ans:ident) => {
         $ans.insert(
             $name as usize,
             SyscallInfo {
                 is_setter: $is_setter,
-                is_uid: $is_uid,
+                is_uid: $type == "uid",
+                is_gid: $type == "gid",
             },
         )
     };
@@ -31,15 +34,15 @@ macro_rules! define_syscall {
 lazy_static! {
     static ref SYSCALL_INFOS: HashMap<usize, SyscallInfo> = {
         let mut ans = HashMap::new();
-        define_syscall!(libc::SYS_getuid, false, true, ans);
-        define_syscall!(libc::SYS_geteuid, false, true, ans);
-        define_syscall!(libc::SYS_setuid, true, true, ans);
-        define_syscall!(libc::SYS_getgid, false, false, ans);
-        // define_syscall!(libc::SYS_getegid, false, false, ans);
-        define_syscall!(libc::SYS_setgid, true, false, ans);
-        define_syscall!(libc::SYS_setgroups, true, false, ans);
-        define_syscall!(libc::SYS_setresgid, true, false, ans);
-        define_syscall!(libc::SYS_setresuid, true, false, ans);
+        define_syscall!(libc::SYS_getuid, false, "uid", ans);
+        define_syscall!(libc::SYS_geteuid, false, "uid", ans);
+        define_syscall!(libc::SYS_setuid, true, "uid", ans);
+        define_syscall!(libc::SYS_getgid, false, "gid", ans);
+        // define_syscall!(libc::SYS_getegid, false, "gid", ans);
+        define_syscall!(libc::SYS_setgid, true, "gid", ans);
+        define_syscall!(libc::SYS_setgroups, true, "unknown", ans);
+        define_syscall!(libc::SYS_setresgid, true, "unknown", ans);
+        define_syscall!(libc::SYS_setresuid, true, "unknown", ans);
         ans
     };
     static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
@@ -77,23 +80,12 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
         Ok(())
     }
 
-    fn after_call(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
         let info = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
         if !info.is_setter && info.is_uid {
-            let maybe_override = self
-                .handler
-                .states
-                .override_uid
-                .read()
-                .or(Err(SysAugError::LockTraceeHandler))?;
-            event!(Level::INFO, "Override getuid() = {:?}", maybe_override);
-            if let Some(uid) = &*maybe_override {
-                regs.set_syscall_retval(*uid);
-                let pid = self.handler.pid;
-                self.handler
-                    .ptrace_client
-                    .execute(move || ptrace::setregs(pid, regs))??;
-            }
+            self.write_retval(regs, &self.handler.states.override_uid)?;
+        } else if !info.is_setter && info.is_gid {
+            self.write_retval(regs, &self.handler.states.override_gid)?;
         }
         Ok(())
     }
@@ -102,5 +94,23 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
 impl<PtraceClient: executor::PtraceClient> AugmentPerms<PtraceClient> {
     pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
         AugmentPerms { handler }
+    }
+
+    fn write_retval(
+        &self,
+        mut regs: GenericPurposeRegs,
+        maybe_override_val: &RwLock<Option<usize>>,
+    ) -> Result<(), SysAugError> {
+        let maybe_override = maybe_override_val
+            .read()
+            .or(Err(SysAugError::LockTraceeHandler))?;
+        if let Some(val) = &*maybe_override {
+            regs.set_syscall_retval(*val);
+            let pid = self.handler.pid;
+            self.handler
+                .ptrace_client
+                .execute(move || ptrace::setregs(pid, regs))??;
+        }
+        Ok(())
     }
 }
