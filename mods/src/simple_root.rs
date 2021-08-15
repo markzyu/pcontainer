@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use sysaug::mods::{Mod, ModAction, ModFeature};
 use sysaug::{SysAugError, TraceeHandlerStates};
+use tracing::{event, Level};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -48,6 +49,7 @@ impl Mod for SimpleRootMod {
     }
 
     fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+        event!(Level::INFO, "Skipping setuid");
         Ok(ModAction::SkipSyscall(0))
     }
 }

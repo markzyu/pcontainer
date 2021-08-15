@@ -312,6 +312,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 .read()
                 .or(Err(SysAugError::LockTraceeHandler))?;
             if maybe_skip.is_some() {
+                event!(Level::INFO, "Attempting to skip syscall");
                 self.ptrace_client
                     .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
                 last_syscall.count(NO_MOD_SYSCALL);

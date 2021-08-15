@@ -6,7 +6,6 @@ use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tracing::{event, Level};
 
 struct SyscallInfo {
     // true -> setuid/setgid, false -> getuid/getgid
@@ -41,8 +40,12 @@ lazy_static! {
         // define_syscall!(libc::SYS_getegid, false, "gid", ans);
         define_syscall!(libc::SYS_setgid, true, "gid", ans);
         define_syscall!(libc::SYS_setgroups, true, "unknown", ans);
+        define_syscall!(libc::SYS_setregid, true, "unknown", ans);
+        define_syscall!(libc::SYS_setreuid, true, "unknown", ans);
         define_syscall!(libc::SYS_setresgid, true, "unknown", ans);
         define_syscall!(libc::SYS_setresuid, true, "unknown", ans);
+        define_syscall!(libc::SYS_setfsgid, true, "unknown", ans);
+        define_syscall!(libc::SYS_setfsuid, true, "unknown", ans);
         ans
     };
     static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
@@ -70,11 +73,6 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
                 m.on_setuid(regs.arg0, regs.syscall_num)
             })?;
         } else if info.is_setter {
-            event!(
-                Level::INFO,
-                "Attempting to skip syscall {}",
-                regs.syscall_num
-            );
             self.handler.skip_syscall(0)?;
         }
         Ok(())
