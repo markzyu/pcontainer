@@ -3,6 +3,7 @@ use crate::common::SysAugError;
 use crate::handler::TraceeHandler;
 use crate::mods;
 use lazy_static::lazy_static;
+use nix::sys;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
@@ -56,16 +57,16 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
                 .prep_attach_to(child_pid, &self.handler.ignore_sigstops)?;
 
             let new_tracee_handler = self.handler.fork(child_pid)?;
-            std::thread::spawn(move || {
-                let _span = new_tracee_handler.trace_span().entered();
-                new_tracee_handler
-                    .call_mods(mods::ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())
-                    .unwrap();
-                new_tracee_handler
-                    .event_loop()
-                    .map_err(common::display_err)
-                    .unwrap();
+            let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
+            let root_pid = self.handler.states.root_pid;
+            let fail_fast = self.handler.states.fail_fast;
+            new_tracee_handler.start(move || {
+                if fail_fast && new_tracee_handler2.failed() {
+                    let _ = sys::signal::kill(root_pid, Some(sys::signal::Signal::SIGKILL))
+                        .map_err(common::display_err);
+                }
             });
+
             self.handler
                 .call_mods(mods::ModFeature::OnCloneComplete, |m| {
                     m.on_clone_complete(raw_pid as isize)
