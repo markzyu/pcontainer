@@ -25,6 +25,10 @@ pub struct CLIArgs {
     #[clap(long)]
     pub root: bool,
 
+    /// Make your applications think they are root when they are not.
+    #[clap(long)]
+    pub rootfs: bool,
+
     /// Make your applications think they can sudo when they cannot. Not compatible with --root
     #[clap(long)]
     pub sudo: bool,
@@ -76,6 +80,9 @@ fn main() -> Result<(), CLIError> {
     }
     if args.root {
         mods.push(mods::SimpleRootMod::new_box);
+    }
+    if args.rootfs {
+        mods.push(mods::RootfsMod::new_box);
     }
     if args.sudo {
         mods.push(mods::PermsMod::new_box);

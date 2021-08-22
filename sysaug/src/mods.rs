@@ -1,8 +1,9 @@
 /// See "../mods/src/lib.rs" for more details
 use crate::common::SysAugError;
 use lazy_static::lazy_static;
+use std::any::type_name;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ModFeature {
@@ -12,6 +13,15 @@ pub enum ModFeature {
     OnCloneComplete,
     OnSetuid,
     OnTraceeStartup,
+    OverrideFileFakePath,
+    OverrideFileRealPath,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PathAction {
+    None,
+    HidePath,
+    Override(PathBuf),
 }
 
 pub enum ModAction {
@@ -27,6 +37,14 @@ lazy_static! {
 }
 
 pub trait Mod {
+    fn err(&self, kind: &str, msg: &str) -> SysAugError {
+        SysAugError::Mod {
+            kind: kind.into(),
+            message: msg.into(),
+            mod_name: type_name::<Self>().to_string(),
+        }
+    }
+
     fn on_init_tracee(&self) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
@@ -44,19 +62,35 @@ pub trait Mod {
     }
 
     // Don't use this to override/change paths.
-    // Instead, set TraceeHandlerStates.path_prefix
+    // Instead, set TraceeHandlerStates.path_prefix, or use override_file_real_path
     fn on_file_path(&self, _raw_path: &Path, _syscall: usize) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 
     // Don't use this to override/change paths.
-    // Instead, set TraceeHandlerStates.path_prefix
+    // Instead, set TraceeHandlerStates.path_prefix, or use override_file_real_path
     fn on_file_real_path(
         &self,
         _raw_path: &Path,
         _syscall: usize,
     ) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
+    }
+
+    fn override_file_real_path(
+        &self,
+        _curr_path: &Path,
+        _syscall: usize,
+    ) -> Result<PathAction, SysAugError> {
+        Ok(PathAction::None)
+    }
+
+    fn override_file_fake_path(
+        &self,
+        _curr_path: &Path,
+        _syscall: usize,
+    ) -> Result<PathAction, SysAugError> {
+        Ok(PathAction::None)
     }
 
     fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
