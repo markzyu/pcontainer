@@ -46,7 +46,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
             let new_tracee_handler = self.handler.fork(child_pid)?;
             let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
             let root_pid = self.handler.states.root_pid;
-            let fail_fast = self.handler.states.fail_fast;
+            let fail_fast = self.handler.states.args.fail_fast;
             new_tracee_handler.start(move || {
                 if fail_fast && new_tracee_handler2.failed() {
                     let _ = sys::signal::kill(root_pid, Some(sys::signal::Signal::SIGKILL))

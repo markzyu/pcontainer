@@ -1,8 +1,9 @@
 use clap::Clap;
 use executor::PtraceServer;
-use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::thread;
-use sysaug::ModProvider;
+use sysaug::{display_err, ModProvider};
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -12,9 +13,9 @@ pub struct CLIArgs {
     #[clap(long)]
     pub strace: bool,
 
-    /// Chroot to this path upon tracee startup.
+    /// Chroot to this path upon tracee startup. Implies --rootfs
     #[clap(long)]
-    pub chroot: Option<String>,
+    pub chroot: Option<PathBuf>,
 
     /// Only use this flag if you see "PTRACE_ATTACH error: EPERM: Permission denied".
     /// This will solve those permission errors, but will also cause slowdowns.
@@ -25,9 +26,9 @@ pub struct CLIArgs {
     #[clap(long)]
     pub root: bool,
 
-    /// Make your applications think they are root when they are not.
+    /// You probably want --chroot instead. This simulates rootfs without chroot, for files in this folder.
     #[clap(long)]
-    pub rootfs: bool,
+    pub rootfs: Option<PathBuf>,
 
     /// Make your applications think they can sudo when they cannot. Not compatible with --root
     #[clap(long)]
@@ -58,6 +59,9 @@ pub enum CLIError {
 
     #[error("Unable to complete")]
     UnableToComplete,
+
+    #[error("Unable to find the absolute path of {0:?}: {1}")]
+    PathCanonicalization(PathBuf, std::io::Error),
 }
 
 fn init_logging() -> () {
@@ -68,13 +72,21 @@ fn init_logging() -> () {
         .expect("Unable to setup logging");
 }
 
-fn main() -> Result<(), CLIError> {
+fn main() -> () {
+    actual_main().map_err(display_err).unwrap();
+}
+
+fn actual_main() -> Result<(), CLIError> {
     // Initialize, parse args
     init_logging();
     let args = CLIArgs::parse();
 
     if args.root && args.sudo {
         event!(Level::ERROR, "You cannot use both --root and --sudo");
+        return Ok(());
+    }
+    if args.chroot.is_some() && args.rootfs.is_some() {
+        event!(Level::ERROR, "You cannot use both --chroot and --rootfs");
         return Ok(());
     }
 
@@ -89,7 +101,7 @@ fn main() -> Result<(), CLIError> {
     if args.root {
         mods.push(mods::SimpleRootMod::new_box);
     }
-    if args.rootfs {
+    if args.chroot.is_some() || args.rootfs.is_some() {
         mods.push(mods::RootfsMod::new_box);
     }
     if args.sudo {
@@ -98,11 +110,11 @@ fn main() -> Result<(), CLIError> {
 
     let retcode = if args.fix_attach {
         let (ptrace_client, ptrace_loop) = executor::new_main_thread_executor();
-        let join = actual_main(&args, mods, ptrace_client)?;
+        let join = launch_ptrace(&args, mods, ptrace_client)?;
         ptrace_loop.serve()?;
         join.join().map_err(|_| CLIError::UnableToComplete)?
     } else {
-        actual_main(&args, mods, executor::new_local_executor())?
+        launch_ptrace(&args, mods, executor::new_local_executor())?
             .join()
             .map_err(|_| CLIError::UnableToComplete)?
     };
@@ -111,7 +123,18 @@ fn main() -> Result<(), CLIError> {
     std::process::exit(retcode.unwrap() as i32);
 }
 
-fn actual_main<PtraceClient: executor::PtraceClient>(
+fn canonicalize_clone(maybe_path: &Option<PathBuf>) -> Result<Option<PathBuf>, CLIError> {
+    if let Some(path) = maybe_path {
+        match path.canonicalize() {
+            Ok(new_path) => Ok(Some(new_path)),
+            Err(e) => Err(CLIError::PathCanonicalization(path.clone(), e)),
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     args: &CLIArgs,
     mods: Vec<ModProvider>,
     ptrace_client: PtraceClient,
@@ -124,9 +147,13 @@ fn actual_main<PtraceClient: executor::PtraceClient>(
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
 
     // Setup tracee handler states
-    let states = sysaug::TraceeHandlerStates {
+    let args2 = sysaug::CLIArgs {
+        chroot: canonicalize_clone(&args.chroot)?,
+        rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
-        path_prefix: RwLock::new(args.chroot.as_ref().map(|s| s.into())),
+    };
+    let states = sysaug::TraceeHandlerStates {
+        args: args2,
         root_pid: pid1,
         ..Default::default()
     };

@@ -2,12 +2,13 @@
 use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::sync::Arc;
-use sysaug::mods::{Mod, ModFeature};
-use sysaug::TraceeHandlerStates;
+use sysaug::mods::{Mod, ModAction, ModFeature};
+use sysaug::{SysAugError, TraceeHandlerStates};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
-        let ans = HashSet::new();
+        let mut ans = HashSet::new();
+        ans.insert(ModFeature::OnTraceeStartup);
         ans
     };
 }
@@ -31,5 +32,15 @@ impl Mod for ChrootMod {
 
     fn get_features(&self) -> &'static HashSet<ModFeature> {
         &*DEFAULT_LISTENER_SPEC
+    }
+
+    fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
+        let mut target = self
+            .states
+            .path_prefix
+            .write()
+            .or(Err(SysAugError::LockTraceeHandler))?;
+        *target = self.states.args.chroot.clone();
+        Ok(ModAction::None)
     }
 }

@@ -10,7 +10,6 @@ use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
-        ans.insert(ModFeature::OnTraceeStartup);
         ans.insert(ModFeature::OverrideFileRealPath);
         ans.insert(ModFeature::OverrideFileFakePath);
         ans.insert(ModFeature::ResolveMetadataPath);
@@ -88,6 +87,11 @@ impl Mod for RootfsMod {
 
     fn resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let path_str = path.to_string_lossy();
+        let args = &self.states.args;
+        let maybe_rootfs = args.rootfs.as_ref().or(args.chroot.as_ref());
+        if !path.starts_with(maybe_rootfs.unwrap()) {
+            return Ok(None);
+        }
         if !path.exists() {
             return Ok(None);
         }

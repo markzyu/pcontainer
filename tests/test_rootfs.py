@@ -1,10 +1,8 @@
+from common import STAGING
 import common as c
 import os
 import tarfile
 import unittest as t
-
-
-STAGING = "tests/fixtures/staging"
 
 
 class TestRootFs(t.TestCase):

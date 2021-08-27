@@ -18,8 +18,15 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use tracing::{event, info, span, Level};
 
-pub struct TraceeHandlerStates {
+#[derive(Clone, Debug, Default)]
+pub struct CLIArgs {
+    pub chroot: Option<PathBuf>,
+    pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
+}
+
+pub struct TraceeHandlerStates {
+    pub args: CLIArgs,
     pub failed: AtomicBool,
     pub override_uid: RwLock<Option<usize>>,
     pub override_gid: RwLock<Option<usize>>,
@@ -371,7 +378,7 @@ fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
 impl Default for TraceeHandlerStates {
     fn default() -> TraceeHandlerStates {
         TraceeHandlerStates {
-            fail_fast: true,
+            args: CLIArgs::default(),
             failed: AtomicBool::new(false),
             override_uid: RwLock::default(),
             override_gid: RwLock::default(),
@@ -385,7 +392,7 @@ impl Default for TraceeHandlerStates {
 impl TraceeHandlerStates {
     pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
-            fail_fast: self.fail_fast,
+            args: self.args.clone(),
             failed: AtomicBool::new(false),
             override_uid: clone_locked(&self.override_uid)?,
             override_gid: clone_locked(&self.override_gid)?,
