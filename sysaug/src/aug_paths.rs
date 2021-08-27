@@ -18,6 +18,7 @@ const META_INIT: &'static str = "{}\n";
 struct SyscallInfo {
     /// Bitwise representation
     path_positions: usize,
+    getdents_bits: Option<u8>,
 }
 
 macro_rules! define_syscall {
@@ -26,6 +27,19 @@ macro_rules! define_syscall {
             $name as usize,
             SyscallInfo {
                 path_positions: $path_positions,
+                getdents_bits: None,
+            },
+        )
+    };
+}
+
+macro_rules! define_getdents_syscall {
+    ($name:expr, $getdents_bits:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                path_positions: 0,
+                getdents_bits: Some($getdents_bits),
             },
         )
     };
@@ -55,7 +69,7 @@ lazy_static! {
         define_syscall!(libc::SYS_faccessat, 2, ans);
         define_syscall!(libc::SYS_mkdirat, 2, ans);
         define_syscall!(libc::SYS_utimensat, 2, ans);
-        define_syscall!(libc::SYS_getdents64, 0, ans);
+        define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
         add_xplat_syscalls(&mut ans);
         ans
     };
@@ -96,6 +110,15 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "aarch64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_syscall!(libc::SYS_newfstatat, 2, ans);
+}
+
+#[cfg(target_arch = "x86_64")]
+fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
+    define_syscall!(libc::SYS_newfstatat, 2, ans);
+    define_syscall!(libc::SYS_chmod, 1, ans);
+    define_syscall!(libc::SYS_utime, 1, ans);
+    define_syscall!(libc::SYS_utimes, 1, ans);
+    define_getdents_syscall!(libc::SYS_getdents, 32, ans);
 }
 
 pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
@@ -159,7 +182,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         }
 
         // Handle getdents (make the buffer seem smaller)
-        if syscall_num == libc::SYS_getdents64 as usize {
+        if syscall.getdents_bits.is_some() {
             regs.arg2 = regs.arg2 / 2;
             need_write_regs = true;
         }
@@ -170,67 +193,19 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         Ok(())
     }
 
-    fn after_call(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError> {
-        let pid = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
-        let syscall_num = regs.syscall_num;
-        if syscall_num == libc::SYS_getdents64 as usize {
-            let addr = regs.arg1;
-            let buf_size = regs.arg2 * 2;
-            let list_size = regs.syscall_retval();
-            if list_size as isize <= 0 {
-                return Ok(());
-            }
-
-            // TODO: Don't perform this expensive call unless we have mods that need the data
-            let mut dirents: Vec<Dirent64> = ptrace_client
-                .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size))??;
-            event!(Level::INFO, "Intercepting {} dir entries", dirents.len());
-
-            let mut is_delete: Vec<bool> = Vec::new();
-            for entry in dirents.iter_mut() {
-                let path_osstr: &OsStr = OsStrExt::from_bytes(&entry.name[..]);
-                let orig_path: &Path = Path::new(path_osstr);
-                let action = self.get_mod_path(syscall_num, orig_path, PathAction::None, true)?;
-                // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
-                let delete = match &action {
-                    PathAction::Override(override_path) => {
-                        let bytes = override_path.as_os_str().as_bytes();
-                        entry.name.fill(0);
-                        for (i, byte) in bytes.iter().take_while(|x| **x != 0).enumerate() {
-                            entry.name[i] = *byte;
-                        }
-                        false
-                    }
-                    PathAction::HidePath => true,
-                    _ => false,
-                };
-                is_delete.push(delete);
-            }
-
-            let mut i = 0;
-            dirents.retain(|_e| {
-                let ans = is_delete[i];
-                i += 1;
-                !ans
-            });
-
-            let num_dirents = dirents.len();
-            let num_bytes = ptrace_client.execute(move || {
-                ptrace::structs_to_tracee_buffer(pid, addr, buf_size, dirents, 2)
-            })??;
-            event!(
-                Level::INFO,
-                "Returning {} dir entries, {} bytes",
-                num_dirents,
-                num_bytes
-            );
-
-            // Restore buffer size value so program doesn't reuse wrong values crash
-            regs.arg2 = regs.arg2 * 2;
-            regs.set_syscall_retval(num_bytes);
-            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+        let retval = regs.syscall_retval();
+        if retval as isize <= 0 {
+            return Ok(());
         }
+
+        let syscall_num = regs.syscall_num;
+        let syscall = SYSCALL_INFOS.get(&syscall_num).unwrap();
+        match syscall.getdents_bits {
+            Some(32) => self.replace_getdents_result::<Dirent>(regs)?,
+            Some(64) => self.replace_getdents_result::<Dirent64>(regs)?,
+            _ => (),
+        };
         Ok(())
     }
 }
@@ -257,6 +232,66 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         }
 
         self.get_mod_path(syscall_num, orig_path, new_path, false)
+    }
+
+    fn replace_getdents_result<T>(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError>
+    where
+        T: IDirent + Clone + Send + 'static,
+    {
+        let addr = regs.arg1;
+        let buf_size = regs.arg2 * 2;
+        let syscall_num = regs.syscall_num;
+        let list_size = regs.syscall_retval();
+        let pid = self.handler.pid;
+        let ptrace_client = &self.handler.ptrace_client;
+        let mut dirents: Vec<T> = ptrace_client
+            .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size))??;
+        event!(Level::INFO, "Intercepting {} dir entries", dirents.len());
+
+        let mut is_delete: Vec<bool> = Vec::new();
+        for entry in dirents.iter_mut() {
+            event!(Level::INFO, "Intercepting {:?}", entry);
+            let path_osstr: &OsStr = OsStrExt::from_bytes(&entry.get_name()[..]);
+            let orig_path: &Path = Path::new(path_osstr);
+            let action = self.get_mod_path(syscall_num, orig_path, PathAction::None, true)?;
+            // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
+            let delete = match &action {
+                PathAction::Override(override_path) => {
+                    let bytes = override_path.as_os_str().as_bytes();
+                    entry.get_name().fill(0);
+                    for (i, byte) in bytes.iter().take_while(|x| **x != 0).enumerate() {
+                        entry.get_name()[i] = *byte;
+                    }
+                    false
+                }
+                PathAction::HidePath => true,
+                _ => false,
+            };
+            is_delete.push(delete);
+        }
+
+        let mut i = 0;
+        dirents.retain(|_e| {
+            let ans = is_delete[i];
+            i += 1;
+            !ans
+        });
+
+        let num_dirents = dirents.len();
+        let num_bytes = ptrace_client
+            .execute(move || ptrace::structs_to_tracee_buffer(pid, addr, buf_size, dirents, 2))??;
+        event!(
+            Level::INFO,
+            "Returning {} dir entries, {} bytes",
+            num_dirents,
+            num_bytes
+        );
+
+        // Restore buffer size value so program doesn't reuse wrong values crash
+        regs.arg2 = regs.arg2 * 2;
+        regs.set_syscall_retval(num_bytes);
+        ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+        Ok(())
     }
 
     fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
@@ -330,11 +365,15 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     }
 }
 
+trait IDirent: ptrace::CStruct + std::fmt::Debug {
+    fn get_name(&mut self) -> &mut [u8];
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
 struct Dirent64 {
-    pub inode: u64,
-    pub offset: u64,
+    pub inode: libc::ino64_t,
+    pub offset: libc::off64_t,
     pub reclen: libc::c_ushort,
     pub type_: libc::c_uchar,
     pub name: [u8; 512],
@@ -343,16 +382,55 @@ struct Dirent64 {
 #[derive(Debug, Clone)]
 #[repr(C)]
 struct Dirent64Header {
-    pub ino: libc::ino64_t,
-    pub off: libc::off64_t,
+    pub inode: libc::ino64_t,
+    pub offset: libc::off64_t,
     pub reclen: libc::c_ushort,
 }
 
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct Dirent {
+    pub inode: libc::ino_t,
+    pub offset: libc::off_t,
+    pub reclen: libc::c_ushort,
+    pub name: [u8; 512],
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct DirentHeader {
+    pub inode: libc::ino_t,
+    pub offset: libc::off_t,
+    pub reclen: libc::c_ushort,
+}
+
+impl IDirent for Dirent64 {
+    fn get_name(&mut self) -> &mut [u8] {
+        &mut self.name
+    }
+}
 impl ptrace::CStruct for Dirent64 {
     type H = Dirent64Header;
 }
-
 impl ptrace::CHeader for Dirent64Header {
+    fn item_size_deducer(&self) -> usize {
+        self.reclen.into()
+    }
+
+    fn item_size_updater(&mut self, size: usize) -> () {
+        self.reclen = size as u16;
+    }
+}
+
+impl IDirent for Dirent {
+    fn get_name(&mut self) -> &mut [u8] {
+        &mut self.name
+    }
+}
+impl ptrace::CStruct for Dirent {
+    type H = DirentHeader;
+}
+impl ptrace::CHeader for DirentHeader {
     fn item_size_deducer(&self) -> usize {
         self.reclen.into()
     }
