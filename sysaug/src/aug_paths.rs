@@ -7,7 +7,7 @@ use ptrace::GenericPurposeRegs;
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{event, Level};
 
@@ -26,6 +26,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
+        let dirfd_path = self.get_dirfd_path(&regs, syscall)?;
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
         let mut need_write_regs = false;
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
@@ -53,7 +54,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
                 PathAction::Override(path) => path.as_path(),
                 _ => orig_path,
             };
-            self.save_metadata_for_file(notify_path)?;
+            self.save_metadata_for_file(notify_path, &dirfd_path)?;
             self.handler
                 .call_mods(mods::ModFeature::OnFileRealPath, |m| {
                     m.on_file_real_path(notify_path, syscall)
@@ -124,6 +125,25 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         self.get_mod_path(syscall, orig_path, new_path, false)
     }
 
+    fn get_dirfd_path(
+        &self,
+        regs: &GenericPurposeRegs,
+        syscall: &SyscallInfo,
+    ) -> Result<PathBuf, SysAugError> {
+        if let Some(dirfd_reg) = syscall.dirfd_position {
+            if dirfd_reg >= 3 {
+                return Err(SysAugError::DirfdReg);
+            }
+            let possible_args = [&regs.arg0, &regs.arg1, &regs.arg2];
+            let dirfd = *possible_args[dirfd_reg as usize] as libc::c_int;
+            if dirfd != libc::AT_FDCWD {
+                return Ok(procfs::getfd_path(self.handler.pid, dirfd as isize)?);
+            }
+        }
+        // Otherwise, use cwd of tracee
+        Ok(procfs::getcwd(self.handler.pid)?)
+    }
+
     fn replace_getdents_result<T>(
         &self,
         syscall: &SyscallInfo,
@@ -187,21 +207,22 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(())
     }
 
-    fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+    fn save_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
         event!(
-            Level::DEBUG,
-            "Checking metadata for: {:?}",
+            Level::INFO,
+            "Checking metadata for: {:?}/{:?}",
+            dirfd_path.to_string_lossy(),
             path.to_string_lossy()
         );
         let maybe_meta_path = self
             .handler
             .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
-                m.resolve_metadata_path(path)
+                m.resolve_metadata_path(path, dirfd_path)
             })?
             .flatten();
         if let Some(meta_path) = maybe_meta_path {
             event!(
-                Level::DEBUG,
+                Level::INFO,
                 "Writing metadata file: {:?}",
                 meta_path.to_string_lossy()
             );

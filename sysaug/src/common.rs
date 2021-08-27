@@ -15,6 +15,9 @@ pub enum SysAugError {
     #[error("Failed to parse waitpid result: {0}")]
     ParseWaitStatus(nix::Error),
 
+    #[error("Procfs error: {0}")]
+    Procfs(#[from] procfs::ProcfsError),
+
     #[error("Ptrace error: {0}")]
     Ptrace(#[from] ptrace::PtraceError),
 
@@ -35,6 +38,9 @@ pub enum SysAugError {
 
     #[error("Not a valid absolute path: {0}")]
     AbsolutePath(std::path::PathBuf),
+
+    #[error("Unable to find tracee's dirfd directory")]
+    DirfdReg,
 
     #[error("Interger conversion error")]
     IntoInt,
@@ -152,9 +158,11 @@ pub struct SyscallInfo {
     /// The type of augment that will handle this syscall
     pub augment: Augments,
 
-    /// Bitwise representation
+    /// Bitwise representation. Bit0: arg0 is path. Bit1 = arg1 ...
     pub path_positions: usize,
+    pub dirfd_position: Option<u8>,
     pub getdents_bits: Option<u8>,
+
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,
     /// true -> setuid/getuid

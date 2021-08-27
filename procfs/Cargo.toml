@@ -8,4 +8,6 @@ edition = "2018"
 
 [dependencies]
 flate2 = "1.0.19"
+nix = "0.20.1"
 thiserror = "1.0.25"
+tracing = "0.1.26"
