@@ -45,6 +45,7 @@ class TestRootFs(t.TestCase):
         self._setup_untar("01-rootfs-metadata-raw.tar")
 
         cmd = f"""
+        set -x;
         cd {STAGING};
         tar cf ../result.tar .
         """
@@ -58,14 +59,14 @@ class TestRootFs(t.TestCase):
 
     def test_rootfs_creates_metadata(self):
         self._setup_untar_in_container("01-rootfs-metadata-mounted.tar", rootfs=True)
-        ans = c.run_script(f"cd {STAGING}; find".encode(), rootfs=True)
+        ans = c.run_script(f"set -x; cd {STAGING}; find -exec ls -l {{}} \\; 1>&2".encode(), rootfs=True)
         self.assertEqual(ans.returncode, 0)
 
         cmd = f"""
         cd {STAGING};
         tar cf ../result.tar .
         """
-        ok = os.system(cmd.encode())
+        ok = os.system(cmd)
         self.assertEqual(ok, 0)
         with tarfile.open("tests/fixtures/01-rootfs-metadata-raw.tar") as expect_tar:
             expect_val = _sort_tar_info(map(_tar_info_minimal, expect_tar.getmembers()))

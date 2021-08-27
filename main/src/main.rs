@@ -60,9 +60,17 @@ pub enum CLIError {
     UnableToComplete,
 }
 
+fn init_logging() -> () {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init()
+        .expect("Unable to setup logging");
+}
+
 fn main() -> Result<(), CLIError> {
     // Initialize, parse args
-    tracing_subscriber::fmt::init();
+    init_logging();
     let args = CLIArgs::parse();
 
     if args.root && args.sudo {

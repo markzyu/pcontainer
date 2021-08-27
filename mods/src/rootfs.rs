@@ -96,11 +96,7 @@ impl Mod for RootfsMod {
         };
 
         let path_str = path.to_string_lossy();
-        event!(
-            Level::DEBUG,
-            "Checking metadata for: {:?}",
-            path_str
-        );
+        event!(Level::DEBUG, "Checking metadata for: {:?}", path_str);
         if !path.exists() {
             return Ok(action);
         }

@@ -9,6 +9,7 @@ def run(args, **kwargs):
 
 def run_script(script, timeout=5, **kwargs):
     cmd = _get_cmd(**kwargs)
+    print(f"cmd = {cmd}")
     return sub.run(
         cmd, 
         input=script,
