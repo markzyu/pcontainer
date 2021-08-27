@@ -123,6 +123,23 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         Ok(())
     }
 
+    pub fn call_first_mod<F, T>(
+        &self,
+        feature: ModFeature,
+        func: F,
+    ) -> Result<Option<T>, SysAugError>
+    where
+        F: Fn(&ModBox) -> Result<T, SysAugError>,
+    {
+        let mod_map = self.mods.read().or(Err(SysAugError::LockTraceeHandler))?;
+        if let Some(mods_) = mod_map.get(&feature) {
+            if let Some(m) = mods_.iter().nth(0) {
+                return Ok(Some(func(m)?));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn call_mods<F>(&self, feature: ModFeature, func: F) -> Result<(), SysAugError>
     where
         F: Fn(&ModBox) -> Result<ModAction, SysAugError>,

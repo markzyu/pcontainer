@@ -13,6 +13,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::{event, Level};
 
+const META_INIT: &'static str = "{}\n";
+
 struct SyscallInfo {
     /// Bitwise representation
     path_positions: usize,
@@ -139,6 +141,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
                 PathAction::Override(path) => path.as_path(),
                 _ => orig_path,
             };
+            self.save_metadata_for_file(notify_path)?;
             self.handler
                 .call_mods(mods::ModFeature::OnFileRealPath, |m| {
                     m.on_file_real_path(notify_path, syscall_num)
@@ -254,6 +257,36 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         }
 
         self.get_mod_path(syscall_num, orig_path, new_path, false)
+    }
+
+    fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+        event!(
+            Level::DEBUG,
+            "Checking metadata for: {:?}",
+            path.to_string_lossy()
+        );
+        let maybe_meta_path = self
+            .handler
+            .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
+                m.resolve_metadata_path(path)
+            })?
+            .flatten();
+        if let Some(meta_path) = maybe_meta_path {
+            event!(
+                Level::DEBUG,
+                "Writing metadata file: {:?}",
+                meta_path.to_string_lossy()
+            );
+            return match std::fs::write(meta_path, META_INIT) {
+                Ok(_) => Ok(()),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => Ok(()),
+                    std::io::ErrorKind::NotFound => Ok(()),
+                    _ => Err(SysAugError::WriteMetadata(e.to_string())),
+                },
+            };
+        }
+        Ok(())
     }
 
     // reverse: false = generating real paths on disk, true = generating fake paths from container
