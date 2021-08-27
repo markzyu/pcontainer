@@ -79,19 +79,27 @@ pub fn display_err<E: Display>(e: E) -> E {
 }
 
 pub trait AugmentSyscall {
-    fn before_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn valid_calls() -> &'static HashMap<usize, Augments>;
+    fn before_call(
+        &self,
+        regs: GenericPurposeRegs,
+        syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError>;
+    fn after_call(
+        &self,
+        regs: GenericPurposeRegs,
+        syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError>;
 
     fn dispatch(
         &self,
         last_syscall: &SyscallCounter,
         regs: GenericPurposeRegs,
     ) -> Result<(), SysAugError> {
+        let syscall_info = last_syscall.syscall_info.unwrap();
         if last_syscall.times % 2 == 1 {
-            self.before_call(regs)
+            self.before_call(regs, syscall_info)
         } else {
-            self.after_call(regs)
+            self.after_call(regs, syscall_info)
         }
     }
 }
@@ -102,19 +110,28 @@ pub enum Augments {
     Paths,
     Perms,
     Waitpid,
+    None,
+}
+
+impl Default for Augments {
+    fn default() -> Augments {
+        Augments::None
+    }
 }
 
 #[derive(Debug)]
 pub struct SyscallCounter {
     pub syscall: Option<usize>,
+    pub syscall_info: Option<&'static SyscallInfo>,
     pub times: u64,
 }
 
 impl SyscallCounter {
-    pub fn count(&mut self, syscall_name: usize) {
+    pub fn count(&mut self, syscall_name: usize, syscall_info: Option<&'static SyscallInfo>) {
         let curr_syscall = Some(syscall_name);
         if self.syscall != curr_syscall {
             self.syscall = curr_syscall;
+            self.syscall_info = syscall_info;
             self.times = 1;
         } else {
             self.times += 1;
@@ -124,7 +141,35 @@ impl SyscallCounter {
     pub fn new() -> SyscallCounter {
         SyscallCounter {
             syscall: None,
+            syscall_info: None,
             times: 0,
         }
     }
 }
+
+#[derive(Debug, Default)]
+pub struct SyscallInfo {
+    /// The type of augment that will handle this syscall
+    pub augment: Augments,
+
+    /// Bitwise representation
+    pub path_positions: usize,
+    pub getdents_bits: Option<u8>,
+    /// true -> setuid/setgid, false -> getuid/getgid
+    pub is_setter: bool,
+    /// true -> setuid/getuid
+    pub is_uid: bool,
+    pub is_gid: bool,
+
+    pub num: usize,
+    pub name: &'static str,
+}
+
+impl SyscallInfo {
+    pub fn name(&self) -> &str {
+        &self.name[10..]
+    }
+}
+
+// We promise not to modify this system call
+pub const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;

@@ -1,12 +1,10 @@
 use crate::common;
-use crate::common::SysAugError;
+use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
-use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -15,129 +13,20 @@ use tracing::{event, Level};
 
 const META_INIT: &'static str = "{}\n";
 
-struct SyscallInfo {
-    /// Bitwise representation
-    path_positions: usize,
-    getdents_bits: Option<u8>,
-}
-
-macro_rules! define_syscall {
-    ($name:expr, $path_positions:expr, $ans:ident) => {
-        $ans.insert(
-            $name as usize,
-            SyscallInfo {
-                path_positions: $path_positions,
-                getdents_bits: None,
-            },
-        )
-    };
-}
-
-macro_rules! define_getdents_syscall {
-    ($name:expr, $getdents_bits:expr, $ans:ident) => {
-        $ans.insert(
-            $name as usize,
-            SyscallInfo {
-                path_positions: 0,
-                getdents_bits: Some($getdents_bits),
-            },
-        )
-    };
-}
-
-lazy_static! {
-    static ref SYSCALL_INFOS: HashMap<usize, SyscallInfo> = {
-        let mut ans = HashMap::new();
-        define_syscall!(libc::SYS_acct, 1, ans);
-        define_syscall!(libc::SYS_chdir, 1, ans);
-        define_syscall!(libc::SYS_chroot, 1, ans);
-        define_syscall!(libc::SYS_getxattr, 1, ans);
-        define_syscall!(libc::SYS_listxattr, 1, ans);
-        define_syscall!(libc::SYS_removexattr, 1, ans);
-        define_syscall!(libc::SYS_setxattr, 1, ans);
-        define_syscall!(libc::SYS_statfs, 1, ans);
-        define_syscall!(libc::SYS_swapoff, 1, ans);
-        define_syscall!(libc::SYS_swapon, 1, ans);
-        define_syscall!(libc::SYS_truncate, 1, ans);
-        define_syscall!(libc::SYS_umount2, 1, ans);
-        define_syscall!(libc::SYS_lgetxattr, 1, ans);
-        define_syscall!(libc::SYS_llistxattr, 1, ans);
-        define_syscall!(libc::SYS_execve, 1, ans);
-
-        define_syscall!(libc::SYS_openat, 2, ans);
-        define_syscall!(libc::SYS_name_to_handle_at, 2, ans);
-        define_syscall!(libc::SYS_faccessat, 2, ans);
-        define_syscall!(libc::SYS_mkdirat, 2, ans);
-        define_syscall!(libc::SYS_utimensat, 2, ans);
-        define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
-        add_xplat_syscalls(&mut ans);
-        ans
-    };
-    static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
-        let mut ans = HashMap::new();
-        for key in SYSCALL_INFOS.keys() {
-            ans.insert(*key, common::Augments::Paths);
-        }
-        ans
-    };
-}
-
-#[cfg(target_arch = "arm")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_syscall!(libc::SYS_access, 1, ans);
-    define_syscall!(libc::SYS_chmod, 1, ans);
-    define_syscall!(libc::SYS_chown, 1, ans);
-    define_syscall!(libc::SYS_chown32, 1, ans);
-    define_syscall!(libc::SYS_mknod, 1, ans);
-    define_syscall!(libc::SYS_creat, 1, ans);
-    define_syscall!(libc::SYS_stat, 1, ans);
-    define_syscall!(libc::SYS_stat64, 1, ans);
-    define_syscall!(libc::SYS_statfs64, 1, ans);
-    define_syscall!(libc::SYS_truncate64, 1, ans);
-    define_syscall!(libc::SYS_uselib, 1, ans);
-    define_syscall!(libc::SYS_utimes, 1, ans);
-    define_syscall!(libc::SYS_open, 1, ans);
-    define_syscall!(libc::SYS_readlink, 1, ans);
-    define_syscall!(libc::SYS_lchown, 1, ans);
-    define_syscall!(libc::SYS_lchown32, 1, ans);
-    define_syscall!(libc::SYS_lstat, 1, ans);
-    define_syscall!(libc::SYS_lstat64, 1, ans);
-    define_syscall!(libc::SYS_unlink, 1, ans);
-    define_syscall!(libc::SYS_rmdir, 1, ans);
-    define_syscall!(libc::SYS_mkdir, 1, ans);
-}
-
-#[cfg(target_arch = "aarch64")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_syscall!(libc::SYS_newfstatat, 2, ans);
-}
-
-#[cfg(target_arch = "x86_64")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_syscall!(libc::SYS_newfstatat, 2, ans);
-    define_syscall!(libc::SYS_chmod, 1, ans);
-    define_syscall!(libc::SYS_utime, 1, ans);
-    define_syscall!(libc::SYS_utimes, 1, ans);
-    define_getdents_syscall!(libc::SYS_getdents, 32, ans);
-}
-
 pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
     pub handler: Arc<TraceeHandler<PtraceClient>>,
 }
 
 impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPaths<PtraceClient> {
-    fn valid_calls() -> &'static HashMap<usize, common::Augments> {
-        &*VALID_SYSCALLS
-    }
-
-    fn before_call(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn before_call(
+        &self,
+        mut regs: GenericPurposeRegs,
+        syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
-        let syscall_num = regs.syscall_num;
-        let syscall = SYSCALL_INFOS.get(&syscall_num).unwrap();
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
-
         let mut need_write_regs = false;
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
@@ -157,9 +46,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
 
             // Calculate path_action
             self.handler.call_mods(mods::ModFeature::OnFilePath, |m| {
-                m.on_file_path(orig_path, syscall_num)
+                m.on_file_path(orig_path, syscall)
             })?;
-            let path_action = self.calc_real_path(orig_path, syscall_num)?;
+            let path_action = self.calc_real_path(orig_path, syscall)?;
             let notify_path = match &path_action {
                 PathAction::Override(path) => path.as_path(),
                 _ => orig_path,
@@ -167,7 +56,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             self.save_metadata_for_file(notify_path)?;
             self.handler
                 .call_mods(mods::ModFeature::OnFileRealPath, |m| {
-                    m.on_file_real_path(notify_path, syscall_num)
+                    m.on_file_real_path(notify_path, syscall)
                 })?;
 
             // if path_action exists, overwrite registers
@@ -193,17 +82,18 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         Ok(())
     }
 
-    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(
+        &self,
+        regs: GenericPurposeRegs,
+        syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError> {
         let retval = regs.syscall_retval();
         if retval as isize <= 0 {
             return Ok(());
         }
-
-        let syscall_num = regs.syscall_num;
-        let syscall = SYSCALL_INFOS.get(&syscall_num).unwrap();
         match syscall.getdents_bits {
-            Some(32) => self.replace_getdents_result::<Dirent>(regs)?,
-            Some(64) => self.replace_getdents_result::<Dirent64>(regs)?,
+            Some(32) => self.replace_getdents_result::<Dirent>(syscall, regs)?,
+            Some(64) => self.replace_getdents_result::<Dirent64>(syscall, regs)?,
             _ => (),
         };
         Ok(())
@@ -214,7 +104,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     fn calc_real_path(
         &self,
         orig_path: &Path,
-        syscall_num: usize,
+        syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         let mut new_path = PathAction::None;
         let prefix_maybe = self
@@ -231,16 +121,19 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             }
         }
 
-        self.get_mod_path(syscall_num, orig_path, new_path, false)
+        self.get_mod_path(syscall, orig_path, new_path, false)
     }
 
-    fn replace_getdents_result<T>(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError>
+    fn replace_getdents_result<T>(
+        &self,
+        syscall: &SyscallInfo,
+        mut regs: GenericPurposeRegs,
+    ) -> Result<(), SysAugError>
     where
         T: IDirent + Clone + Send + 'static,
     {
         let addr = regs.arg1;
         let buf_size = regs.arg2 * 2;
-        let syscall_num = regs.syscall_num;
         let list_size = regs.syscall_retval();
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
@@ -250,10 +143,10 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
 
         let mut is_delete: Vec<bool> = Vec::new();
         for entry in dirents.iter_mut() {
-            event!(Level::INFO, "Intercepting {:?}", entry);
+            event!(Level::TRACE, "Intercepting {:?}", entry);
             let path_osstr: &OsStr = OsStrExt::from_bytes(&entry.get_name()[..]);
             let orig_path: &Path = Path::new(path_osstr);
-            let action = self.get_mod_path(syscall_num, orig_path, PathAction::None, true)?;
+            let action = self.get_mod_path(syscall, orig_path, PathAction::None, true)?;
             // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
             let delete = match &action {
                 PathAction::Override(override_path) => {
@@ -328,7 +221,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     // perspective
     fn get_mod_path(
         &self,
-        syscall_num: usize,
+        syscall: &SyscallInfo,
         orig_path: &Path,
         initial_override: PathAction,
         reverse: bool,
@@ -346,9 +239,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
                 _ => orig_path,
             };
             let new_override = if reverse {
-                m.override_file_fake_path(curr_path, syscall_num)?
+                m.override_file_fake_path(curr_path, syscall)?
             } else {
-                m.override_file_real_path(curr_path, syscall_num)?
+                m.override_file_real_path(curr_path, syscall)?
             };
             override_path.replace(if new_override == PathAction::None {
                 old_override

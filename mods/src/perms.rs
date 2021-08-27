@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{SysAugError, TraceeHandlerStates};
+use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -47,8 +47,12 @@ impl Mod for PermsMod {
         &*DEFAULT_LISTENER_SPEC
     }
 
-    fn on_file_real_path(&self, path: &Path, syscall: usize) -> Result<ModAction, SysAugError> {
-        if syscall == libc::SYS_execve as usize {
+    fn on_file_real_path(
+        &self,
+        path: &Path,
+        syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
+        if syscall.num == libc::SYS_execve as usize {
             if let Some(stat) = nix::sys::stat::stat(path).ok() {
                 let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
                 if setuid != 0 {
@@ -65,7 +69,7 @@ impl Mod for PermsMod {
         Ok(ModAction::None)
     }
 
-    fn on_setuid(&self, uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+    fn on_setuid(&self, uid: usize, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
         self.setuid(uid)?;
         Ok(ModAction::SkipSyscall(0))
     }

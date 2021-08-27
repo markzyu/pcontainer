@@ -5,7 +5,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModFeature, PathAction};
-use sysaug::{SysAugError, TraceeHandlerStates};
+use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -69,7 +69,7 @@ impl Mod for RootfsMod {
     fn override_file_real_path(
         &self,
         curr_path: &Path,
-        _syscall: usize,
+        _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         self.map_components(curr_path, |bytes| {
             if bytes == b"." {
@@ -109,7 +109,7 @@ impl Mod for RootfsMod {
     fn override_file_fake_path(
         &self,
         curr_path: &Path,
-        _syscall: usize,
+        _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         self.map_components(curr_path, |bytes| {
             if bytes == b"." {

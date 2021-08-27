@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{SysAugError, TraceeHandlerStates};
+use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -36,8 +36,8 @@ impl Mod for StraceMod {
         &*DEFAULT_LISTENER_SPEC
     }
 
-    fn on_file_path(&self, path: &Path, syscall: usize) -> Result<ModAction, SysAugError> {
-        if syscall == libc::SYS_execve as usize {
+    fn on_file_path(&self, path: &Path, syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
+        if syscall.num == libc::SYS_execve as usize {
             event!(
                 Level::INFO,
                 "Execve pid {:?} input Path: {:?}",
@@ -50,8 +50,12 @@ impl Mod for StraceMod {
         Ok(ModAction::None)
     }
 
-    fn on_file_real_path(&self, path: &Path, syscall: usize) -> Result<ModAction, SysAugError> {
-        if syscall == libc::SYS_execve as usize {
+    fn on_file_real_path(
+        &self,
+        path: &Path,
+        syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
+        if syscall.num == libc::SYS_execve as usize {
             event!(
                 Level::INFO,
                 "Execve pid {:?} real Path: {:?}",

@@ -1,5 +1,5 @@
 /// See "../mods/src/lib.rs" for more details
-use crate::common::SysAugError;
+use crate::common::{SysAugError, SyscallInfo};
 use lazy_static::lazy_static;
 use std::any::type_name;
 use std::collections::HashSet;
@@ -69,7 +69,11 @@ pub trait Mod {
 
     // Don't use this to override/change paths.
     // Instead, set TraceeHandlerStates.path_prefix, or use override_file_real_path
-    fn on_file_path(&self, _raw_path: &Path, _syscall: usize) -> Result<ModAction, SysAugError> {
+    fn on_file_path(
+        &self,
+        _raw_path: &Path,
+        _syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 
@@ -78,7 +82,7 @@ pub trait Mod {
     fn on_file_real_path(
         &self,
         _raw_path: &Path,
-        _syscall: usize,
+        _syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
@@ -86,7 +90,7 @@ pub trait Mod {
     fn override_file_real_path(
         &self,
         _curr_path: &Path,
-        _syscall: usize,
+        _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         Ok(PathAction::None)
     }
@@ -94,12 +98,12 @@ pub trait Mod {
     fn override_file_fake_path(
         &self,
         _curr_path: &Path,
-        _syscall: usize,
+        _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         Ok(PathAction::None)
     }
 
-    fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+    fn on_setuid(&self, _uid: usize, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 

@@ -4,10 +4,10 @@ use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     display_err, AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError,
-    SyscallCounter,
+    SyscallCounter, NO_MOD_SYSCALL,
 };
 use crate::mods::{ModAction, ModFeature};
-use lazy_static::lazy_static;
+use crate::syscalls::SYSCALL_INFOS;
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
@@ -40,21 +40,6 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
     pub signal_tracee: RwLock<Option<sys::signal::Signal>>,
     pub skip_syscall_retval: RwLock<Option<usize>>,
-}
-
-// We promise not to modify this system call
-const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;
-
-lazy_static! {
-    static ref SYSCALL_TO_AUG: HashMap<&'static usize, &'static Augments> = {
-        let mut ans = HashMap::new();
-        ans.extend(AugmentClone::<executor::LocalPtraceClient>::valid_calls());
-        ans.extend(AugmentPaths::<executor::LocalPtraceClient>::valid_calls());
-        ans.extend(AugmentPerms::<executor::LocalPtraceClient>::valid_calls());
-        ans.extend(AugmentWaitpid::<executor::LocalPtraceClient>::valid_calls());
-        ans.remove(&NO_MOD_SYSCALL);
-        ans
-    };
 }
 
 macro_rules! new_augment {
@@ -280,14 +265,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 // SYSTEM CALL
                 &WaitStatus::PtraceEvent(_, _, _) | &WaitStatus::PtraceSyscall(_) => {
                     let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-                    last_syscall.count(regs.syscall_num);
+                    let syscall_info = SYSCALL_INFOS.get(&regs.syscall_num);
+                    let syscall_name = syscall_info.map(|x| x.name()).unwrap_or("??");
+                    last_syscall.count(regs.syscall_num, syscall_info);
 
                     let _span = if last_syscall.times % 2 == 1 {
                         span!(
                             Level::DEBUG,
                             "before",
-                            "syscall {:?} args {:#x} {:#x} {:#x}",
-                            last_syscall.syscall,
+                            "syscall {} args {:#x} {:#x} {:#x}",
+                            syscall_name,
                             regs.arg0,
                             regs.arg1,
                             regs.arg2
@@ -296,8 +283,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         span!(
                             Level::DEBUG,
                             "after",
-                            "syscall {:?} args {:#x} {:#x} {:#x}",
-                            last_syscall.syscall,
+                            "syscall {} args {:#x} {:#x} {:#x}",
+                            syscall_name,
                             regs.arg0,
                             regs.arg1,
                             regs.arg2
@@ -306,13 +293,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     .entered();
                     event!(Level::TRACE, "syscall event");
 
-                    let which_aug = SYSCALL_TO_AUG.get(&regs.syscall_num);
+                    let which_aug = syscall_info.map(|x| &x.augment);
                     let _span2 = span!(
                         Level::INFO,
                         "sysaug",
-                        "{:?} {:?}",
-                        &regs.syscall_num,
-                        which_aug
+                        "{:?},{}",
+                        which_aug.unwrap_or(&Augments::None),
+                        syscall_name
                     )
                     .entered();
                     match which_aug {
@@ -320,7 +307,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs),
                         Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs),
                         Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs),
-                        None => Ok(()),
+                        _ => Ok(()),
                     }
                     .map_err(display_err)?;
                     self.maybe_skip_syscall(&mut last_syscall)?;
@@ -369,7 +356,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 event!(Level::INFO, "Attempting to skip syscall");
                 self.ptrace_client
                     .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
-                last_syscall.count(NO_MOD_SYSCALL);
+                last_syscall.count(NO_MOD_SYSCALL, None);
             }
         }
         Ok(())
