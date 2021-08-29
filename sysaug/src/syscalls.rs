@@ -132,27 +132,13 @@ lazy_static! {
 
 #[cfg(target_arch = "arm")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_paths_syscall!(libc::SYS_access, 1, ans);
-    define_paths_syscall!(libc::SYS_chmod, 1, ans);
-    define_paths_syscall!(libc::SYS_chown, 1, ans);
     define_paths_syscall!(libc::SYS_chown32, 1, ans);
-    define_paths_syscall!(libc::SYS_mknod, 1, ans);
-    define_paths_syscall!(libc::SYS_creat, 1, ans);
-    define_paths_syscall!(libc::SYS_stat, 1, ans);
     define_paths_syscall!(libc::SYS_stat64, 1, ans);
     define_paths_syscall!(libc::SYS_statfs64, 1, ans);
     define_paths_syscall!(libc::SYS_truncate64, 1, ans);
-    define_paths_syscall!(libc::SYS_uselib, 1, ans);
-    define_paths_syscall!(libc::SYS_utimes, 1, ans);
-    define_paths_syscall!(libc::SYS_open, 1, ans);
-    define_paths_syscall!(libc::SYS_readlink, 1, ans);
-    define_paths_syscall!(libc::SYS_lchown, 1, ans);
     define_paths_syscall!(libc::SYS_lchown32, 1, ans);
-    define_paths_syscall!(libc::SYS_lstat, 1, ans);
     define_paths_syscall!(libc::SYS_lstat64, 1, ans);
-    define_paths_syscall!(libc::SYS_unlink, 1, ans);
-    define_paths_syscall!(libc::SYS_rmdir, 1, ans);
-    define_paths_syscall!(libc::SYS_mkdir, 1, ans);
+    add_xplat_syscalls2(ans);
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -163,8 +149,26 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "x86_64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
-    define_paths_syscall!(libc::SYS_chmod, 1, ans);
     define_paths_syscall!(libc::SYS_utime, 1, ans);
-    define_paths_syscall!(libc::SYS_utimes, 1, ans);
     define_getdents_syscall!(libc::SYS_getdents, 32, ans);
+    add_xplat_syscalls2(ans);
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
+fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
+    define_paths_syscall!(libc::SYS_access, 1, ans);
+    define_paths_syscall!(libc::SYS_chmod, 1, ans);
+    define_paths_syscall!(libc::SYS_chown, 1, ans);
+    define_paths_syscall!(libc::SYS_mknod, 1, ans);
+    define_paths_syscall!(libc::SYS_creat, 1, ans);
+    define_paths_syscall!(libc::SYS_stat, 1, ans);
+    define_paths_syscall!(libc::SYS_uselib, 1, ans);
+    define_paths_syscall!(libc::SYS_utimes, 1, ans);
+    define_paths_syscall!(libc::SYS_open, 1, ans);
+    define_paths_syscall!(libc::SYS_readlink, 1, ans);
+    define_paths_syscall!(libc::SYS_lchown, 1, ans);
+    define_paths_syscall!(libc::SYS_lstat, 1, ans);
+    define_paths_syscall!(libc::SYS_unlink, 1, ans);
+    define_paths_syscall!(libc::SYS_rmdir, 1, ans);
+    define_paths_syscall!(libc::SYS_mkdir, 1, ans);
 }
