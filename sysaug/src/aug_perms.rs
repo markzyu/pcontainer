@@ -49,9 +49,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPerms<PtraceClient> {
         mut regs: GenericPurposeRegs,
         maybe_override_val: &RwLock<Option<usize>>,
     ) -> Result<(), SysAugError> {
-        let maybe_override = maybe_override_val
-            .read()
-            .or(Err(SysAugError::LockTraceeHandler))?;
+        let maybe_override = common::rwlock_read(maybe_override_val)?;
         if let Some(val) = &*maybe_override {
             regs.set_syscall_retval(*val);
             let pid = self.handler.pid;

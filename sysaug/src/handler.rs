@@ -3,8 +3,9 @@ use crate::aug_paths::AugmentPaths;
 use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
-    display_err, AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError,
-    SyscallCounter, NO_MOD_SYSCALL,
+    display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_take,
+    AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
+    NO_MOD_SYSCALL,
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::SYSCALL_INFOS;
@@ -88,8 +89,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         }
 
         let ans2 = Arc::clone(&ans);
-        let mut ans_mods = ans2.mods.write().or(Err(SysAugError::LockTraceeHandler))?;
-        *ans_mods = mod_map;
+        rwlock_replace(&ans2.mods, mod_map)?;
         Ok(ans)
     }
 
@@ -107,11 +107,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     pub fn skip_syscall(&self, retval: usize) -> Result<(), SysAugError> {
-        let mut maybe_retval = self
-            .skip_syscall_retval
-            .write()
-            .or(Err(SysAugError::LockTraceeHandler))?;
-        maybe_retval.replace(retval);
+        rwoption_replace(&self.skip_syscall_retval, retval)?;
         Ok(())
     }
 
@@ -123,7 +119,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     where
         F: Fn(&ModBox) -> Result<T, SysAugError>,
     {
-        let mod_map = self.mods.read().or(Err(SysAugError::LockTraceeHandler))?;
+        let mod_map = rwlock_read(&self.mods)?;
         if let Some(mods_) = mod_map.get(&feature) {
             if let Some(m) = mods_.iter().nth(0) {
                 return Ok(Some(func(m)?));
@@ -136,7 +132,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     where
         F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
     {
-        let mod_map = self.mods.read().or(Err(SysAugError::LockTraceeHandler))?;
+        let mod_map = rwlock_read(&self.mods)?;
         if let Some(mods_) = mod_map.get(&feature) {
             for m in mods_.iter() {
                 match func(m)? {
@@ -218,13 +214,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.set_ptrace_options()?;
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
         loop {
-            let maybe_signal = {
-                let mut lock = self
-                    .signal_tracee
-                    .write()
-                    .or(Err(SysAugError::LockTraceeHandler))?;
-                lock.take()
-            };
+            let maybe_signal = rwoption_take(&self.signal_tracee)?;
             self.ptrace_client
                 .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceSyscall)?;
@@ -250,11 +240,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         continue;
                     }
                     info!("Will deliver signal {:?} to {:?}", &signal, &pid);
-                    let mut maybe_signal = self
-                        .signal_tracee
-                        .write()
-                        .or(Err(SysAugError::LockTraceeHandler))?;
-                    maybe_signal.replace(signal);
+                    rwoption_replace(&self.signal_tracee, signal)?;
                 }
                 // Tracee Exits
                 &WaitStatus::PtraceEvent(pid2, _, libc::PTRACE_EVENT_EXIT) => {
@@ -329,10 +315,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     fn maybe_skip_syscall(&self, last_syscall: &mut SyscallCounter) -> Result<(), SysAugError> {
         let pid = self.pid;
         if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
-            let mut maybe_skip = self
-                .skip_syscall_retval
-                .write()
-                .or(Err(SysAugError::LockTraceeHandler))?;
+            let mut maybe_skip = rwlock_write(&self.skip_syscall_retval)?;
             event!(
                 Level::INFO,
                 "In NO_MOD_SYSCALL, times: {}",
@@ -355,10 +338,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     .execute(move || ptrace::setregs(pid, regs))??;
             }
         } else if last_syscall.times % 2 == 1 {
-            let maybe_skip = self
-                .skip_syscall_retval
-                .read()
-                .or(Err(SysAugError::LockTraceeHandler))?;
+            let maybe_skip = rwlock_read(&self.skip_syscall_retval)?;
             if maybe_skip.is_some() {
                 event!(Level::INFO, "Attempting to skip syscall");
                 self.ptrace_client
@@ -371,7 +351,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 }
 
 fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
-    let val = lock.read().or(Err(SysAugError::LockTraceeHandler))?;
+    let val = rwlock_read(lock)?;
     Ok(RwLock::new(val.clone()))
 }
 

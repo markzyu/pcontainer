@@ -108,13 +108,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         let mut new_path = PathAction::None;
-        let prefix_maybe = self
-            .handler
-            .states
-            .path_prefix
-            .read()
-            .or(Err(SysAugError::LockTraceeHandler))?;
-
+        let prefix_maybe = common::rwlock_read(&self.handler.states.path_prefix)?;
         if let Some(prefix) = prefix_maybe.as_ref() {
             if orig_path.is_absolute() {
                 let val = prefix.as_path().join(orig_path.strip_prefix("/").unwrap());

@@ -24,12 +24,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
             regs.arg1,
             regs.arg2
         );
-        let mut maybe_orig_regs = self
-            .handler
-            .orig_request_regs
-            .write()
-            .or(Err(SysAugError::LockTraceeHandler))?;
-        maybe_orig_regs.replace(regs);
+        common::rwoption_replace(&self.handler.orig_request_regs, regs)?;
         Ok(())
     }
 
@@ -54,11 +49,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
             .map_err(SysAugError::PtraceRead)? as i32;
         let child_status = sys::wait::WaitStatus::from_raw(child_pid, raw_child_status)
             .map_err(SysAugError::ParseWaitStatus)?;
-        let mut ignores = self
-            .handler
-            .ignore_sigstops
-            .write()
-            .or(Err(SysAugError::LockTraceeHandler))?;
+        let mut ignores = common::rwlock_write(&self.handler.ignore_sigstops)?;
         event!(Level::INFO, "Child status: {:?}", child_status);
         if !matches!(
             child_status,
@@ -71,13 +62,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         if ignores.remove(&child_pid) {
             // Restart system call with orignal arguments, stack pointer, etc.
             event!(Level::INFO, "restarting waitpid()");
-            let mut maybe_orig_regs = self
-                .handler
-                .orig_request_regs
-                .write()
-                .or(Err(SysAugError::LockTraceeHandler))?;
             let pid2 = self.handler.pid;
-            let orig_regs = maybe_orig_regs.take().unwrap();
+            let orig_regs = common::rwoption_take(&self.handler.orig_request_regs)?.unwrap();
             self.handler
                 .ptrace_client
                 .execute(move || ptrace::setregs(pid2, orig_regs))??;
