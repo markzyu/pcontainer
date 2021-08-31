@@ -57,8 +57,6 @@ class TestRootFs(t.TestCase):
 
     def test_rootfs_creates_metadata(self):
         self._setup_untar_in_container("01-rootfs-metadata-mounted.tar", rootfs=True)
-        ans = c.run_script(f"set -x; cd {STAGING}; find -exec ls -l {{}} \\; 1>&2".encode(), rootfs=True)
-        self.assertEqual(ans.returncode, 0)
 
         cmd = f"""
         cd {STAGING};

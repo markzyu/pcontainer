@@ -54,6 +54,9 @@ pub enum SysAugError {
     #[error("Failed to write metadata: {0}")]
     WriteMetadata(String),
 
+    #[error("Unexpected null value for {0}")]
+    NullValue(String),
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,
@@ -214,4 +217,12 @@ pub fn rwoption_replace<T>(lock: &RwLock<Option<T>>, val: T) -> Result<Option<T>
 pub fn rwoption_take<T>(lock: &RwLock<Option<T>>) -> Result<Option<T>, SysAugError> {
     let mut guard = rwlock_write(lock)?;
     Ok(guard.take())
+}
+
+#[macro_export]
+macro_rules! rwoption_take_ok {
+    ($name:expr) => {
+        crate::common::rwoption_take(&$name)?
+            .ok_or(SysAugError::NullValue(stringify!($name).to_string()))
+    };
 }

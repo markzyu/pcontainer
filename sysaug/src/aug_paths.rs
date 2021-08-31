@@ -3,6 +3,7 @@ use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
+use crate::rwoption_take_ok;
 use ptrace::GenericPurposeRegs;
 use std::cell::RefCell;
 use std::ffi::OsStr;
@@ -26,9 +27,11 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
-        let dirfd_path = self.get_dirfd_path(&regs, syscall)?;
+        // Translate paths from host namespace to tracee namespace
+        let save_dirfd_path = self.get_dirfd_path(&regs, syscall)?;
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
         let mut need_write_regs = false;
+        let mut save_paths: [Option<PathBuf>; 3] = Default::default();
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
@@ -45,22 +48,13 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             let path_osstr: &OsStr = OsStrExt::from_bytes(&path_bytes);
             let orig_path: &Path = Path::new(path_osstr);
 
-            // Calculate path_action
-            self.handler.call_mods(mods::ModFeature::OnFilePath, |m| {
-                m.on_file_path(orig_path, syscall)
-            })?;
+            // Calculate path_action, notify mods, and maybe update tracee
             let path_action = self.calc_real_path(orig_path, syscall)?;
-            let notify_path = match &path_action {
-                PathAction::Override(path) => path.as_path(),
-                _ => orig_path,
-            };
-            self.save_metadata_for_file(notify_path, &dirfd_path)?;
-            self.handler
-                .call_mods(mods::ModFeature::OnFileRealPath, |m| {
-                    m.on_file_real_path(notify_path, syscall)
-                })?;
-
-            // if path_action exists, overwrite registers
+            self.notify_mods(syscall, orig_path, &path_action)?;
+            save_paths[i] = Some(match &path_action {
+                PathAction::Override(new_path) => new_path.clone(),
+                _ => orig_path.into(),
+            });
             if let PathAction::Override(new_path_val) = path_action {
                 let addr = ptrace_client.execute(move || {
                     let final_bytes: &[u8] = new_path_val.as_os_str().as_bytes();
@@ -77,6 +71,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             need_write_regs = true;
         }
 
+        common::rwoption_replace(&self.handler.curr_paths, save_paths)?;
+        common::rwoption_replace(&self.handler.curr_dirfd_path, save_dirfd_path)?;
+
         if need_write_regs {
             ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
@@ -88,6 +85,14 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         regs: GenericPurposeRegs,
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
+        let paths = rwoption_take_ok!(self.handler.curr_paths)?;
+        let dirfd_path = rwoption_take_ok!(self.handler.curr_dirfd_path)?;
+        for maybe_path in paths.iter() {
+            if let Some(path) = maybe_path {
+                self.save_metadata_for_file(path, &dirfd_path)?;
+            }
+        }
+
         let retval = regs.syscall_retval();
         if retval as isize <= 0 {
             return Ok(());
@@ -102,6 +107,26 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
 }
 
 impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
+    fn notify_mods(
+        &self,
+        syscall: &SyscallInfo,
+        orig_path: &Path,
+        path_action: &PathAction,
+    ) -> Result<(), SysAugError> {
+        self.handler.call_mods(mods::ModFeature::OnFilePath, |m| {
+            m.on_file_path(orig_path, syscall)
+        })?;
+        let notify_path = match path_action {
+            PathAction::Override(path) => path.as_path(),
+            _ => orig_path,
+        };
+        self.handler
+            .call_mods(mods::ModFeature::OnFileRealPath, |m| {
+                m.on_file_real_path(notify_path, syscall)
+            })?;
+        Ok(())
+    }
+
     fn calc_real_path(
         &self,
         orig_path: &Path,
