@@ -120,6 +120,12 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             PathAction::Override(path) => path.as_path(),
             _ => orig_path,
         };
+        event!(
+            Level::INFO,
+            "Translate {} -> {}",
+            orig_path.to_string_lossy(),
+            notify_path.to_string_lossy()
+        );
         self.handler
             .call_mods(mods::ModFeature::OnFileRealPath, |m| {
                 m.on_file_real_path(notify_path, syscall)
@@ -228,7 +234,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
 
     fn save_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
         event!(
-            Level::INFO,
+            Level::TRACE,
             "Checking metadata for: {:?}/{:?}",
             dirfd_path.to_string_lossy(),
             path.to_string_lossy()
@@ -241,7 +247,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             .flatten();
         if let Some(meta_path) = maybe_meta_path {
             event!(
-                Level::INFO,
+                Level::TRACE,
                 "Writing metadata file: {:?}",
                 meta_path.to_string_lossy()
             );

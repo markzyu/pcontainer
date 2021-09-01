@@ -386,6 +386,12 @@ pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, Ptra
     let size = checked_mul(usizes.len(), *USIZE_SIZE)?;
     let regs = getregs(pid)?;
     let start: usize = checked_sub(regs.sp, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
+    event!(
+        Level::TRACE,
+        "Writing {} bytes to tracee stack, {:#x}",
+        bytes.len(),
+        start
+    );
     let mut addr = start;
     for value in usizes.iter() {
         write(pid, addr, *value)?;
@@ -625,6 +631,12 @@ pub fn structs_to_tracee_buffer<T>(
 where
     T: Sized + CStruct,
 {
+    event!(
+        Level::TRACE,
+        "Writing ~{} bytes to tracee buffer, {:#x}",
+        buffer_size,
+        addr
+    );
     let mut curr_addr = addr;
     let max_addr = checked_add(addr, buffer_size)?;
     let t_size = std::mem::size_of::<T>();
