@@ -140,6 +140,7 @@ pub struct SyscallCounter {
     pub syscall: Option<usize>,
     pub syscall_info: Option<&'static SyscallInfo>,
     pub times: u64,
+    pub total_times: u64,
 }
 
 impl SyscallCounter {
@@ -152,6 +153,7 @@ impl SyscallCounter {
         } else {
             self.times += 1;
         }
+        self.total_times += 1;
     }
 
     pub fn new() -> SyscallCounter {
@@ -159,6 +161,7 @@ impl SyscallCounter {
             syscall: None,
             syscall_info: None,
             times: 0,
+            total_times: 0,
         }
     }
 }

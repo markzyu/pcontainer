@@ -45,6 +45,10 @@ pub struct CLIArgs {
     /// Try to attach GDB to applications that crashed
     #[clap(long)]
     pub gdb: bool,
+
+    /// Attach GDB after X number of system calls
+    #[clap(long)]
+    pub gdb_at: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -156,6 +160,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
         gdb: args.gdb,
+        gdb_at: args.gdb_at,
     };
     let states = sysaug::TraceeHandlerStates {
         args: args2,

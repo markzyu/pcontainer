@@ -25,6 +25,7 @@ pub struct CLIArgs {
     pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
     pub gdb: bool,
+    pub gdb_at: Option<u64>,
 }
 
 pub struct TraceeHandlerStates {
@@ -246,15 +247,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     }
                     if signal == sys::signal::Signal::SIGSEGV && self.states.args.gdb {
                         info!("Tracee segfault. Starting gdb");
-                        self.ptrace_client
-                            .execute(move || {
-                                sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP)
-                            })?
-                            .map_err(SysAugError::GDBDetach)?;
-                        let mut cmd = std::process::Command::new("gdb");
-                        cmd.arg("-p").arg(pid.as_raw().to_string());
-                        let status = cmd.status().map_err(SysAugError::GDB)?;
-                        return Ok(status.code().unwrap_or(-1) as u8);
+                        return self.transfer_to_gdb();
                     }
                     info!("Will deliver signal {:?} to {:?}", &signal, &pid);
                     rwoption_replace(&self.signal_tracee, signal)?;
@@ -302,17 +295,20 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         )
                     }
                     .entered();
-                    event!(Level::TRACE, "syscall event");
-
                     let which_aug = syscall_info.map(|x| &x.augment);
                     let _span2 = span!(
                         Level::INFO,
                         "sysaug",
-                        "{:?},{}",
+                        "{:?},{},{}",
                         which_aug.unwrap_or(&Augments::None),
-                        syscall_name
+                        syscall_name,
+                        last_syscall.total_times
                     )
                     .entered();
+                    event!(Level::TRACE, "syscall event");
+                    if self.states.args.gdb_at == Some(last_syscall.total_times) {
+                        return self.transfer_to_gdb();
+                    }
                     match which_aug {
                         Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs),
                         Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs),
@@ -328,6 +324,17 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 }
             }
         }
+    }
+
+    fn transfer_to_gdb(&self) -> Result<u8, SysAugError> {
+        let pid = self.pid;
+        self.ptrace_client
+            .execute(move || sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP))?
+            .map_err(SysAugError::GDBDetach)?;
+        let mut cmd = std::process::Command::new("gdb");
+        cmd.arg("-p").arg(pid.as_raw().to_string());
+        let status = cmd.status().map_err(SysAugError::GDB)?;
+        Ok(status.code().unwrap_or(-1) as u8)
     }
 
     fn maybe_skip_syscall(&self, last_syscall: &mut SyscallCounter) -> Result<(), SysAugError> {
