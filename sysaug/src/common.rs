@@ -42,6 +42,12 @@ pub enum SysAugError {
     #[error("Unable to find tracee's dirfd directory")]
     DirfdReg,
 
+    #[error("Unable to detach tracee for gdb to attach: {0}")]
+    GDBDetach(nix::Error),
+
+    #[error("Unable to run gdb: {0}")]
+    GDB(std::io::Error),
+
     #[error("Interger conversion error")]
     IntoInt,
 

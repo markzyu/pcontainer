@@ -24,6 +24,7 @@ pub struct CLIArgs {
     pub chroot: Option<PathBuf>,
     pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
+    pub gdb: bool,
 }
 
 pub struct TraceeHandlerStates {
@@ -243,6 +244,18 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     if getsig_err == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
                         continue;
                     }
+                    if signal == sys::signal::Signal::SIGSEGV && self.states.args.gdb {
+                        info!("Tracee segfault. Starting gdb");
+                        self.ptrace_client
+                            .execute(move || {
+                                sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP)
+                            })?
+                            .map_err(SysAugError::GDBDetach)?;
+                        let mut cmd = std::process::Command::new("gdb");
+                        cmd.arg("-p").arg(pid.as_raw().to_string());
+                        let status = cmd.status().map_err(SysAugError::GDB)?;
+                        return Ok(status.code().unwrap_or(-1) as u8);
+                    }
                     info!("Will deliver signal {:?} to {:?}", &signal, &pid);
                     rwoption_replace(&self.signal_tracee, signal)?;
                 }
@@ -263,7 +276,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 &WaitStatus::PtraceEvent(_, _, _) | &WaitStatus::PtraceSyscall(_) => {
                     let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
                     let syscall_info = SYSCALL_INFOS.get(&regs.syscall_num);
-                    let syscall_name = syscall_info.map(|x| x.name()).unwrap_or("??");
+                    let syscall_num_str = regs.syscall_num.to_string();
+                    let syscall_name = syscall_info.map(|x| x.name()).unwrap_or(&syscall_num_str);
                     last_syscall.count(regs.syscall_num, syscall_info);
 
                     let _span = if last_syscall.times % 2 == 1 {
