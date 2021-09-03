@@ -63,6 +63,9 @@ pub enum PtraceError {
     #[error("Cannot write tracee memory: {0}")]
     Write(nix::Error),
 
+    #[error("Cannot write tracee memory of offset {0} (not aligned)")]
+    WriteOffsetNotAligned(usize),
+
     #[error("Failed to wait/waitpid for tracee: {0}")]
     Waitpid(nix::Error),
 
@@ -381,11 +384,21 @@ pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
     Ok(result)
 }
 
-pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, PtraceError> {
+/// This always writes to the same location of stack.
+/// So if you want to write multiple byte arrays, each one must have a different offset
+pub fn bytes_to_stack(
+    pid: nix::unistd::Pid,
+    offset: usize,
+    bytes: &[u8],
+) -> Result<usize, PtraceError> {
+    if offset % *USIZE_SIZE != 0 {
+        return Err(PtraceError::WriteOffsetNotAligned(offset));
+    }
     let usizes = bytes_to_usizes(bytes)?;
     let size = checked_mul(usizes.len(), *USIZE_SIZE)?;
     let regs = getregs(pid)?;
-    let start: usize = checked_sub(regs.sp, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
+    let total_offset = checked_add(offset, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
+    let start: usize = checked_sub(regs.sp, total_offset)?;
     event!(
         Level::TRACE,
         "Writing {} bytes to tracee stack, {:#x}",
@@ -398,6 +411,11 @@ pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, Ptra
         addr = checked_add(addr, *USIZE_SIZE)?;
     }
     Ok(start)
+}
+
+pub fn aligned(val: usize) -> Result<usize, PtraceError> {
+    let num_usizes = checked_div(checked_sub(checked_add(val, *USIZE_SIZE)?, 1)?, *USIZE_SIZE)?;
+    checked_mul(num_usizes, *USIZE_SIZE)
 }
 
 pub fn write(pid: nix::unistd::Pid, addr: usize, value: usize) -> Result<(), PtraceError> {
@@ -650,10 +668,7 @@ where
     if t_size < header_size {
         return Err(PtraceError::HeaderTooBig(header_size, t_size));
     }
-    let skip_header = checked_div(
-        checked_sub(checked_add(header_size, *USIZE_SIZE)?, 1)?,
-        *USIZE_SIZE,
-    )?;
+    let skip_header = checked_div(aligned(header_size)?, *USIZE_SIZE)?;
     let skip_header_bytes = checked_mul(skip_header, *USIZE_SIZE)?;
 
     for item in items.iter_mut() {
@@ -731,7 +746,7 @@ pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
 pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
     let mut regs = getregs(pid)?;
     event!(
-        Level::INFO,
+        Level::DEBUG,
         "Replacing syscall {} with {}",
         regs.syscall_num,
         val,

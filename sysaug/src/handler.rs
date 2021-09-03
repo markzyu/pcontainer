@@ -5,7 +5,7 @@ use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_take,
     AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
-    NO_MOD_SYSCALL,
+    NO_MOD_SYSCALL, PERMS_IDS_SIZE,
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::SYSCALL_INFOS;
@@ -28,11 +28,11 @@ pub struct CLIArgs {
     pub gdb_at: Option<u64>,
 }
 
+#[derive(Debug)]
 pub struct TraceeHandlerStates {
     pub args: CLIArgs,
     pub failed: AtomicBool,
-    pub override_uid: RwLock<Option<usize>>,
-    pub override_gid: RwLock<Option<usize>>,
+    pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
     pub path_prefix: RwLock<Option<PathBuf>>,
     pub pid: nix::unistd::Pid,
     pub root_pid: nix::unistd::Pid,
@@ -314,6 +314,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs),
                         Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs),
                         Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs),
+                        Some(Augments::Unimplemented) => Err(SysAugError::UnimplementedAugment),
                         _ => Ok(()),
                     }
                     .map_err(display_err)?;
@@ -353,7 +354,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
 
                 event!(
-                    Level::INFO,
+                    Level::DEBUG,
                     "Replacing syscall return value {} with {}",
                     regs.syscall_retval(),
                     retval
@@ -365,7 +366,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         } else if last_syscall.times % 2 == 1 {
             let maybe_skip = rwlock_read(&self.skip_syscall_retval)?;
             if maybe_skip.is_some() {
-                event!(Level::INFO, "Attempting to skip syscall");
+                event!(Level::DEBUG, "Attempting to skip syscall");
                 self.ptrace_client
                     .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
                 last_syscall.count(NO_MOD_SYSCALL, None);
@@ -385,8 +386,7 @@ impl Default for TraceeHandlerStates {
         TraceeHandlerStates {
             args: CLIArgs::default(),
             failed: AtomicBool::new(false),
-            override_uid: RwLock::default(),
-            override_gid: RwLock::default(),
+            perms_ids: RwLock::default(),
             path_prefix: RwLock::default(),
             pid: nix::unistd::Pid::from_raw(0),
             root_pid: nix::unistd::Pid::from_raw(0),
@@ -399,8 +399,7 @@ impl TraceeHandlerStates {
         Ok(TraceeHandlerStates {
             args: self.args.clone(),
             failed: AtomicBool::new(false),
-            override_uid: clone_locked(&self.override_uid)?,
-            override_gid: clone_locked(&self.override_gid)?,
+            perms_ids: clone_locked(&self.perms_ids)?,
             path_prefix: clone_locked(&self.path_prefix)?,
             pid: self.pid,
             root_pid: self.root_pid,

@@ -63,6 +63,9 @@ pub enum SysAugError {
     #[error("Unexpected null value for {0}")]
     NullValue(String),
 
+    #[error("Unimplemented system call")]
+    UnimplementedAugment,
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,
@@ -125,6 +128,7 @@ pub enum Augments {
     Perms,
     Waitpid,
     None,
+    Unimplemented,
 }
 
 impl Default for Augments {
@@ -166,6 +170,14 @@ impl SyscallCounter {
     }
 }
 
+// pub const PERMS_IDBIT_R: u8 = 1;
+// pub const PERMS_IDBIT_E: u8 = 2;
+// pub const PERMS_IDBIT_S: u8 = 4;
+// pub const PERMS_IDBIT_F: u8 = 8;
+/// True = uid, False = gid.
+pub const PERMS_IDBIT_UG: u8 = 16;
+pub const PERMS_IDS_SIZE: usize = 32;
+
 #[derive(Debug, Default)]
 pub struct SyscallInfo {
     /// The type of augment that will handle this syscall
@@ -175,14 +187,17 @@ pub struct SyscallInfo {
     pub path_positions: usize,
     pub dirfd_position: Option<u8>,
     pub getdents_bits: Option<u8>,
+    pub sets_file_perms: bool,
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,
-    /// true -> setuid/getuid
-    pub is_uid: bool,
-    pub is_gid: bool,
+    /// 0 -> see resf_bit, 3 -> reuid/regid, 7 -> resuid/resgid
+    ///     + check PERMS_IDBIT_UG for uid/gid
+    pub res_bits: u8,
+    /// 2 -> gid, 24 -> fsuid
+    pub resf_bit: u8,
 
-    pub num: usize,
+    pub num: libc::c_long,
     pub name: &'static str,
 }
 
@@ -216,16 +231,39 @@ pub fn rwlock_replace<T>(lock: &RwLock<T>, val: T) -> Result<(), SysAugError> {
     Ok(())
 }
 
-/// Useful for accessing Option-typed fields in TraceeHandlerStates
 pub fn rwoption_replace<T>(lock: &RwLock<Option<T>>, val: T) -> Result<Option<T>, SysAugError> {
     let mut guard = rwlock_write(lock)?;
     Ok(guard.replace(val))
 }
 
-/// Useful for accessing Option-typed fields in TraceeHandlerStates
+pub fn rwoption_setdefault<T>(lock: &RwLock<Option<T>>, val: T) -> Result<(), SysAugError> {
+    let mut guard = rwlock_write(lock)?;
+    if guard.is_none() {
+        guard.replace(val);
+    }
+    Ok(())
+}
+
 pub fn rwoption_take<T>(lock: &RwLock<Option<T>>) -> Result<Option<T>, SysAugError> {
     let mut guard = rwlock_write(lock)?;
     Ok(guard.take())
+}
+
+#[macro_export]
+macro_rules! rwoptions_replace {
+    ($name:expr, $idx:expr, $val:expr) => {{
+        $name.write().or(Err(SysAugError::LockTraceeHandler))?[$idx].replace($val)
+    }};
+}
+
+#[macro_export]
+macro_rules! rwoptions_setdefault {
+    ($name:expr, $idx:expr, $val:expr) => {{
+        let mut guard = $name.write().or(Err(SysAugError::LockTraceeHandler))?;
+        if guard[$idx].is_none() {
+            guard[$idx].replace($val);
+        }
+    }};
 }
 
 #[macro_export]

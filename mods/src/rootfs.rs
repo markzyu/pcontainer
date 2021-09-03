@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use sysaug::mods::{Mod, ModFeature, PathAction};
+use sysaug::mods::{Mod, ModAction, ModFeature, PathAction};
 use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 
 lazy_static! {
@@ -12,6 +12,7 @@ lazy_static! {
         let mut ans = HashSet::new();
         ans.insert(ModFeature::OverrideFileRealPath);
         ans.insert(ModFeature::OverrideFileFakePath);
+        ans.insert(ModFeature::OnFileRealPath);
         ans.insert(ModFeature::ResolveMetadataPath);
         ans
     };
@@ -137,5 +138,16 @@ impl Mod for RootfsMod {
             }
             PathAction::None
         })
+    }
+
+    fn on_file_real_path(
+        &self,
+        _raw_path: &Path,
+        syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
+        if syscall.sets_file_perms {
+            return Ok(ModAction::SkipSyscall(0));
+        }
+        Ok(ModAction::None)
     }
 }

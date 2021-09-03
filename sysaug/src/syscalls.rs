@@ -9,7 +9,7 @@ macro_rules! define_syscall {
             SyscallInfo {
                 augment: $augment,
                 name: stringify!($name),
-                num: $name as usize,
+                num: $name,
                 ..Default::default()
             },
         )
@@ -17,16 +17,16 @@ macro_rules! define_syscall {
 }
 
 macro_rules! define_perms_syscall {
-    ($name:expr, $is_setter:expr, $type:expr, $ans:ident) => {
+    ($name:expr, $is_setter:expr, $res_bits:expr, $resf_bit:expr, $ans:ident) => {
         $ans.insert(
             $name as usize,
             SyscallInfo {
                 augment: Augments::Perms,
                 name: stringify!($name),
-                num: $name as usize,
+                num: $name,
                 is_setter: $is_setter,
-                is_uid: $type == "uid",
-                is_gid: $type == "gid",
+                res_bits: $res_bits,
+                resf_bit: $resf_bit,
                 ..Default::default()
             },
         )
@@ -40,7 +40,7 @@ macro_rules! define_paths_syscall {
             SyscallInfo {
                 augment: Augments::Paths,
                 name: stringify!($name),
-                num: $name as usize,
+                num: $name,
                 path_positions: $path_positions,
                 getdents_bits: None,
                 ..Default::default()
@@ -56,10 +56,28 @@ macro_rules! define_dirfd_syscall {
             SyscallInfo {
                 augment: Augments::Paths,
                 name: stringify!($name),
-                num: $name as usize,
+                num: $name,
                 path_positions: $path_positions,
                 dirfd_position: Some($dirfd_position),
                 getdents_bits: None,
+                ..Default::default()
+            },
+        )
+    };
+}
+
+macro_rules! define_dirfd_setperms_syscall {
+    ($name:expr, $path_positions:expr, $dirfd_position:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name,
+                path_positions: $path_positions,
+                dirfd_position: Some($dirfd_position),
+                getdents_bits: None,
+                sets_file_perms: true,
                 ..Default::default()
             },
         )
@@ -73,7 +91,7 @@ macro_rules! define_getdents_syscall {
             SyscallInfo {
                 augment: Augments::Paths,
                 name: stringify!($name),
-                num: $name as usize,
+                num: $name,
                 path_positions: 0,
                 getdents_bits: Some($getdents_bits),
                 ..Default::default()
@@ -89,19 +107,20 @@ lazy_static! {
         let mut ans = HashMap::new();
         define_syscall!(libc::SYS_clone, Augments::Clone, ans);
         define_syscall!(libc::SYS_wait4, Augments::Waitpid, ans);
-        define_perms_syscall!(libc::SYS_getuid, false, "uid", ans);
-        define_perms_syscall!(libc::SYS_geteuid, false, "uid", ans);
-        define_perms_syscall!(libc::SYS_setuid, true, "uid", ans);
-        define_perms_syscall!(libc::SYS_getgid, false, "gid", ans);
-        // define_perms_syscall!(libc::SYS_getegid, false, "gid", ans);
-        define_perms_syscall!(libc::SYS_setgid, true, "gid", ans);
-        define_perms_syscall!(libc::SYS_setgroups, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setregid, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setreuid, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setresgid, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setresuid, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setfsgid, true, "unknown", ans);
-        define_perms_syscall!(libc::SYS_setfsuid, true, "unknown", ans);
+        define_perms_syscall!(libc::SYS_getuid, false, 0, 17, ans);
+        define_perms_syscall!(libc::SYS_geteuid, false, 0, 18, ans);
+        define_perms_syscall!(libc::SYS_getgid, false, 0, 1, ans);
+        define_perms_syscall!(libc::SYS_getegid, false, 0, 2, ans);
+        define_perms_syscall!(libc::SYS_getgroups, false, 0, 0, ans);
+        define_perms_syscall!(libc::SYS_setuid, true, 0, 18, ans);
+        define_perms_syscall!(libc::SYS_setgid, true, 0, 2, ans);
+        define_perms_syscall!(libc::SYS_setgroups, true, 0, 0, ans);
+        define_perms_syscall!(libc::SYS_setregid, true, 3, 0, ans);
+        define_perms_syscall!(libc::SYS_setreuid, true, 19, 0, ans);
+        define_perms_syscall!(libc::SYS_setresgid, true, 7, 0, ans);
+        define_perms_syscall!(libc::SYS_setresuid, true, 23, 0, ans);
+        define_perms_syscall!(libc::SYS_setfsgid, true, 0, 8, ans);
+        define_perms_syscall!(libc::SYS_setfsuid, true, 0, 24, ans);
         define_paths_syscall!(libc::SYS_acct, 1, ans);
         define_paths_syscall!(libc::SYS_chdir, 1, ans);
         define_paths_syscall!(libc::SYS_chroot, 1, ans);
@@ -121,6 +140,8 @@ lazy_static! {
         define_dirfd_syscall!(libc::SYS_openat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
+        define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, ans);
+        define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
@@ -149,6 +170,7 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "x86_64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
+    define_paths_syscall!(libc::SYS_rename, 3, ans);
     define_paths_syscall!(libc::SYS_utime, 1, ans);
     define_getdents_syscall!(libc::SYS_getdents, 32, ans);
     add_xplat_syscalls2(ans);

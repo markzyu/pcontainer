@@ -11,7 +11,7 @@ pub enum ModFeature {
     OnFileRealPath,
     OnChroot,
     OnCloneComplete,
-    OnSetuid,
+    OnSetid,
     OnTraceeStartup,
     OverrideFileFakePath,
     OverrideFileRealPath,
@@ -107,7 +107,12 @@ pub trait Mod {
         Ok(PathAction::None)
     }
 
-    fn on_setuid(&self, _uid: usize, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
+    fn on_setid(
+        &self,
+        _which: u8,
+        _val: usize,
+        _syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 

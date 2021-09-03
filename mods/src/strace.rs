@@ -37,7 +37,7 @@ impl Mod for StraceMod {
     }
 
     fn on_file_path(&self, path: &Path, syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
-        if syscall.num == libc::SYS_execve as usize {
+        if syscall.num == libc::SYS_execve {
             event!(
                 Level::INFO,
                 "Execve pid {:?} input Path: {:?}",
@@ -55,7 +55,7 @@ impl Mod for StraceMod {
         path: &Path,
         syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
-        if syscall.num == libc::SYS_execve as usize {
+        if syscall.num == libc::SYS_execve {
             event!(
                 Level::INFO,
                 "Execve pid {:?} real Path: {:?}",

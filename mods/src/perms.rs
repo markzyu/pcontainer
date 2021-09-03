@@ -4,15 +4,28 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{rwoption_replace, SysAugError, SyscallInfo, TraceeHandlerStates};
+use sysaug::{rwoptions_replace, SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
         ans.insert(ModFeature::OnFileRealPath);
-        ans.insert(ModFeature::OnSetuid);
+        ans.insert(ModFeature::OnSetid);
         ans
+    };
+}
+
+macro_rules! exec_setid {
+    ($perms_ids:expr, $which:expr, $path:expr, $id: expr) => {
+        event!(
+            Level::INFO,
+            "Execve real path: {:?} set {} to {:?}",
+            $path,
+            $which,
+            $id,
+        );
+        rwoptions_replace!(&$perms_ids, $which as usize, $id as usize);
     };
 }
 
@@ -23,11 +36,6 @@ pub struct PermsMod {
 impl PermsMod {
     pub fn new_box(states: Arc<TraceeHandlerStates>) -> Box<dyn Mod> {
         Box::new(PermsMod { states })
-    }
-
-    fn setuid(&self, uid: usize) -> Result<(), SysAugError> {
-        rwoption_replace(&self.states.override_uid, uid)?;
-        Ok(())
     }
 }
 
@@ -47,25 +55,34 @@ impl Mod for PermsMod {
         path: &Path,
         syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
-        if syscall.num == libc::SYS_execve as usize {
+        if syscall.num == libc::SYS_execve {
             if let Some(stat) = nix::sys::stat::stat(path).ok() {
                 let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
+                let setgid = stat.st_mode & nix::sys::stat::Mode::S_ISGID.bits();
                 if setuid != 0 {
-                    event!(
-                        Level::INFO,
-                        "Execve real path: {:?} setuid to {:?}",
-                        path,
-                        stat.st_uid,
-                    );
-                    self.setuid(stat.st_uid as usize)?;
+                    exec_setid!(self.states.perms_ids, 18, path, stat.st_uid);
+                }
+                if setgid != 0 {
+                    exec_setid!(self.states.perms_ids, 2, path, stat.st_gid);
                 }
             }
         }
         Ok(ModAction::None)
     }
 
-    fn on_setuid(&self, uid: usize, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
-        self.setuid(uid)?;
+    fn on_setid(
+        &self,
+        which: u8,
+        uid: usize,
+        _syscall: &SyscallInfo,
+    ) -> Result<ModAction, SysAugError> {
+        event!(
+            Level::INFO,
+            "Setting {:b} id to {}",
+            which,
+            uid as libc::uid_t
+        );
+        rwoptions_replace!(&self.states.perms_ids, which as usize, uid);
         Ok(ModAction::SkipSyscall(0))
     }
 }
