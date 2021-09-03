@@ -12,6 +12,12 @@ Mods are dynamic but sysaug isn't.
 - `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
 - `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
 
+## Why does everything fail with either SIGSEGV, or linker errors?
+
+Please try again with a different chroot / rootfs. Currently pcontainer doesn't update elf binaries' interpreter path. And some rootfs uses a dramatically different interpreter than the one provided by your HOST OS.
+
+This bug is being tracked in issue #12
+
 ## What's a good performance overhead?
 
 Tested on Android Termux:
