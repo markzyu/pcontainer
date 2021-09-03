@@ -234,7 +234,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             match &status {
                 // Decide whether to deliver signal to tracee
                 &WaitStatus::Stopped(pid2, signal) => {
-                    event!(Level::INFO, "child stopped, status {:?}", &status);
+                    event!(Level::DEBUG, "child stopped, status {:?}", &status);
                     if pid2 != pid || signal == sys::signal::Signal::SIGTRAP {
                         continue;
                     }
@@ -342,7 +342,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
             let mut maybe_skip = rwlock_write(&self.skip_syscall_retval)?;
             event!(
-                Level::INFO,
+                Level::DEBUG,
                 "In NO_MOD_SYSCALL, times: {}",
                 &last_syscall.times,
             );

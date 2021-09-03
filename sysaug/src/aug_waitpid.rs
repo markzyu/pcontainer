@@ -19,7 +19,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
         event!(
-            Level::INFO,
+            Level::DEBUG,
             "before waitpid({}, {:x}, {:x})",
             regs.arg0 as isize,
             regs.arg1,
@@ -36,7 +36,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
     ) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         let retval = regs.syscall_retval() as isize;
-        event!(Level::INFO, "after waitpid() = {}", retval);
+        event!(Level::DEBUG, "after waitpid() = {}", retval);
         if retval <= 0 {
             return Ok(());
         }
@@ -51,7 +51,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         let child_status = sys::wait::WaitStatus::from_raw(child_pid, raw_child_status)
             .map_err(SysAugError::ParseWaitStatus)?;
         let mut ignores = common::rwlock_write(&self.handler.ignore_sigstops)?;
-        event!(Level::INFO, "Child status: {:?}", child_status);
+        event!(Level::DEBUG, "Child status: {:?}", child_status);
         if !matches!(
             child_status,
             sys::wait::WaitStatus::Stopped(_, sys::signal::Signal::SIGSTOP)
@@ -62,7 +62,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
 
         if ignores.remove(&child_pid) {
             // Restart system call with orignal arguments, stack pointer, etc.
-            event!(Level::INFO, "restarting waitpid()");
+            event!(Level::DEBUG, "restarting waitpid()");
             let pid2 = self.handler.pid;
             let orig_regs = rwoption_take_ok!(self.handler.orig_request_regs)?;
             self.handler

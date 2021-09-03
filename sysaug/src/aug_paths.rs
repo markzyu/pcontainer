@@ -121,7 +121,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             _ => orig_path,
         };
         event!(
-            Level::INFO,
+            Level::DEBUG,
             "Translate {} -> {}",
             orig_path.to_string_lossy(),
             notify_path.to_string_lossy()
@@ -184,7 +184,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         let ptrace_client = &self.handler.ptrace_client;
         let mut dirents: Vec<T> = ptrace_client
             .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size))??;
-        event!(Level::INFO, "Intercepting {} dir entries", dirents.len());
+        event!(Level::DEBUG, "Intercepting {} dir entries", dirents.len());
 
         let mut is_delete: Vec<bool> = Vec::new();
         for entry in dirents.iter_mut() {
@@ -219,7 +219,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         let num_bytes = ptrace_client
             .execute(move || ptrace::structs_to_tracee_buffer(pid, addr, buf_size, dirents, 2))??;
         event!(
-            Level::INFO,
+            Level::DEBUG,
             "Returning {} dir entries, {} bytes",
             num_dirents,
             num_bytes
