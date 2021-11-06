@@ -63,6 +63,9 @@ pub enum SysAugError {
     #[error("Unexpected null value for {0}")]
     NullValue(String),
 
+    #[error("Unable to open elf file: {0}")]
+    ReadElf(std::io::Error),
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,
