@@ -4,7 +4,7 @@ use crate::handler::TraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
 use crate::rwoption_take_ok;
-use ptrace::GenericPurposeRegs;
+use ptrace::{GenericPurposeRegs, USIZE_SIZE};
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::io::{Read, Seek};
@@ -34,6 +34,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 3] = Default::default();
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
+            if syscall.num == libc::SYS_execve as usize {
+                continue;
+            }
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
                 continue;
@@ -130,16 +133,25 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         let arg1 = regs.arg1;
         let path_bytes =
             ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg0))??;
-        let argv_bytes =
-            ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg1))??;
-        let orig_path_buf = self.path_from_bytes(path_bytes)?;
-        if !orig_path_buf.exists() {
+        let argv_bytes = ptrace_client
+            .execute(move || ptrace::read_bytes_until_num_zeroes(pid, arg1, *USIZE_SIZE))??;
+
+        // Translate elf path to real path
+        let elf_path_buf = self.path_from_bytes(path_bytes)?;
+        let mut new_elf_path = elf_path_buf;
+        {
+            let path_action = self.calc_real_path(&new_elf_path, syscall)?;
+            self.notify_mods(syscall, &new_elf_path, &path_action)?;
+            if let PathAction::Override(new_path_val) = path_action {
+                new_elf_path = new_path_val;
+            }
+        }
+        if !new_elf_path.exists() {
             return Ok(false);
         }
 
-        event!(Level::DEBUG, "ELF file: {:?}", orig_path_buf,);
-        let mut file =
-            std::fs::File::open(orig_path_buf.as_path()).map_err(SysAugError::ReadElf)?;
+        event!(Level::DEBUG, "ELF file: {:?}", new_elf_path,);
+        let mut file = std::fs::File::open(new_elf_path.as_path()).map_err(SysAugError::ReadElf)?;
         if let Ok(elf_file) = elf::File::open_stream(&mut file) {
             let header = elf_file
                 .phdrs
@@ -157,19 +169,37 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
                 .map_err(SysAugError::ReadElf)?;
 
             // Calculate real path of interpreter
-            let elf_path_buf = self.path_from_bytes(buf)?;
-            let path_action = self.calc_real_path(&elf_path_buf, syscall)?;
-            self.notify_mods(syscall, &elf_path_buf, &path_action)?;
-            let mut new_path = elf_path_buf;
+            let interp_path_buf = self.path_from_bytes(buf)?;
+            let path_action = self.calc_real_path(&interp_path_buf, syscall)?;
+            self.notify_mods(syscall, &interp_path_buf, &path_action)?;
+            let mut new_interp_path = interp_path_buf;
             if let PathAction::Override(new_path_val) = path_action {
-                new_path = new_path_val;
+                new_interp_path = new_path_val;
             }
-
             event!(
                 Level::INFO,
-                "ELF interpreter: {}",
-                new_path.to_string_lossy(),
+                "Setting ELF interpreter = {}",
+                new_interp_path.to_string_lossy(),
             );
+
+            // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
+            // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
+            let interp_str_size = new_interp_path.as_os_str().as_bytes().len() + *USIZE_SIZE;
+            let interp_addr = ptrace_client.execute(move || {
+                let final_bytes: &[u8] = new_interp_path.as_os_str().as_bytes();
+                ptrace::bytes_to_stack(pid, final_bytes)
+            })??;
+            let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
+            let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
+            new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
+            new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
+            new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
+            new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
+            let new_argv_addr = ptrace_client.execute(move || {
+                ptrace::bytes_to_stack_with_skip(pid, &new_argv, interp_str_size)
+            })??;
+            regs.arg0 = interp_addr;
+            regs.arg1 = new_argv_addr;
             return Ok(true);
         }
         Ok(false)
