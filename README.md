@@ -1,3 +1,16 @@
+## Why?
+
+I developed this project to solve the problem that FOSS developers cannot easily install an Open Source Linux Distro onto their phones if they want to develop software, or teach software development, on the go.
+
+Here is a diagram explaining why the problem exists:
+
+![](Why1.png)
+
+My solution is not that different from proot. In fact, it's inspiried by proot -- we can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. However, there are a few differences:
+
+1. This solution is multithreaded, while proot itself is single threaded.
+2. This solution is designed to run Linux Distros on phones, while proot itself needs patches to run on phones.
+
 ## Project structure
 
 ![project structure](ProjectStructure.png)

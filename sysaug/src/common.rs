@@ -66,6 +66,9 @@ pub enum SysAugError {
     #[error("Unimplemented system call")]
     UnimplementedAugment,
 
+    #[error("Unable to read binary file: {0}")]
+    ReadBin(std::io::Error),
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,

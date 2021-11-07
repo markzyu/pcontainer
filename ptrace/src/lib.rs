@@ -13,7 +13,7 @@ const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 const MAX_STRUCT_SIZE: usize = 2048;
 
 lazy_static! {
-    static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
+    pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 }
 
 #[derive(Debug, Error)]
@@ -586,19 +586,33 @@ pub fn read_bytes(
     Ok(())
 }
 
-pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, PtraceError> {
+pub fn read_bytes_until_num_zeroes(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    n0: usize,
+) -> Result<Vec<u8>, PtraceError> {
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
+    let mut total_zeroes = 0;
     loop {
         let machine_word = read(pid, curr_addr)?;
         for byte in machine_word.to_ne_bytes().iter() {
             if *byte == b'\0' {
-                return Ok(result);
+                total_zeroes += 1;
+                if total_zeroes >= n0 {
+                    return Ok(result);
+                }
+            } else {
+                total_zeroes = 0;
             }
             result.push(*byte);
         }
         curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
+}
+
+pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, PtraceError> {
+    read_bytes_until_num_zeroes(pid, addr, 1)
 }
 
 /// Write multiple C syscall structures back to tracee memory.
