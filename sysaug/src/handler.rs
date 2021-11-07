@@ -80,7 +80,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ignore_sigstops: RwLock::default(),
             signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
             skip_syscall_retval: RwLock::default(),
-            states: Arc::new((*default_states).clone()?),
+            states: Arc::new((*default_states).try_clone()?),
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();
@@ -128,7 +128,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     {
         let mod_map = rwlock_read(&self.mods)?;
         if let Some(mods_) = mod_map.get(&feature) {
-            if let Some(m) = mods_.iter().nth(0) {
+            if let Some(m) = mods_.get(0) {
                 return Ok(Some(func(m)?));
             }
         }
@@ -188,7 +188,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         callback: F,
     ) -> thread::JoinHandle<Option<u8>>
     where
-        F: FnOnce() -> () + Send + 'static,
+        F: FnOnce() + Send + 'static,
     {
         thread::spawn(move || {
             let self2 = Arc::clone(&self);
@@ -398,7 +398,7 @@ impl Default for TraceeHandlerStates {
 }
 
 impl TraceeHandlerStates {
-    pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
+    pub fn try_clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
             args: self.args.clone(),
             failed: AtomicBool::new(false),

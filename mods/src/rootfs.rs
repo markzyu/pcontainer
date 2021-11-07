@@ -94,7 +94,7 @@ impl Mod for RootfsMod {
         let path = dirfd_path.join(rel_path);
         let path_str = path.to_string_lossy();
         let args = &self.states.args;
-        let maybe_rootfs = args.rootfs.as_ref().or(args.chroot.as_ref());
+        let maybe_rootfs = args.rootfs.as_ref().or_else(|| args.chroot.as_ref());
         if !path.exists() {
             return Ok(None);
         }
@@ -110,7 +110,7 @@ impl Mod for RootfsMod {
         } else {
             let filename = path
                 .file_name()
-                .ok_or(self.err("FailedToReadFilename", &path_str))?;
+                .ok_or_else(|| self.err("FailedToReadFilename", &path_str))?;
             let mut new_filename = OsString::from(".");
             new_filename.push(filename);
             Ok(Some(path.with_file_name(new_filename)))

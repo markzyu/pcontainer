@@ -82,13 +82,11 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             let header = elf_file
                 .phdrs
                 .iter()
-                .filter(|x| x.progtype.0 == libc::PT_INTERP)
-                .nth(0)
+                .find(|x| x.progtype.0 == libc::PT_INTERP)
                 .unwrap();
 
             // READ interpreter path FROM header.offset FOR header.filesz BYTES
-            let mut buf: Vec<u8> = Vec::with_capacity(header.filesz as usize);
-            buf.resize(header.filesz as usize, 0);
+            let mut buf: Vec<u8> = vec![0; header.filesz as usize];
             file.seek(std::io::SeekFrom::Start(header.offset))
                 .map_err(SysAugError::ReadBin)?;
             file.read_exact(buf.as_mut_slice())
@@ -130,7 +128,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         } else if let Some(shebang) = self.parse_shebang(&mut file)? {
             event!(Level::DEBUG, "Script file: {:?}", new_elf_path);
             let parts: Vec<&str> = shebang[2..].split(' ').collect();
-            if parts.len() > 2 || parts.len() == 0 {
+            if parts.len() > 2 || parts.is_empty() {
                 return Ok(false);
             }
             let (part0, maybe_part1) = {
@@ -167,7 +165,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             })??;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
-            return self.expand_exec_with_parser(regs, &syscall);
+            return self.expand_exec_with_parser(regs, syscall);
         }
         Ok(false)
     }

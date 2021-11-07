@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{event, Level};
 
-const META_INIT: &'static str = "{}\n";
+const META_INIT: &str = "{}\n";
 
 pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
     pub handler: Arc<TraceeHandler<PtraceClient>>,
@@ -67,7 +67,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
 
         // Handle getdents (make the buffer seem smaller)
         if syscall.getdents_bits.is_some() {
-            regs.arg2 = regs.arg2 / 2;
+            regs.arg2 /= 2;
             need_write_regs = true;
         }
 
@@ -87,10 +87,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
     ) -> Result<(), SysAugError> {
         let paths = rwoption_take_ok!(self.handler.curr_paths)?;
         let dirfd_path = rwoption_take_ok!(self.handler.curr_dirfd_path)?;
-        for maybe_path in paths.iter() {
-            if let Some(path) = maybe_path {
-                self.save_metadata_for_file(path, &dirfd_path)?;
-            }
+        for path in paths.iter().flatten() {
+            self.save_metadata_for_file(path, &dirfd_path)?;
         }
 
         let retval = regs.syscall_retval();
@@ -147,7 +145,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         for entry in dirents.iter_mut() {
             event!(Level::TRACE, "Intercepting {:?}", entry);
             let orig_path_buf = path_from_bytes(entry.get_name().to_vec())?;
-            let orig_path: &Path = &(orig_path_buf.as_path());
+            let orig_path: &Path = orig_path_buf.as_path();
             let action = get_mod_path(&self.handler, syscall, orig_path, PathAction::None, true)?;
             // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
             let delete = match &action {
@@ -183,7 +181,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         );
 
         // Restore buffer size value so program doesn't reuse wrong values crash
-        regs.arg2 = regs.arg2 * 2;
+        regs.arg2 *= 2;
         regs.set_syscall_retval(num_bytes);
         ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         Ok(())
@@ -277,7 +275,7 @@ impl ptrace::CHeader for Dirent64Header {
         self.reclen.into()
     }
 
-    fn item_size_updater(&mut self, size: usize) -> () {
+    fn item_size_updater(&mut self, size: usize) {
         self.reclen = size as u16;
     }
 }
@@ -295,7 +293,7 @@ impl ptrace::CHeader for DirentHeader {
         self.reclen.into()
     }
 
-    fn item_size_updater(&mut self, size: usize) -> () {
+    fn item_size_updater(&mut self, size: usize) {
         self.reclen = size as u16;
     }
 }

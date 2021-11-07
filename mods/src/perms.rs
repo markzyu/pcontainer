@@ -56,7 +56,7 @@ impl Mod for PermsMod {
         syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
         if syscall.num == libc::SYS_execve {
-            if let Some(stat) = nix::sys::stat::stat(path).ok() {
+            if let Ok(stat) = nix::sys::stat::stat(path) {
                 let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
                 let setgid = stat.st_mode & nix::sys::stat::Mode::S_ISGID.bits();
                 if setuid != 0 {

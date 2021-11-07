@@ -72,7 +72,7 @@ pub enum CLIError {
     PathCanonicalization(PathBuf, std::io::Error),
 }
 
-fn init_logging() -> () {
+fn init_logging() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -80,7 +80,7 @@ fn init_logging() -> () {
         .expect("Unable to setup logging");
 }
 
-fn main() -> () {
+fn main() {
     actual_main().map_err(display_err).unwrap();
 }
 
@@ -171,6 +171,6 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     // Start tracee handler thread
     let ptrace_client2 = ptrace_client.clone();
     let new_tracee_handler =
-        sysaug::TraceeHandler::new(pid1, ptrace_client.clone(), mods, Some(Arc::new(states)))?;
+        sysaug::TraceeHandler::new(pid1, ptrace_client, mods, Some(Arc::new(states)))?;
     Ok(new_tracee_handler.start(move || ptrace_client2.stop()))
 }

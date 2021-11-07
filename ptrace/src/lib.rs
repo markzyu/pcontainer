@@ -78,7 +78,7 @@ pub trait CHeader {
     fn item_size_deducer(&self) -> usize;
 
     /// See structs_to_tracee_buffer
-    fn item_size_updater(&mut self, _size: usize) -> ();
+    fn item_size_updater(&mut self, _size: usize);
 }
 
 pub trait CStruct {
@@ -131,19 +131,19 @@ pub fn pid(child: &process::Child) -> Result<nix::unistd::Pid, PtraceError> {
 }
 
 pub fn waitpid(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
-    Ok(wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG)).map_err(PtraceError::Waitpid)?)
+    wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG)).map_err(PtraceError::Waitpid)
 }
 
 pub fn wait(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
-    waitpid(pid(&child)?)
+    waitpid(pid(child)?)
 }
 
 pub fn waitpid_hang(pid: nix::unistd::Pid) -> Result<wait::WaitStatus, PtraceError> {
-    Ok(wait::waitpid(pid, None).map_err(PtraceError::Waitpid)?)
+    wait::waitpid(pid, None).map_err(PtraceError::Waitpid)
 }
 
 pub fn wait_hang(child: &process::Child) -> Result<wait::WaitStatus, PtraceError> {
-    waitpid_hang(pid(&child)?)
+    waitpid_hang(pid(child)?)
 }
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
@@ -715,11 +715,10 @@ where
                     skipped_zeroes = checked_add(skipped_zeroes, 1)?;
                     continue;
                 }
-                checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
             } else {
                 count_zeroes = 0;
-                checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
             }
+            checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
             curr_remainder_addr = checked_add(curr_remainder_addr, *USIZE_SIZE)?;
         }
 
@@ -749,7 +748,7 @@ pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
         libc::ptrace(
             sys::ptrace::Request::PTRACE_GETEVENTMSG as u32,
             libc::pid_t::from(pid),
-            0 as *mut libc::c_void,
+            std::ptr::null_mut::<libc::c_void>(),
             data.as_mut_ptr() as *mut libc::c_void,
         )
     };

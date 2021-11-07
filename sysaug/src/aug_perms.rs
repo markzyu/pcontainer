@@ -31,14 +31,14 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
         } else {
             let ug_bit = res_bits & PERMS_IDBIT_UG;
             let possible_args = &[regs.arg0, regs.arg1, regs.arg2];
-            for i in 0..3 {
+            for (i, possible_arg) in possible_args.iter().enumerate() {
                 let match_bit = res_bits & (1 << i);
                 if match_bit == 0 {
                     continue;
                 }
 
                 self.handler.call_mods(mods::ModFeature::OnSetid, |m| {
-                    m.on_setid(match_bit | ug_bit, possible_args[i], syscall)
+                    m.on_setid(match_bit | ug_bit, *possible_arg, syscall)
                 })?;
             }
         }
