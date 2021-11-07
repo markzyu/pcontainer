@@ -127,6 +127,7 @@ pub trait AugmentSyscall {
 #[derive(Debug)]
 pub enum Augments {
     Clone,
+    Exec,
     Paths,
     Perms,
     Waitpid,

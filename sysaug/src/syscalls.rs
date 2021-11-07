@@ -135,7 +135,7 @@ lazy_static! {
         define_paths_syscall!(libc::SYS_umount2, 1, ans);
         define_paths_syscall!(libc::SYS_lgetxattr, 1, ans);
         define_paths_syscall!(libc::SYS_llistxattr, 1, ans);
-        define_paths_syscall!(libc::SYS_execve, 1, ans);
+        define_syscall!(libc::SYS_execve, Augments::Exec, ans);
 
         define_dirfd_syscall!(libc::SYS_openat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, ans);

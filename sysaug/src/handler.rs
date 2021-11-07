@@ -1,4 +1,5 @@
 use crate::aug_clone::AugmentClone;
+use crate::aug_exec::AugmentExec;
 use crate::aug_paths::AugmentPaths;
 use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
@@ -209,6 +210,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
+        let augment_exec = new_augment!(AugmentExec<PtraceClient>, self);
         let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
         let augment_perms = new_augment!(AugmentPerms<PtraceClient>, self);
         let augment_waitpid = new_augment!(AugmentWaitpid<PtraceClient>, self);
@@ -311,6 +313,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     }
                     match which_aug {
                         Some(Augments::Clone) => augment_clone.dispatch(&last_syscall, regs),
+                        Some(Augments::Exec) => augment_exec.dispatch(&last_syscall, regs),
                         Some(Augments::Paths) => augment_paths.dispatch(&last_syscall, regs),
                         Some(Augments::Perms) => augment_perms.dispatch(&last_syscall, regs),
                         Some(Augments::Waitpid) => augment_waitpid.dispatch(&last_syscall, regs),
