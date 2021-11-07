@@ -7,7 +7,7 @@ use crate::rwoption_take_ok;
 use ptrace::{GenericPurposeRegs, USIZE_SIZE};
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::io::{Read, Seek};
+use std::io::{BufRead, Read, Seek};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -118,6 +118,19 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(path_osstr.into())
     }
 
+    fn parse_shebang(&self, file: &mut std::fs::File) -> Result<Option<String>, SysAugError> {
+        file.seek(std::io::SeekFrom::Start(0))
+            .map_err(SysAugError::ReadBin)?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(SysAugError::ReadBin)?;
+        Ok(if line.starts_with("#!") {
+            Some(line.trim().to_string())
+        } else {
+            None
+        })
+    }
+
     fn expand_exec_with_parser(
         &self,
         regs: &mut GenericPurposeRegs,
@@ -146,12 +159,13 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
                 new_elf_path = new_path_val;
             }
         }
+
+        event!(Level::DEBUG, "Binary file: {:?}", new_elf_path);
         if !new_elf_path.exists() {
             return Ok(false);
         }
 
-        event!(Level::DEBUG, "ELF file: {:?}", new_elf_path,);
-        let mut file = std::fs::File::open(new_elf_path.as_path()).map_err(SysAugError::ReadElf)?;
+        let mut file = std::fs::File::open(new_elf_path.as_path()).map_err(SysAugError::ReadBin)?;
         if let Ok(elf_file) = elf::File::open_stream(&mut file) {
             let header = elf_file
                 .phdrs
@@ -164,9 +178,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             let mut buf: Vec<u8> = Vec::with_capacity(header.filesz as usize);
             buf.resize(header.filesz as usize, 0);
             file.seek(std::io::SeekFrom::Start(header.offset))
-                .map_err(SysAugError::ReadElf)?;
+                .map_err(SysAugError::ReadBin)?;
             file.read_exact(buf.as_mut_slice())
-                .map_err(SysAugError::ReadElf)?;
+                .map_err(SysAugError::ReadBin)?;
 
             // Calculate real path of interpreter
             let interp_path_buf = self.path_from_bytes(buf)?;
@@ -201,6 +215,46 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
             return Ok(true);
+        } else if let Some(shebang) = self.parse_shebang(&mut file)? {
+            event!(Level::DEBUG, "Script file: {:?}", new_elf_path);
+            let parts: Vec<&str> = shebang[2..].split(' ').collect();
+            if parts.len() > 2 || parts.len() == 0 {
+                return Ok(false);
+            }
+            let (part0, maybe_part1) = {
+                let part0 = parts[0].to_string();
+                let maybe_part1 = parts.get(1).map(|&x| x.to_string());
+                (part0, maybe_part1)
+            };
+            let mut new_argv: Vec<u8> = Vec::new();
+
+            let mut skip = 8192;
+            let part0_size = part0.as_bytes().len() + *USIZE_SIZE;
+            let interp_addr = ptrace_client.execute(move || {
+                let final_bytes: &[u8] = part0.as_bytes();
+                ptrace::bytes_to_stack_with_skip(pid, final_bytes, skip)
+            })??;
+            new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
+            skip += part0_size;
+
+            if let Some(part1) = maybe_part1 {
+                let part1_size = part1.as_bytes().len() + *USIZE_SIZE;
+                let part1_addr = ptrace_client.execute(move || {
+                    let final_bytes: &[u8] = part1.as_bytes();
+                    ptrace::bytes_to_stack_with_skip(pid, final_bytes, skip)
+                })??;
+                new_argv.append(&mut part1_addr.to_ne_bytes().to_vec());
+                skip += part1_size;
+            }
+
+            new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
+            new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
+            new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
+            let new_argv_addr = ptrace_client
+                .execute(move || ptrace::bytes_to_stack_with_skip(pid, &new_argv, skip))??;
+            regs.arg0 = interp_addr;
+            regs.arg1 = new_argv_addr;
+            return self.expand_exec_with_parser(regs, &syscall);
         }
         Ok(false)
     }
