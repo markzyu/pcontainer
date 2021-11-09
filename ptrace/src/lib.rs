@@ -386,11 +386,11 @@ pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
 
 /// This always writes to the same location of stack.
 /// So if you want to write multiple byte arrays, each one must have a different offset
-pub fn bytes_to_stack(
+pub unsafe fn bytes_to_stack(
     pid: nix::unistd::Pid,
     offset: usize,
     bytes: &[u8],
-) -> Result<usize, PtraceError> {
+) -> Result<(usize, usize), PtraceError> {
     if offset % *USIZE_SIZE != 0 {
         return Err(PtraceError::WriteOffsetNotAligned(offset));
     }
@@ -410,7 +410,9 @@ pub fn bytes_to_stack(
         write(pid, addr, *value)?;
         addr = checked_add(addr, *USIZE_SIZE)?;
     }
-    Ok(start)
+
+    let new_offset = checked_add(offset, size)?;
+    Ok((start, new_offset))
 }
 
 pub fn aligned(val: usize) -> Result<usize, PtraceError> {

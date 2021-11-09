@@ -5,7 +5,6 @@ use crate::handler::TraceeHandler;
 use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
-use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
 use tracing::{event, Level};
 
@@ -110,20 +109,14 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
 
             // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
             // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
-            let interp_str_size = new_interp_path.as_os_str().as_bytes().len() + *USIZE_SIZE;
-            let interp_addr = ptrace_client.execute(move || {
-                let final_bytes: &[u8] = new_interp_path.as_os_str().as_bytes();
-                ptrace::bytes_to_stack(pid, 0, final_bytes)
-            })??;
+            let interp_addr = self.handler.tracee_stack_append_path(new_interp_path)?;
             let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
             let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
             new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
             new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
-            let new_argv_addr = ptrace_client.execute(move || {
-                ptrace::bytes_to_stack(pid, ptrace::aligned(interp_str_size)?, &new_argv)
-            })??;
+            let new_argv_addr = self.handler.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
             return Ok(true);
@@ -153,31 +146,19 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
                 elf_path_buf.to_string_lossy(),
             );
 
-            let mut skip = 8192;
-            let part0_size = part0.as_bytes().len() + *USIZE_SIZE;
-            let interp_addr = ptrace_client.execute(move || {
-                let final_bytes: &[u8] = part0.as_bytes();
-                ptrace::bytes_to_stack(pid, ptrace::aligned(skip)?, final_bytes)
-            })??;
+            let interp_addr = self.handler.tracee_stack_append(part0.into())?;
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
-            skip += part0_size;
 
             if let Some(part1) = maybe_part1 {
-                let part1_size = part1.as_bytes().len() + *USIZE_SIZE;
-                let part1_addr = ptrace_client.execute(move || {
-                    let final_bytes: &[u8] = part1.as_bytes();
-                    ptrace::bytes_to_stack(pid, ptrace::aligned(skip)?, final_bytes)
-                })??;
+                let part1_addr = self.handler.tracee_stack_append(part1.into())?;
                 new_argv.append(&mut part1_addr.to_ne_bytes().to_vec());
-                skip += part1_size;
             }
 
             new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
             new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
-            let new_argv_addr = ptrace_client.execute(move || {
-                ptrace::bytes_to_stack(pid, ptrace::aligned(skip)?, &new_argv)
-            })??;
+
+            let new_argv_addr = self.handler.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
             return self.expand_exec_with_parser(regs, syscall);

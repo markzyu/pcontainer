@@ -31,7 +31,6 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 3] = Default::default();
-        let mut offset: usize = 0;
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
@@ -52,13 +51,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             notify_mods_about_path(&self.handler, syscall, &orig_path_buf, &path_action)?;
             if let PathAction::Override(new_path_val) = path_action {
                 save_paths[i] = Some(new_path_val.clone());
-                let n_bytes = ptrace::aligned(new_path_val.as_os_str().as_bytes().len())?;
-                let addr = ptrace_client.execute(move || {
-                    let final_bytes: &[u8] = new_path_val.as_os_str().as_bytes();
-                    ptrace::bytes_to_stack(pid, offset, final_bytes)
-                })??;
-                offset += n_bytes;
-                **ref_arg_i = addr;
+                **ref_arg_i = self.handler.tracee_stack_append_path(new_path_val)?;
                 need_write_regs = true;
             } else {
                 save_paths[i] = Some(orig_path_buf);

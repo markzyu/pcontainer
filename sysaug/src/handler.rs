@@ -14,6 +14,7 @@ use nix::sys;
 use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
+use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -53,6 +54,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
     pub signal_tracee: RwLock<Option<sys::signal::Signal>>,
     pub skip_syscall_retval: RwLock<Option<usize>>,
+    pub tracee_stack_offset: RwLock<usize>,
 }
 
 macro_rules! new_augment {
@@ -80,6 +82,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ignore_sigstops: RwLock::default(),
             signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
             skip_syscall_retval: RwLock::default(),
+            tracee_stack_offset: RwLock::default(),
             states: Arc::new((*default_states).try_clone()?),
         });
 
@@ -206,6 +209,34 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn failed(&self) -> bool {
         self.states.failed.load(Ordering::Relaxed)
+    }
+
+    // Send the content of `bytes` to tracee's stack, and return its address.
+    // This can be called multiple times and will add new content to the end of
+    // previous contents.
+    pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
+        let pid = self.pid;
+        let mut offset = rwlock_write(&self.tracee_stack_offset)?;
+        let old_offset = *offset;
+        let (addr, new_offset) = self.ptrace_client.execute(move || {
+            let final_bytes = bytes.as_slice();
+            unsafe { ptrace::bytes_to_stack(pid, old_offset, final_bytes) }
+        })??;
+        *offset = new_offset;
+        Ok(addr)
+    }
+
+    pub fn tracee_stack_append_path(&self, path: PathBuf) -> Result<usize, SysAugError> {
+        let bytes = path.into_os_string().into_vec();
+        self.tracee_stack_append(bytes)
+    }
+
+    // Change the address, to which the next tracee_stack_append will write contents.
+    // offset = how many bytes of previously written contents will stay after this
+    pub fn tracee_stack_seek(&self, offset: usize) -> Result<(), SysAugError> {
+        let mut ref_offset = rwlock_write(&self.tracee_stack_offset)?;
+        *ref_offset = offset;
+        Ok(())
     }
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
