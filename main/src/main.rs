@@ -75,7 +75,9 @@ pub enum CLIError {
 fn init_logging() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::WARN.into()),
+        )
         .try_init()
         .expect("Unable to setup logging");
 }

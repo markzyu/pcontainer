@@ -10,7 +10,7 @@ def run(args, **kwargs):
     return os.system(f"{cmd} {args} 1>/dev/null 2>/dev/null")
 
 
-def run_script(script, timeout=5, **kwargs):
+def run_script(script, timeout=5, stderr=None, **kwargs):
     cmd = _get_cmd(**kwargs)
     print(f"cmd = {cmd}")
     return sub.run(
@@ -18,7 +18,7 @@ def run_script(script, timeout=5, **kwargs):
         input=script,
         timeout=timeout,
         stdout=sub.PIPE,
-        stderr=os.sys.stderr,
+        stderr=stderr or os.sys.stderr,
     )
 
 

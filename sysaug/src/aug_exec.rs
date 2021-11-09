@@ -131,6 +131,12 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             event!(Level::DEBUG, "Script file: {:?}", new_elf_path);
             let parts: Vec<&str> = shebang.split(' ').collect();
             if parts.len() > 2 || parts.is_empty() {
+                event!(
+                    Level::ERROR,
+                    "Cannot execute file {} because of invalid shebang: {:?}",
+                    elf_path_buf.to_string_lossy(),
+                    shebang,
+                );
                 return Ok(false);
             }
             let (part0, maybe_part1) = {
@@ -176,6 +182,11 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             regs.arg1 = new_argv_addr;
             return self.expand_exec_with_parser(regs, syscall);
         }
+        event!(
+            Level::ERROR,
+            "Cannot execute file {} because we don't know what type of file it is",
+            elf_path_buf.to_string_lossy(),
+        );
         Ok(false)
     }
 
