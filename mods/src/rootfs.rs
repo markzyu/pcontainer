@@ -72,11 +72,12 @@ impl Mod for RootfsMod {
         _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         self.map_components(curr_path, |bytes| {
-            if bytes == b"." {
+            if bytes == b"." || bytes == b".." {
                 return PathAction::None;
             }
             let maybe_n_dots = bytes.iter().position(|&x| x != b'.');
-            if let Some(n_dots) = maybe_n_dots {
+            if maybe_n_dots != Some(0) {
+                let n_dots = maybe_n_dots.unwrap_or(bytes.len());
                 let mut result = b".".repeat(n_dots * 2);
                 result.extend_from_slice(&bytes[n_dots..]);
                 let osstring = OsString::from_vec(result);
@@ -123,11 +124,12 @@ impl Mod for RootfsMod {
         _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         self.map_components(curr_path, |bytes| {
-            if bytes == b"." {
+            if bytes == b"." || bytes == b".." {
                 return PathAction::None;
             }
             let maybe_n_dots = bytes.iter().position(|&x| x != b'.');
-            if let Some(n_dots) = maybe_n_dots {
+            if maybe_n_dots != Some(0) {
+                let n_dots = maybe_n_dots.unwrap_or(bytes.len());
                 if n_dots % 2 == 1 {
                     return PathAction::HidePath;
                 }

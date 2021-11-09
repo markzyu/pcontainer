@@ -31,6 +31,11 @@ class TestBasics(t.TestCase):
         self.assertEqual(ans.returncode, 0)
         self.assertEqual(ans.stdout.split(b"(")[0].lower(), b"bash")
 
+    def test_run_shell_script_with_spaces_in_shebang(self):
+        ans = c.run_script(b"./tests/fixtures/02-script-with-spaces-in-shebang.sh")
+        self.assertEqual(ans.returncode, 0)
+        self.assertEqual(ans.stdout, b"TEST\n")
+
     def test_run_id_as_root(self):
         ans = c.run_script(b"id", root=True)
         self.assertEqual(ans.returncode, 0)

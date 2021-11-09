@@ -21,6 +21,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentExe
     ) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         if !self.expand_exec_with_parser(&mut regs, syscall)? {
+            self.handler.skip_syscall(-libc::ENOENT as usize)?;
             return Ok(());
         }
         self.handler
@@ -63,7 +64,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
 
         // Translate elf path to real path
         let elf_path_buf = path_from_bytes(path_bytes)?;
-        let mut new_elf_path = elf_path_buf;
+        let mut new_elf_path = elf_path_buf.clone();
         {
             let path_action = calc_real_path(&self.handler, &new_elf_path, syscall)?;
             notify_mods_about_path(&self.handler, syscall, &new_elf_path, &path_action)?;
@@ -72,10 +73,10 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             }
         }
 
-        event!(Level::DEBUG, "Binary file: {:?}", new_elf_path);
         if !new_elf_path.exists() {
             return Ok(false);
         }
+        event!(Level::INFO, "Binary file: {:?}", new_elf_path);
 
         let mut file = std::fs::File::open(new_elf_path.as_path()).map_err(SysAugError::ReadBin)?;
         if let Ok(elf_file) = elf::File::open_stream(&mut file) {
@@ -102,8 +103,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             }
             event!(
                 Level::INFO,
-                "Setting ELF interpreter = {}",
+                "Setting ELF interpreter = {}, exe = {}",
                 new_interp_path.to_string_lossy(),
+                elf_path_buf.to_string_lossy(),
             );
 
             // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
@@ -127,7 +129,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             return Ok(true);
         } else if let Some(shebang) = self.parse_shebang(&mut file)? {
             event!(Level::DEBUG, "Script file: {:?}", new_elf_path);
-            let parts: Vec<&str> = shebang[2..].split(' ').collect();
+            let parts: Vec<&str> = shebang.split(' ').collect();
             if parts.len() > 2 || parts.is_empty() {
                 return Ok(false);
             }
@@ -137,6 +139,13 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
                 (part0, maybe_part1)
             };
             let mut new_argv: Vec<u8> = Vec::new();
+
+            event!(
+                Level::INFO,
+                "Setting shebang interpreter = {}, script = {}",
+                part0,
+                elf_path_buf.to_string_lossy(),
+            );
 
             let mut skip = 8192;
             let part0_size = part0.as_bytes().len() + *USIZE_SIZE;
@@ -177,7 +186,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         let mut line = String::new();
         reader.read_line(&mut line).map_err(SysAugError::ReadBin)?;
         Ok(if line.starts_with("#!") {
-            Some(line.trim().to_string())
+            Some(line[2..].trim().to_string())
         } else {
             None
         })

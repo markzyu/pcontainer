@@ -69,6 +69,9 @@ pub enum SysAugError {
     #[error("Unable to read binary file: {0}")]
     ReadBin(std::io::Error),
 
+    #[error("Unable to read symlink: {0}")]
+    ReadSymlink(std::io::Error),
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,

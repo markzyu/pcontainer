@@ -14,7 +14,7 @@ use tracing::{event, Level};
 type HandlerArc<T> = Arc<TraceeHandler<T>>;
 
 // Calculate real path of file based on its path in rootfs
-pub fn calc_real_path<T: executor::PtraceClient>(
+pub fn calc_real_path_simple<T: executor::PtraceClient>(
     handler: &HandlerArc<T>,
     orig_path: &Path,
     syscall: &SyscallInfo,
@@ -29,6 +29,31 @@ pub fn calc_real_path<T: executor::PtraceClient>(
     }
 
     get_mod_path(handler, syscall, orig_path, new_path, false)
+}
+
+// Calculate real path of file + following symlinks that use fake paths
+pub fn calc_real_path<T: executor::PtraceClient>(
+    handler: &HandlerArc<T>,
+    orig_path: &Path,
+    syscall: &SyscallInfo,
+) -> Result<PathAction, SysAugError> {
+    let action = calc_real_path_simple(handler, orig_path, syscall)?;
+    if let PathAction::Override(real_path) = &action {
+        if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
+            if !metadata.file_type().is_symlink() {
+                return Ok(action);
+            }
+            let link = real_path.read_link().map_err(SysAugError::ReadSymlink)?;
+            if link.is_relative() {
+                return Ok(action);
+            }
+            calc_real_path(handler, link.as_path(), syscall)
+        } else {
+            Ok(action)
+        }
+    } else {
+        Ok(action)
+    }
 }
 
 // Ask every mod to translate a path from rootfs point of view to real paths
@@ -93,7 +118,10 @@ pub fn notify_mods_about_path<T: executor::PtraceClient>(
     Ok(())
 }
 
-pub fn path_from_bytes(path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> {
+pub fn path_from_bytes(mut path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> {
+    while path_bytes.last() == Some(&0) {
+        path_bytes.pop();
+    }
     let path_osstr: OsString = OsStringExt::from_vec(path_bytes);
     Ok(path_osstr.into())
 }
