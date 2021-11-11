@@ -177,10 +177,6 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         let mut reader = std::io::BufReader::new(file);
         let mut line = String::new();
         reader.read_line(&mut line).map_err(SysAugError::ReadBin)?;
-        Ok(if line.starts_with("#!") {
-            Some(line[2..].trim().to_string())
-        } else {
-            None
-        })
+        Ok(line.strip_prefix("#!").map(|l| l.trim().to_string()))
     }
 }

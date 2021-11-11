@@ -386,6 +386,11 @@ pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
 
 /// This always writes to the same location of stack.
 /// So if you want to write multiple byte arrays, each one must have a different offset
+///
+/// # Safety
+/// This function is unsafe because you need to choose `offset` carefully. If you call
+/// this function multiple times during the same system call, you might overwrite your
+/// own progress if `offset` is incorrect.
 pub unsafe fn bytes_to_stack(
     pid: nix::unistd::Pid,
     offset: usize,
