@@ -353,6 +353,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         _ => Ok(()),
                     }
                     .map_err(display_err)?;
+                    if let Some(info) = syscall_info {
+                        if info.sets_file_perms {
+                            self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
+                        }
+                    }
                     self.maybe_skip_syscall(&mut last_syscall)?;
                 }
                 _ => {

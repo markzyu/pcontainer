@@ -14,6 +14,7 @@ lazy_static! {
         ans.insert(ModFeature::OverrideFileFakePath);
         ans.insert(ModFeature::OnFileRealPath);
         ans.insert(ModFeature::ResolveMetadataPath);
+        ans.insert(ModFeature::OnSetsPerms);
         ans
     };
 }
@@ -142,14 +143,7 @@ impl Mod for RootfsMod {
         })
     }
 
-    fn on_file_real_path(
-        &self,
-        _raw_path: &Path,
-        syscall: &SyscallInfo,
-    ) -> Result<ModAction, SysAugError> {
-        if syscall.sets_file_perms {
-            return Ok(ModAction::SkipSyscall(0));
-        }
-        Ok(ModAction::None)
+    fn on_sets_perms(&self, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
+        Ok(ModAction::SkipSyscall(0))
     }
 }

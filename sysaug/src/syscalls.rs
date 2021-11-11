@@ -16,6 +16,20 @@ macro_rules! define_syscall {
     };
 }
 
+macro_rules! define_setperms_syscall {
+    ($name:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                name: stringify!($name),
+                num: $name,
+                sets_file_perms: true,
+                ..Default::default()
+            },
+        )
+    };
+}
+
 macro_rules! define_perms_syscall {
     ($name:expr, $is_setter:expr, $res_bits:expr, $resf_bit:expr, $ans:ident) => {
         $ans.insert(
@@ -43,6 +57,23 @@ macro_rules! define_paths_syscall {
                 num: $name,
                 path_positions: $path_positions,
                 getdents_bits: None,
+                ..Default::default()
+            },
+        )
+    };
+}
+
+macro_rules! define_paths_setperms_syscall {
+    ($name:expr, $path_positions:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name,
+                path_positions: $path_positions,
+                getdents_bits: None,
+                sets_file_perms: true,
                 ..Default::default()
             },
         )
@@ -179,8 +210,8 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
 fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
     define_paths_syscall!(libc::SYS_access, 1, ans);
-    define_paths_syscall!(libc::SYS_chmod, 1, ans);
-    define_paths_syscall!(libc::SYS_chown, 1, ans);
+    define_paths_setperms_syscall!(libc::SYS_chmod, 1, ans);
+    define_paths_setperms_syscall!(libc::SYS_chown, 1, ans);
     define_paths_syscall!(libc::SYS_mknod, 1, ans);
     define_paths_syscall!(libc::SYS_creat, 1, ans);
     define_paths_syscall!(libc::SYS_stat, 1, ans);
@@ -188,7 +219,9 @@ fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
     define_paths_syscall!(libc::SYS_utimes, 1, ans);
     define_paths_syscall!(libc::SYS_open, 1, ans);
     define_paths_syscall!(libc::SYS_readlink, 1, ans);
-    define_paths_syscall!(libc::SYS_lchown, 1, ans);
+    define_setperms_syscall!(libc::SYS_fchmod, ans);
+    define_setperms_syscall!(libc::SYS_fchown, ans);
+    define_paths_setperms_syscall!(libc::SYS_lchown, 1, ans);
     define_paths_syscall!(libc::SYS_lstat, 1, ans);
     define_paths_syscall!(libc::SYS_unlink, 1, ans);
     define_paths_syscall!(libc::SYS_rmdir, 1, ans);

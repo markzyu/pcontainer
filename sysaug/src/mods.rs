@@ -12,6 +12,7 @@ pub enum ModFeature {
     OnChroot,
     OnCloneComplete,
     OnSetid,
+    OnSetsPerms,
     OnTraceeStartup,
     OverrideFileFakePath,
     OverrideFileRealPath,
@@ -113,6 +114,10 @@ pub trait Mod {
         _val: usize,
         _syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
+        Ok(ModAction::None)
+    }
+
+    fn on_sets_perms(&self, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 
