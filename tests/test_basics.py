@@ -39,7 +39,7 @@ class TestBasics(t.TestCase):
 
     def test_run_shell_script_with_invalid_shebang(self):
         ans = c.run_script(b"./tests/fixtures/03-script-invalid-shebang.sh", stderr=subprocess.PIPE)
-        self.assertEqual(ans.returncode, 126)
+        self.assertNotEqual(ans.returncode, 0)
         self.assertTrue(b"because of invalid shebang: \"/bin/sh -a -b -c\"" in ans.stderr)
 
     def test_run_id_as_root(self):

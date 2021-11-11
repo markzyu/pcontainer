@@ -35,14 +35,13 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
-        let retval = regs.syscall_retval() as isize;
+        let retval = regs.syscall_retval() as libc::pid_t;
         event!(Level::DEBUG, "after waitpid() = {}", retval);
         if retval <= 0 {
             return Ok(());
         }
 
-        let child_pid: nix::unistd::Pid =
-            nix::unistd::Pid::from_raw(retval.try_into().or(Err(SysAugError::IntoInt))?);
+        let child_pid: nix::unistd::Pid = nix::unistd::Pid::from_raw(retval);
         let raw_child_status = self
             .handler
             .ptrace_client
