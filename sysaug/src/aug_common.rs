@@ -21,10 +21,13 @@ pub fn calc_real_path_simple<T: executor::PtraceClient>(
 ) -> Result<PathAction, SysAugError> {
     let mut new_path = PathAction::None;
     let prefix_maybe = common::rwlock_read(&handler.states.path_prefix)?;
-    if let Some(prefix) = prefix_maybe.as_ref() {
-        if orig_path.is_absolute() {
-            let val = prefix.as_path().join(orig_path.strip_prefix("/").unwrap());
-            new_path = PathAction::Override(val);
+    let exclude_list = common::rwlock_read(&handler.states.path_prefix_excludes)?;
+    if !exclude_list.iter().any(|x| orig_path.starts_with(x)) {
+        if let Some(prefix) = prefix_maybe.as_ref() {
+            if orig_path.is_absolute() {
+                let val = prefix.as_path().join(orig_path.strip_prefix("/").unwrap());
+                new_path = PathAction::Override(val);
+            }
         }
     }
 

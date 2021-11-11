@@ -36,6 +36,7 @@ pub struct TraceeHandlerStates {
     pub failed: AtomicBool,
     pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
     pub path_prefix: RwLock<Option<PathBuf>>,
+    pub path_prefix_excludes: RwLock<Vec<PathBuf>>,
     pub pid: nix::unistd::Pid,
     pub root_pid: nix::unistd::Pid,
 }
@@ -422,6 +423,7 @@ impl Default for TraceeHandlerStates {
             failed: AtomicBool::new(false),
             perms_ids: RwLock::default(),
             path_prefix: RwLock::default(),
+            path_prefix_excludes: RwLock::default(),
             pid: nix::unistd::Pid::from_raw(0),
             root_pid: nix::unistd::Pid::from_raw(0),
         }
@@ -435,6 +437,7 @@ impl TraceeHandlerStates {
             failed: AtomicBool::new(false),
             perms_ids: clone_locked(&self.perms_ids)?,
             path_prefix: clone_locked(&self.path_prefix)?,
+            path_prefix_excludes: clone_locked(&self.path_prefix_excludes)?,
             pid: self.pid,
             root_pid: self.root_pid,
         })

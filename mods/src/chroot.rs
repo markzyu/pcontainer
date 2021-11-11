@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{rwlock_replace, SysAugError, TraceeHandlerStates};
+use sysaug::{rwlock_replace, rwlock_write, SysAugError, TraceeHandlerStates};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -36,6 +36,10 @@ impl Mod for ChrootMod {
 
     fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
         rwlock_replace(&self.states.path_prefix, self.states.args.chroot.clone())?;
+        let mut excludes = rwlock_write(&self.states.path_prefix_excludes)?;
+        excludes.push("/dev".into());
+        excludes.push("/proc".into());
+        excludes.push("/sys".into());
         Ok(ModAction::None)
     }
 }
