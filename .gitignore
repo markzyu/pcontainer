@@ -2,3 +2,4 @@
 target/
 .*.sw[opqr]
 .sw[opqr]
+*.out

@@ -42,6 +42,12 @@ class TestBasics(t.TestCase):
         self.assertNotEqual(ans.returncode, 0)
         self.assertTrue(b"because of invalid shebang: \"/bin/sh -a -b -c\"" in ans.stderr)
 
+    def test_wait4_is_restarted_if_child_is_stopped(self):
+        ans = c.run_script(b"./tests/fixtures/04-wait4-restarts.out")
+        self.assertNotIn(b"waitpid failure", ans.stdout)
+        self.assertNotIn(b"is exit: 0 is stop: 1 exit code:", ans.stdout)
+        self.assertIn(b"is exit: 1 is stop: 0 exit code: 1", ans.stdout)
+
     def test_run_id_as_root(self):
         ans = c.run_script(b"id", root=True)
         self.assertEqual(ans.returncode, 0)

@@ -321,8 +321,9 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         span!(
                             Level::DEBUG,
                             "after",
-                            "syscall {} args {:#x} {:#x} {:#x}",
+                            "syscall {} return {:#x} args {:#x} {:#x} {:#x}",
                             syscall_name,
+                            regs.syscall_retval(),
                             regs.arg0,
                             regs.arg1,
                             regs.arg2
