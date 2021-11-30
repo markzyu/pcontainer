@@ -47,6 +47,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub pid: nix::unistd::Pid,
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
+    pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
 
     pub curr_paths: RwLock<Option<[Option<PathBuf>; 3]>>,
     pub curr_dirfd_path: RwLock<Option<PathBuf>>,
@@ -70,6 +71,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         ptrace_client: PtraceClient,
         mods: Vec<ModProvider>,
         states: Option<Arc<TraceeHandlerStates>>,
+        parent: Option<Arc<TraceeHandler<PtraceClient>>>,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         let default_states = states.unwrap_or_default();
         let ans = Arc::new(TraceeHandler {
@@ -85,6 +87,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             skip_syscall_retval: RwLock::default(),
             tracee_stack_offset: RwLock::default(),
             states: Arc::new((*default_states).try_clone()?),
+            parent: parent,
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();
@@ -106,7 +109,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     /// Create a new TraceeHandler for a child, without starting event loop
     pub fn fork(
-        &self,
+        self: &Arc<TraceeHandler<PtraceClient>>,
         child_pid: nix::unistd::Pid,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         TraceeHandler::new(
@@ -114,6 +117,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             self.ptrace_client.clone(),
             self.mod_providers.clone(),
             Some(self.states.clone()),
+            Some(Arc::clone(self)),
         )
     }
 
