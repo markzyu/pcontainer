@@ -283,6 +283,14 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     if getsig_err == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
                         continue;
                     }
+                    if signal == sys::signal::Signal::SIGSTOP {
+                        if let Some(parent) = self.parent.as_ref() {
+                            let ignore_sigstops = rwlock_read(&parent.ignore_sigstops)?;
+                            if ignore_sigstops.contains(&pid) {
+                                continue;
+                            }
+                        }
+                    }
                     if signal == sys::signal::Signal::SIGSEGV && self.states.args.gdb {
                         info!("Tracee segfault. Starting gdb");
                         return self.transfer_to_gdb();
@@ -313,7 +321,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
                     let _span = if last_syscall.times % 2 == 1 {
                         span!(
-                            Level::DEBUG,
+                            Level::INFO,
                             "before",
                             "syscall {} args {:#x} {:#x} {:#x}",
                             syscall_name,
@@ -323,7 +331,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         )
                     } else {
                         span!(
-                            Level::DEBUG,
+                            Level::INFO,
                             "after",
                             "syscall {} return {:#x} args {:#x} {:#x} {:#x}",
                             syscall_name,
