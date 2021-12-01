@@ -175,7 +175,12 @@ lazy_static! {
         define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
+
+        define_setperms_syscall!(libc::SYS_fchmod, ans);
+        define_setperms_syscall!(libc::SYS_fchown, ans);
+
         add_xplat_syscalls(&mut ans);
         ans.remove(&NO_MOD_SYSCALL);
         ans
@@ -196,6 +201,8 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "aarch64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
+    define_dirfd_syscall!(libc::SYS_unlinkat, 2, 0, ans);
+    define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -219,8 +226,6 @@ fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
     define_paths_syscall!(libc::SYS_utimes, 1, ans);
     define_paths_syscall!(libc::SYS_open, 1, ans);
     define_paths_syscall!(libc::SYS_readlink, 1, ans);
-    define_setperms_syscall!(libc::SYS_fchmod, ans);
-    define_setperms_syscall!(libc::SYS_fchown, ans);
     define_paths_setperms_syscall!(libc::SYS_lchown, 1, ans);
     define_paths_syscall!(libc::SYS_lstat, 1, ans);
     define_paths_syscall!(libc::SYS_unlink, 1, ans);
