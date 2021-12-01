@@ -87,7 +87,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             skip_syscall_retval: RwLock::default(),
             tracee_stack_offset: RwLock::default(),
             states: Arc::new((*default_states).try_clone()?),
-            parent: parent,
+            parent,
         });
 
         let mut mod_map: ModsByFeature = HashMap::new();

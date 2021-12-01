@@ -1,12 +1,9 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
-use crate::rwoption_take_ok;
-use nix::sys;
 use ptrace::GenericPurposeRegs;
-use std::convert::TryInto;
 use std::sync::Arc;
-use tracing::{event, info, Level};
+use tracing::info;
 
 pub struct AugmentWaitpid<PtraceClient: executor::PtraceClient> {
     pub handler: Arc<TraceeHandler<PtraceClient>>,
@@ -24,7 +21,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         if !ignore_sigstops.is_empty() {
             regs.arg2 &= !(libc::WUNTRACED as usize);
             info!("New arg2 = {}", regs.arg2);
-            self.handler.ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+            self.handler
+                .ptrace_client
+                .execute(move || ptrace::setregs(pid, regs))??;
         }
         Ok(())
     }
@@ -36,7 +35,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
     ) -> Result<(), SysAugError> {
         let retval = regs.syscall_retval();
         info!("Returning {}", retval);
-        if (retval > 0) {
+        if retval > 0 {
             let pid = nix::unistd::Pid::from_raw(retval as i32);
             let mut pids = common::rwlock_write(&self.handler.ignore_sigstops)?;
             pids.remove(&pid);
