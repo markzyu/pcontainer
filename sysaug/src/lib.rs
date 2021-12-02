@@ -11,7 +11,7 @@ mod syscalls;
 
 pub use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault,
-    rwoption_take, ModProvider, SysAugError, SyscallInfo,
+    rwoption_take, ModProvider, PermType, SysAugError, SyscallInfo,
 };
 pub use crate::handler::{CLIArgs, TraceeHandler, TraceeHandlerStates};
 pub use crate::mods::Mod;

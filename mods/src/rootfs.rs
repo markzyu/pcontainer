@@ -5,7 +5,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature, PathAction};
-use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
+use sysaug::{PermType, SysAugError, SyscallInfo, TraceeHandlerStates};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -143,7 +143,10 @@ impl Mod for RootfsMod {
         })
     }
 
-    fn on_sets_perms(&self, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
-        Ok(ModAction::SkipSyscall(0))
+    fn on_sets_perms(&self, syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
+        if syscall.sets_file_perms == Some(PermType::Chown) {
+            return Ok(ModAction::SkipSyscall(0));
+        }
+        Ok(ModAction::None)
     }
 }

@@ -367,7 +367,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     }
                     .map_err(display_err)?;
                     if let Some(info) = syscall_info {
-                        if info.sets_file_perms {
+                        if info.sets_file_perms.is_some() {
                             self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
                         }
                     }

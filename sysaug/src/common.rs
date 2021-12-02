@@ -185,6 +185,12 @@ impl SyscallCounter {
 pub const PERMS_IDBIT_UG: u8 = 16;
 pub const PERMS_IDS_SIZE: usize = 32;
 
+#[derive(Debug, PartialEq)]
+pub enum PermType {
+    Chmod,
+    Chown,
+}
+
 #[derive(Debug, Default)]
 pub struct SyscallInfo {
     /// The type of augment that will handle this syscall
@@ -194,7 +200,7 @@ pub struct SyscallInfo {
     pub path_positions: usize,
     pub dirfd_position: Option<u8>,
     pub getdents_bits: Option<u8>,
-    pub sets_file_perms: bool,
+    pub sets_file_perms: Option<PermType>,
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,

@@ -1,4 +1,4 @@
-use crate::common::{Augments, SyscallInfo, NO_MOD_SYSCALL};
+use crate::common::{Augments, PermType, SyscallInfo, NO_MOD_SYSCALL};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
@@ -17,13 +17,13 @@ macro_rules! define_syscall {
 }
 
 macro_rules! define_setperms_syscall {
-    ($name:expr, $ans:ident) => {
+    ($name:expr, $perm_type:expr, $ans:ident) => {
         $ans.insert(
             $name as usize,
             SyscallInfo {
                 name: stringify!($name),
                 num: $name,
-                sets_file_perms: true,
+                sets_file_perms: Some($perm_type),
                 ..Default::default()
             },
         )
@@ -64,7 +64,7 @@ macro_rules! define_paths_syscall {
 }
 
 macro_rules! define_paths_setperms_syscall {
-    ($name:expr, $path_positions:expr, $ans:ident) => {
+    ($name:expr, $path_positions:expr, $perm_type:expr, $ans:ident) => {
         $ans.insert(
             $name as usize,
             SyscallInfo {
@@ -73,7 +73,7 @@ macro_rules! define_paths_setperms_syscall {
                 num: $name,
                 path_positions: $path_positions,
                 getdents_bits: None,
-                sets_file_perms: true,
+                sets_file_perms: Some($perm_type),
                 ..Default::default()
             },
         )
@@ -98,7 +98,7 @@ macro_rules! define_dirfd_syscall {
 }
 
 macro_rules! define_dirfd_setperms_syscall {
-    ($name:expr, $path_positions:expr, $dirfd_position:expr, $ans:ident) => {
+    ($name:expr, $path_positions:expr, $dirfd_position:expr, $perm_type:expr, $ans:ident) => {
         $ans.insert(
             $name as usize,
             SyscallInfo {
@@ -108,7 +108,7 @@ macro_rules! define_dirfd_setperms_syscall {
                 path_positions: $path_positions,
                 dirfd_position: Some($dirfd_position),
                 getdents_bits: None,
-                sets_file_perms: true,
+                sets_file_perms: Some($perm_type),
                 ..Default::default()
             },
         )
@@ -171,15 +171,16 @@ lazy_static! {
         define_dirfd_syscall!(libc::SYS_openat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
-        define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, ans);
-        define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, ans);
+        define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, PermType::Chmod, ans);
+        define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_unlinkat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
 
-        define_setperms_syscall!(libc::SYS_fchmod, ans);
-        define_setperms_syscall!(libc::SYS_fchown, ans);
+        define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, ans);
+        define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, ans);
 
         add_xplat_syscalls(&mut ans);
         ans.remove(&NO_MOD_SYSCALL);
@@ -201,7 +202,6 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "aarch64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
-    define_dirfd_syscall!(libc::SYS_unlinkat, 2, 0, ans);
     define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
 }
 
@@ -217,17 +217,20 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
 fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
     define_paths_syscall!(libc::SYS_access, 1, ans);
-    define_paths_setperms_syscall!(libc::SYS_chmod, 1, ans);
-    define_paths_setperms_syscall!(libc::SYS_chown, 1, ans);
+    define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, ans);
+    define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, ans);
     define_paths_syscall!(libc::SYS_mknod, 1, ans);
     define_paths_syscall!(libc::SYS_creat, 1, ans);
     define_paths_syscall!(libc::SYS_stat, 1, ans);
     define_paths_syscall!(libc::SYS_uselib, 1, ans);
     define_paths_syscall!(libc::SYS_utimes, 1, ans);
+    define_dirfd_syscall!(libc::SYS_futimesat, 2, 0, ans);
     define_paths_syscall!(libc::SYS_open, 1, ans);
     define_paths_syscall!(libc::SYS_readlink, 1, ans);
-    define_paths_setperms_syscall!(libc::SYS_lchown, 1, ans);
+    define_paths_setperms_syscall!(libc::SYS_lchown, 1, PermType::Chown, ans);
     define_paths_syscall!(libc::SYS_lstat, 1, ans);
+    define_paths_syscall!(libc::SYS_symlink, 2, ans);
+    define_paths_syscall!(libc::SYS_link, 3, ans);
     define_paths_syscall!(libc::SYS_unlink, 1, ans);
     define_paths_syscall!(libc::SYS_rmdir, 1, ans);
     define_paths_syscall!(libc::SYS_mkdir, 1, ans);
