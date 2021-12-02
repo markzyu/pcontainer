@@ -1,6 +1,7 @@
 from common import STAGING
 import common as c
 import os
+import subprocess
 import tarfile
 import unittest as t
 
@@ -69,6 +70,20 @@ class TestRootFs(t.TestCase):
         with tarfile.open("tests/fixtures/result.tar") as actual_tar:
             actual_val = _sort_tar_info(map(_tar_info_minimal, actual_tar.getmembers()))
         self.assertEqual(expect_val, actual_val)
+
+    def test_rm_rf_after_rootfs_creates_metadata(self):
+        """
+        See #20 for details on why this is necessary
+        """
+        self.test_rootfs_creates_metadata()
+
+        cmd = f"""
+        set -x;
+        rm -rf {STAGING};
+        """
+        ans = c.run_script(cmd.encode(), rootfs=True)
+        self.assertEqual(ans.returncode, 0)
+        self.assertFalse(os.path.exists(STAGING))
 
 
 def _sort_tar_info(obj):
