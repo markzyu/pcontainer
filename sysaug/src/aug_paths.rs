@@ -64,6 +64,14 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             need_write_regs = true;
         }
 
+        // Delete metadata before unlink & rmdir
+        if syscall.deletion_type.is_some() {
+            let ref_save_paths = &save_paths;
+            for path in ref_save_paths.iter().flatten() {
+                self.delete_metadata_for_file(path, &save_dirfd_path)?;
+            }
+        }
+
         common::rwoption_replace(&self.handler.curr_paths, save_paths)?;
         common::rwoption_replace(&self.handler.curr_dirfd_path, save_dirfd_path)?;
 
@@ -80,12 +88,15 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
     ) -> Result<(), SysAugError> {
         let paths = rwoption_take_ok!(self.handler.curr_paths)?;
         let dirfd_path = rwoption_take_ok!(self.handler.curr_dirfd_path)?;
-        for path in paths.iter().flatten() {
-            self.save_metadata_for_file(path, &dirfd_path)?;
+        let del_type = &syscall.deletion_type;
+        let retval = regs.syscall_retval() as isize;
+        if del_type.is_none() || retval < 0 {
+            for path in paths.iter().flatten() {
+                self.save_metadata_for_file(path, &dirfd_path)?;
+            }
         }
 
-        let retval = regs.syscall_retval();
-        if retval as isize <= 0 {
+        if retval <= 0 {
             return Ok(());
         }
         match syscall.getdents_bits {
@@ -180,20 +191,25 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(())
     }
 
-    fn save_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
-        event!(
-            Level::TRACE,
-            "Checking metadata for: {:?}/{:?}",
-            dirfd_path.to_string_lossy(),
-            path.to_string_lossy()
-        );
+    fn _get_metadata_path(&self, path: &Path, dirfd_path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let maybe_meta_path = self
             .handler
             .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
                 m.resolve_metadata_path(path, dirfd_path)
             })?
             .flatten();
-        if let Some(meta_path) = maybe_meta_path {
+        event!(
+            Level::TRACE,
+            "Checking metadata for: {:?}/{:?} = {:?}",
+            dirfd_path.to_string_lossy(),
+            path.to_string_lossy(),
+            maybe_meta_path,
+        );
+        Ok(maybe_meta_path)
+    }
+
+    fn save_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
+        if let Some(meta_path) = self._get_metadata_path(path, dirfd_path)? {
             event!(
                 Level::TRACE,
                 "Writing metadata file: {:?}",
@@ -207,6 +223,18 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
                     _ => Err(SysAugError::WriteMetadata(e.to_string())),
                 },
             };
+        }
+        Ok(())
+    }
+
+    fn delete_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
+        if let Some(meta_path) = self._get_metadata_path(path, dirfd_path)? {
+            event!(
+                Level::TRACE,
+                "Deleting metadata file: {:?}",
+                meta_path.to_string_lossy()
+            );
+            std::fs::remove_file(meta_path).map_err(SysAugError::DeleteMetadata)?;
         }
         Ok(())
     }

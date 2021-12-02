@@ -1,4 +1,4 @@
-use crate::common::{Augments, PermType, SyscallInfo, NO_MOD_SYSCALL};
+use crate::common::{Augments, DelType, PermType, SyscallInfo, NO_MOD_SYSCALL};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
@@ -63,6 +63,23 @@ macro_rules! define_paths_syscall {
     };
 }
 
+macro_rules! define_paths_deletion_syscall {
+    ($name:expr, $path_positions:expr, $type:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name,
+                path_positions: $path_positions,
+                getdents_bits: None,
+                deletion_type: Some($type),
+                ..Default::default()
+            },
+        )
+    };
+}
+
 macro_rules! define_paths_setperms_syscall {
     ($name:expr, $path_positions:expr, $perm_type:expr, $ans:ident) => {
         $ans.insert(
@@ -91,6 +108,24 @@ macro_rules! define_dirfd_syscall {
                 path_positions: $path_positions,
                 dirfd_position: Some($dirfd_position),
                 getdents_bits: None,
+                ..Default::default()
+            },
+        )
+    };
+}
+
+macro_rules! define_dirfd_deletion_syscall {
+    ($name:expr, $path_positions:expr, $dirfd_position:expr, $type:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name,
+                path_positions: $path_positions,
+                dirfd_position: Some($dirfd_position),
+                getdents_bits: None,
+                deletion_type: Some($type),
                 ..Default::default()
             },
         )
@@ -175,7 +210,7 @@ lazy_static! {
         define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
-        define_dirfd_syscall!(libc::SYS_unlinkat, 2, 0, ans);
+        define_dirfd_deletion_syscall!(libc::SYS_unlinkat, 2, 0, DelType::File, ans);
         define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
 
@@ -231,7 +266,7 @@ fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
     define_paths_syscall!(libc::SYS_lstat, 1, ans);
     define_paths_syscall!(libc::SYS_symlink, 2, ans);
     define_paths_syscall!(libc::SYS_link, 3, ans);
-    define_paths_syscall!(libc::SYS_unlink, 1, ans);
-    define_paths_syscall!(libc::SYS_rmdir, 1, ans);
+    define_paths_deletion_syscall!(libc::SYS_unlink, 1, DelType::File, ans);
+    define_paths_deletion_syscall!(libc::SYS_rmdir, 1, DelType::Dir, ans);
     define_paths_syscall!(libc::SYS_mkdir, 1, ans);
 }

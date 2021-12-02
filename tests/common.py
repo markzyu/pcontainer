@@ -12,7 +12,8 @@ def run(args, **kwargs):
 
 def run_script(script, timeout=5, stderr=None, **kwargs):
     cmd = _get_cmd(**kwargs)
-    print(f"cmd = {cmd}")
+    cmd_expr = " ".join(cmd)
+    print(f"cmd = {cmd_expr} script = {script.strip()}")
     return sub.run(
         cmd, 
         input=script,

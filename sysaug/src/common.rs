@@ -60,6 +60,9 @@ pub enum SysAugError {
     #[error("Failed to write metadata: {0}")]
     WriteMetadata(String),
 
+    #[error("Failed to delete metadata: {0}")]
+    DeleteMetadata(std::io::Error),
+
     #[error("Unexpected null value for {0}")]
     NullValue(String),
 
@@ -186,6 +189,12 @@ pub const PERMS_IDBIT_UG: u8 = 16;
 pub const PERMS_IDS_SIZE: usize = 32;
 
 #[derive(Debug, PartialEq)]
+pub enum DelType {
+    File,
+    Dir,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum PermType {
     Chmod,
     Chown,
@@ -201,6 +210,7 @@ pub struct SyscallInfo {
     pub dirfd_position: Option<u8>,
     pub getdents_bits: Option<u8>,
     pub sets_file_perms: Option<PermType>,
+    pub deletion_type: Option<DelType>,
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,
