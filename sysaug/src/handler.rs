@@ -49,7 +49,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
 
-    pub curr_paths: RwLock<Option<[Option<PathBuf>; 3]>>,
+    pub curr_paths: RwLock<Option<[Option<PathBuf>; 4]>>,
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     // ignore the next sigstop for the following pids
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,

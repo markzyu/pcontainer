@@ -211,6 +211,7 @@ pub struct SyscallInfo {
     /// Bitwise representation. Bit0: arg0 is path. Bit1 = arg1 ...
     pub path_positions: usize,
     pub dirfd_position: Option<u8>,
+    pub dirfd_precedes_path: bool,
     pub getdents_bits: Option<u8>,
     pub sets_file_perms: Option<PermType>,
     pub deletion_type: Option<DelType>,

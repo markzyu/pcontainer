@@ -27,10 +27,15 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let ptrace_client = &self.handler.ptrace_client;
 
         // Translate paths from host namespace to tracee namespace
-        let dirfd_path = self.get_dirfd_path(&regs, syscall)?;
-        let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
+        let copy_regs = regs.clone();
+        let mut possible_args = [
+            &mut regs.arg0,
+            &mut regs.arg1,
+            &mut regs.arg2,
+            &mut regs.arg3,
+        ];
         let mut need_write_regs = false;
-        let mut save_paths: [Option<PathBuf>; 3] = Default::default();
+        let mut save_paths: [Option<PathBuf>; 4] = Default::default();
         for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
@@ -40,6 +45,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             if **ref_arg_i == 0 {
                 continue;
             }
+
+            let dirfd_path = self.get_dirfd_path(&copy_regs, syscall, i)?;
 
             // Read orig_path from registers
             let path_bytes =
@@ -111,8 +118,16 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         &self,
         regs: &GenericPurposeRegs,
         syscall: &SyscallInfo,
+        i: usize,
     ) -> Result<PathBuf, SysAugError> {
-        if let Some(dirfd_reg) = syscall.dirfd_position {
+        let maybe = if let Some(dirfd_reg) = syscall.dirfd_position {
+            Some(dirfd_reg as isize)
+        } else if syscall.dirfd_precedes_path {
+            Some((i as isize) - 1)
+        } else {
+            None
+        };
+        if let Some(dirfd_reg) = maybe {
             if dirfd_reg >= 3 {
                 return Err(SysAugError::DirfdReg);
             }

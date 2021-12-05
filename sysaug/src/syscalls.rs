@@ -97,6 +97,7 @@ macro_rules! define_paths_setperms_syscall {
     };
 }
 
+// In this version, all paths share the same dirfd
 macro_rules! define_dirfd_syscall {
     ($name:expr, $path_positions:expr, $dirfd_position:expr, $ans:ident) => {
         $ans.insert(
@@ -107,6 +108,25 @@ macro_rules! define_dirfd_syscall {
                 num: $name,
                 path_positions: $path_positions,
                 dirfd_position: Some($dirfd_position),
+                getdents_bits: None,
+                ..Default::default()
+            },
+        )
+    };
+}
+
+// In this version, the dirfd for each path is the argument immediately preceding it.
+macro_rules! define_dirfd2_syscall {
+    ($name:expr, $path_positions:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name,
+                path_positions: $path_positions,
+                dirfd_precedes_path: true,
+                dirfd_position: None,
                 getdents_bits: None,
                 ..Default::default()
             },
@@ -208,7 +228,10 @@ lazy_static! {
         define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
         define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, PermType::Chmod, ans);
         define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, ans);
+        define_dirfd2_syscall!(libc::SYS_linkat, 10, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
+        define_dirfd2_syscall!(libc::SYS_renameat, 10, ans);
+        define_dirfd_syscall!(libc::SYS_symlinkat, 4, 1, ans);
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         define_dirfd_deletion_syscall!(libc::SYS_unlinkat, 2, 0, DelType::File, ans);
         define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
