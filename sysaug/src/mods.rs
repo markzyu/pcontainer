@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ModFeature {
+    IsMetadataPath,
     OnFilePath,
     OnFileRealPath,
     OnChroot,
@@ -55,9 +56,14 @@ pub trait Mod {
         &*DEFAULT_LISTENER_SPEC
     }
 
-    // Return None if we don't want to keep metadata around for a specific path
+    // Return None if we don't want to keep metadata around for a host OS path
     fn resolve_metadata_path(&self, _path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         Ok(None)
+    }
+
+    // Given a real host OS path, check if it is a metadata path.
+    fn is_metadata_path(&self, _path: &Path) -> Result<bool, SysAugError> {
+        Ok(false)
     }
 
     fn on_chroot(&self, _raw_path: &Path) -> Result<ModAction, SysAugError> {

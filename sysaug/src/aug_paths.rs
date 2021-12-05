@@ -224,14 +224,43 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(())
     }
 
+    fn _log_and_delete_metadata(&self, path: &Path) -> Result<(), SysAugError> {
+        event!(
+            Level::TRACE,
+            "Deleting metadata file: {:?}",
+            path.to_string_lossy()
+        );
+        if !path.exists() {
+            return Ok(());
+        }
+        let _ = std::fs::remove_file(path)
+            .map_err(SysAugError::DeleteMetadata)
+            .map_err(common::display_err);
+        Ok(())
+    }
+
     fn delete_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
         if let Some(meta_path) = self._get_metadata_path(path)? {
-            event!(
-                Level::TRACE,
-                "Deleting metadata file: {:?}",
-                meta_path.to_string_lossy()
-            );
-            std::fs::remove_file(meta_path).map_err(SysAugError::DeleteMetadata)?;
+            self._log_and_delete_metadata(&meta_path)?;
+        }
+
+        if path.is_dir() {
+            for child in std::fs::read_dir(path).map_err(SysAugError::ListMetadata)? {
+                let child = child.map_err(SysAugError::ListMetadata)?;
+                let child_path = child.path();
+                if child_path.is_dir() {
+                    continue;
+                }
+                let is_metadata = self
+                    .handler
+                    .call_first_mod(mods::ModFeature::IsMetadataPath, |m| {
+                        m.is_metadata_path(&child_path)
+                    })?
+                    .unwrap_or(false);
+                if is_metadata {
+                    self._log_and_delete_metadata(&child_path)?;
+                }
+            }
         }
         Ok(())
     }

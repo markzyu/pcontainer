@@ -10,11 +10,12 @@ use sysaug::{PermType, SysAugError, SyscallInfo, TraceeHandlerStates};
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
+        ans.insert(ModFeature::IsMetadataPath);
         ans.insert(ModFeature::OverrideFileRealPath);
         ans.insert(ModFeature::OverrideFileFakePath);
         ans.insert(ModFeature::OnFileRealPath);
-        ans.insert(ModFeature::ResolveMetadataPath);
         ans.insert(ModFeature::OnSetsPerms);
+        ans.insert(ModFeature::ResolveMetadataPath);
         ans
     };
 }
@@ -111,6 +112,22 @@ impl Mod for RootfsMod {
             let mut new_filename = OsString::from(".");
             new_filename.push(filename);
             Ok(Some(path.with_file_name(new_filename)))
+        }
+    }
+
+    fn is_metadata_path(&self, path: &Path) -> Result<bool, SysAugError> {
+        if let Some(name) = path.file_name() {
+            let bytes = name.as_bytes();
+            if bytes == b"." || bytes == b".." {
+                Ok(false)
+            } else {
+                match bytes.iter().position(|&x| x != b'.') {
+                    None => Ok(bytes.len() % 2 == 1),
+                    Some(n) => Ok(n % 2 == 1),
+                }
+            }
+        } else {
+            Ok(false)
         }
     }
 

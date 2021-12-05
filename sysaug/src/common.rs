@@ -51,6 +51,9 @@ pub enum SysAugError {
     #[error("Interger conversion error")]
     IntoInt,
 
+    #[error("Cannot list metadata files in folder, because: {0}")]
+    ListMetadata(std::io::Error),
+
     #[error("Cannot lock/unlock tracee handler")]
     LockTraceeHandler,
 
