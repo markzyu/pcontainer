@@ -88,12 +88,7 @@ impl Mod for RootfsMod {
         })
     }
 
-    fn resolve_metadata_path(
-        &self,
-        rel_path: &Path,
-        dirfd_path: &Path,
-    ) -> Result<Option<PathBuf>, SysAugError> {
-        let path = dirfd_path.join(rel_path);
+    fn resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let path_str = path.to_string_lossy();
         let args = &self.states.args;
         let maybe_rootfs = args.rootfs.as_ref().or_else(|| args.chroot.as_ref());

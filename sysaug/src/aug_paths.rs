@@ -27,7 +27,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let ptrace_client = &self.handler.ptrace_client;
 
         // Translate paths from host namespace to tracee namespace
-        let save_dirfd_path = self.get_dirfd_path(&regs, syscall)?;
+        let dirfd_path = self.get_dirfd_path(&regs, syscall)?;
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 3] = Default::default();
@@ -50,11 +50,11 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             let path_action = calc_real_path(&self.handler, &orig_path_buf, syscall)?;
             notify_mods_about_path(&self.handler, syscall, &orig_path_buf, &path_action)?;
             if let PathAction::Override(new_path_val) = path_action {
-                save_paths[i] = Some(new_path_val.clone());
+                save_paths[i] = Some(dirfd_path.join(&new_path_val));
                 **ref_arg_i = self.handler.tracee_stack_append_path(new_path_val)?;
                 need_write_regs = true;
             } else {
-                save_paths[i] = Some(orig_path_buf);
+                save_paths[i] = Some(dirfd_path.join(orig_path_buf));
             }
         }
 
@@ -68,12 +68,11 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         if syscall.deletion_type.is_some() {
             let ref_save_paths = &save_paths;
             for path in ref_save_paths.iter().flatten() {
-                self.delete_metadata_for_file(path, &save_dirfd_path)?;
+                self.delete_metadata_for_file(path)?;
             }
         }
 
         common::rwoption_replace(&self.handler.curr_paths, save_paths)?;
-        common::rwoption_replace(&self.handler.curr_dirfd_path, save_dirfd_path)?;
 
         if need_write_regs {
             ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
@@ -87,12 +86,11 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
         let paths = rwoption_take_ok!(self.handler.curr_paths)?;
-        let dirfd_path = rwoption_take_ok!(self.handler.curr_dirfd_path)?;
         let del_type = &syscall.deletion_type;
         let retval = regs.syscall_retval() as isize;
         if del_type.is_none() || retval < 0 {
             for path in paths.iter().flatten() {
-                self.save_metadata_for_file(path, &dirfd_path)?;
+                self.save_metadata_for_file(path)?;
             }
         }
 
@@ -191,25 +189,24 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(())
     }
 
-    fn _get_metadata_path(&self, path: &Path, dirfd_path: &Path) -> Result<Option<PathBuf>, SysAugError> {
+    fn _get_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let maybe_meta_path = self
             .handler
             .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
-                m.resolve_metadata_path(path, dirfd_path)
+                m.resolve_metadata_path(path)
             })?
             .flatten();
         event!(
             Level::TRACE,
-            "Checking metadata for: {:?}/{:?} = {:?}",
-            dirfd_path.to_string_lossy(),
+            "Checking metadata for: {:?} = {:?}",
             path.to_string_lossy(),
             maybe_meta_path,
         );
         Ok(maybe_meta_path)
     }
 
-    fn save_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
-        if let Some(meta_path) = self._get_metadata_path(path, dirfd_path)? {
+    fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+        if let Some(meta_path) = self._get_metadata_path(path)? {
             event!(
                 Level::TRACE,
                 "Writing metadata file: {:?}",
@@ -227,8 +224,8 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         Ok(())
     }
 
-    fn delete_metadata_for_file(&self, path: &Path, dirfd_path: &Path) -> Result<(), SysAugError> {
-        if let Some(meta_path) = self._get_metadata_path(path, dirfd_path)? {
+    fn delete_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+        if let Some(meta_path) = self._get_metadata_path(path)? {
             event!(
                 Level::TRACE,
                 "Deleting metadata file: {:?}",

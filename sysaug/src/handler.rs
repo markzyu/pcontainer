@@ -50,7 +50,6 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
 
     pub curr_paths: RwLock<Option<[Option<PathBuf>; 3]>>,
-    pub curr_dirfd_path: RwLock<Option<PathBuf>>,
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     // ignore the next sigstop for the following pids
     pub ignore_sigstops: RwLock<HashSet<nix::unistd::Pid>>,
@@ -80,7 +79,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             mods: RwLock::new(HashMap::new()),
             mod_providers: mods,
             curr_paths: RwLock::default(),
-            curr_dirfd_path: RwLock::default(),
             orig_request_regs: RwLock::default(),
             ignore_sigstops: RwLock::default(),
             signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),

@@ -56,11 +56,7 @@ pub trait Mod {
     }
 
     // Return None if we don't want to keep metadata around for a specific path
-    fn resolve_metadata_path(
-        &self,
-        _path: &Path,
-        _dirfd_path: &Path,
-    ) -> Result<Option<PathBuf>, SysAugError> {
+    fn resolve_metadata_path(&self, _path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         Ok(None)
     }
 
