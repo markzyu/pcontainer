@@ -787,6 +787,15 @@ pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceEr
     Ok(())
 }
 
+pub fn stack_ptr() -> usize {
+    let mut ans: Option<usize> = None;
+    backtrace::trace(|frame| {
+        ans.replace(frame.sp() as usize);
+        false
+    });
+    ans.unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use nix::sys::ptrace;

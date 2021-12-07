@@ -40,6 +40,7 @@ pub fn calc_real_path<T: executor::PtraceClient>(
     orig_path: &Path,
     syscall: &SyscallInfo,
 ) -> Result<PathAction, SysAugError> {
+    event!(Level::DEBUG, "Following symlink {:?}", orig_path);
     let action = calc_real_path_simple(handler, orig_path, syscall)?;
     if let PathAction::Override(real_path) = &action {
         if let Ok(metadata) = std::fs::symlink_metadata(real_path) {

@@ -186,7 +186,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     pub fn trace_span(&self) -> tracing::Span {
-        return span!(Level::ERROR, "event_loop", "{:?}", self.pid);
+        span!(Level::ERROR, "event_loop", "{:?}", self.pid)
     }
 
     pub fn start<F>(
@@ -354,7 +354,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         last_syscall.total_times
                     )
                     .entered();
-                    event!(Level::TRACE, "syscall event");
+                    event!(
+                        Level::TRACE,
+                        "syscall event, stack@{:x}",
+                        ptrace::stack_ptr()
+                    );
                     if self.states.args.gdb_at == Some(last_syscall.total_times) {
                         return self.transfer_to_gdb();
                     }
