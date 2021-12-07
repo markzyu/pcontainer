@@ -196,18 +196,22 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     where
         F: FnOnce() + Send + 'static,
     {
-        thread::spawn(move || {
-            let self2 = Arc::clone(&self);
-            let _span = self.trace_span().entered();
-            let result = self.event_loop().map_err(display_err);
-            if result.is_err() {
-                let _ = sys::signal::kill(self2.pid, Some(sys::signal::Signal::SIGKILL))
-                    .map_err(display_err);
-                self2.states.failed.store(true, Ordering::Relaxed);
-            }
-            callback();
-            result.ok()
-        })
+        let thread_name = format!("tracer-{}", self.pid);
+        let new_thread = thread::Builder::new().name(thread_name);
+        new_thread
+            .spawn(move || {
+                let self2 = Arc::clone(&self);
+                let _span = self.trace_span().entered();
+                let result = self.event_loop().map_err(display_err);
+                if result.is_err() {
+                    let _ = sys::signal::kill(self2.pid, Some(sys::signal::Signal::SIGKILL))
+                        .map_err(display_err);
+                    self2.states.failed.store(true, Ordering::Relaxed);
+                }
+                callback();
+                result.ok()
+            })
+            .unwrap()
     }
 
     pub fn failed(&self) -> bool {
