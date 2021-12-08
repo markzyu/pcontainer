@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ModFeature {
-    IsMetadataPath,
+    DeleteMetaDir,
     OnFilePath,
     OnFileRealPath,
     OnChroot,
@@ -69,9 +69,9 @@ pub trait Mod {
         Ok(None)
     }
 
-    // Given a real host OS path, check if it is a metadata path.
-    fn is_metadata_path(&self, _path: &Path) -> Result<bool, SysAugError> {
-        Ok(false)
+    // Given a real host OS path to a directory, delete all metadata inside it.
+    fn delete_meta_dir(&self, _path: &Path) -> Result<(), SysAugError> {
+        Ok(())
     }
 
     fn on_chroot(&self, _raw_path: &Path) -> Result<ModAction, SysAugError> {

@@ -75,6 +75,7 @@ class TestRootFs(t.TestCase):
         ans = c.run_script(cmd.encode(), rootfs=True)
         self.assertEqual(ans.returncode, 0)
         self.assertFalse(os.path.exists(STAGING))
+        self.assertFalse(os.path.exists(METADATA + "/rootfs"))
 
     def test_rmdir_deletes_untracked_metadata_files(self):
         """
@@ -95,6 +96,7 @@ class TestRootFs(t.TestCase):
         ans = c.run_script(cmd.encode(), rootfs=True)
         self.assertEqual(ans.returncode, 0)
         self.assertFalse(os.path.exists(STAGING))
+        self.assertFalse(os.path.exists(METADATA + "/rootfs"))
     
     def test_chroot_symlinks(self):
         os.system(f"ls -l {STAGING}")

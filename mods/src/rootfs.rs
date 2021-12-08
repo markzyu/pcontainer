@@ -8,6 +8,7 @@ use sysaug::{PermType, SysAugError, SyscallInfo, TraceeHandlerStates};
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
+        ans.insert(ModFeature::DeleteMetaDir);
         ans.insert(ModFeature::OnSetsPerms);
         ans.insert(ModFeature::ResolveMetadataPath);
         ans
@@ -83,6 +84,14 @@ impl Mod for RootfsMod {
         }
         metadir.pop();
         Ok(Some(metadir.join("meta")))
+    }
+
+    fn delete_meta_dir(&self, path: &Path) -> Result<(), SysAugError> {
+        if let Some(mut meta_path) = self.resolve_metadata_path(path)? {
+            meta_path.pop();
+            let _ = std::fs::remove_dir_all(meta_path);
+        }
+        Ok(())
     }
 
     fn on_sets_perms(&self, syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
