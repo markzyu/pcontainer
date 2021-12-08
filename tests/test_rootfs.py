@@ -1,5 +1,6 @@
 from common import STAGING
 import common as c
+import errno
 import os
 import subprocess
 import tarfile
@@ -105,6 +106,35 @@ class TestRootFs(t.TestCase):
         ans = c.run_script(cmd.encode(), rootfs=True)
         self.assertEqual(ans.returncode, 0)
         self.assertFalse(os.path.exists(STAGING))
+    
+    def test_chroot_symlinks(self):
+        os.system(f"ls -l {STAGING}")
+        ans = c.run_elf_chroot("tests/fixtures/05-symlinks.out")
+        stdout = ans.stdout.decode("utf8")
+        print("Actual stdout:")
+        print(stdout)
+        print()
+        self.assertEqual(
+            stdout,
+            (
+                "created symlinks\n"
+                "/link -> /link\n"
+                "/a -> /c\n"
+                "/y -> /x\n"
+                f"readlink(/x) = -1 errno = {errno.EINVAL}\n"
+                f"open(/link) = -1 errno = {errno.ELOOP}\n"
+                f"open(/a) = -1 errno = {errno.ELOOP}\n"
+                f"open(/y) = 0 errno = {errno.ELOOP}\n"
+                f"open(/x) = 0 errno = {errno.ELOOP}\n"
+                f"access(/link) = 0 errno = {errno.ENOENT}\n"
+                f"access(/a) = -1 errno = {errno.ENOENT}\n"
+                f"access(/b) = -1 errno = {errno.ENOENT}\n"
+                f"access(/c) = -1 errno = {errno.ENOENT}\n"
+                f"access(/y) = -1 errno = {errno.ENOENT}\n"
+                f"access(/x) = 0 errno = {errno.ENOENT}\n"
+            ),
+        )
+        self.assertEqual(ans.returncode, 0)
 
 
 def _sort_tar_info(obj):
