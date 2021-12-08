@@ -23,11 +23,37 @@ def run_script(script, timeout=5, stderr=None, **kwargs):
     )
 
 
-def _get_cmd(root=False, rootfs=False):
+def run_elf_chroot(elf_path, timeout=5, stderr=None, **kwargs):
+    """
+    Run an ELF binary file with a proper --chroot
+    """
+    if isinstance(elf_path, bytes):
+        elf_path = elf_path.decode("utf8")
+
+    setup_cmd = f"""
+        tests/fixtures/00-setup-chroot.sh '{elf_path}' {STAGING}
+    """
+    os.system(setup_cmd)
+
+    cmd = _get_cmd(chroot=True, **kwargs)
+    cmd.append("--cmd")
+    cmd.append("/executable")
+    cmd_expr = " ".join(cmd)
+    print(f"cmd = {cmd_expr}")
+    return sub.run(
+        cmd, 
+        input=b"",
+        timeout=timeout,
+        stdout=sub.PIPE,
+        stderr=stderr or os.sys.stderr,
+    )
+
+
+def _get_cmd(root=False, rootfs=False, chroot=False):
     args = [
         "target/debug/dockify",
         "--root" if root else "",
-        "--rootfs" if rootfs else "",
-        STAGING if rootfs else "",
+        "--chroot" if chroot else "--rootfs" if rootfs else "",
+        STAGING if (chroot or rootfs) else "",
     ]
     return list(filter(bool, args))
