@@ -4,6 +4,7 @@ use crate::handler::TraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -35,12 +36,14 @@ pub fn calc_real_path_simple<T: executor::PtraceClient>(
 }
 
 // Calculate real path of file + following symlinks that use fake paths
-pub fn calc_real_path<T: executor::PtraceClient>(
+pub fn calc_real_path_recurse<T: executor::PtraceClient>(
     handler: &HandlerArc<T>,
     orig_path: &Path,
     syscall: &SyscallInfo,
+    mut visited: HashSet<PathBuf>,
 ) -> Result<PathAction, SysAugError> {
     event!(Level::DEBUG, "Following symlink {:?}", orig_path);
+    visited.insert(orig_path.into());
     let action = calc_real_path_simple(handler, orig_path, syscall)?;
     if let PathAction::Override(real_path) = &action {
         if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
@@ -51,13 +54,25 @@ pub fn calc_real_path<T: executor::PtraceClient>(
             if link.is_relative() {
                 return Ok(action);
             }
-            calc_real_path(handler, link.as_path(), syscall)
+            if visited.contains(&link) {
+                return Ok(action);
+            }
+            calc_real_path_recurse(handler, link.as_path(), syscall, visited)
         } else {
             Ok(action)
         }
     } else {
         Ok(action)
     }
+}
+
+// Same as calc_real_path_recurse
+pub fn calc_real_path<T: executor::PtraceClient>(
+    handler: &HandlerArc<T>,
+    orig_path: &Path,
+    syscall: &SyscallInfo,
+) -> Result<PathAction, SysAugError> {
+    calc_real_path_recurse(handler, orig_path, syscall, HashSet::new())
 }
 
 // Ask every mod to translate a path from rootfs point of view to real paths
