@@ -236,12 +236,15 @@ lazy_static! {
         define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, ans);
         define_dirfd2_syscall!(libc::SYS_linkat, 10, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
+
         define_dirfd2_syscall!(libc::SYS_renameat, 10, ans);
         define_dirfd_syscall!(libc::SYS_symlinkat, 4, 1, ans);
-        update_syscall!(ans, libc::SYS_symlinkat, |x| x.dont_follow_symlink = true);
-        define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         define_dirfd_deletion_syscall!(libc::SYS_unlinkat, 2, 0, DelType::File, ans);
+        update_syscall!(ans, libc::SYS_renameat, |x| x.dont_follow_symlink = true);
+        update_syscall!(ans, libc::SYS_symlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_unlinkat, |x| x.dont_follow_symlink = true);
+
+        define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
 
@@ -279,6 +282,7 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
     define_paths_syscall!(libc::SYS_rename, 3, ans);
+    update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
     define_paths_syscall!(libc::SYS_utime, 1, ans);
     define_getdents_syscall!(libc::SYS_getdents, 32, ans);
     add_xplat_syscalls2(ans);

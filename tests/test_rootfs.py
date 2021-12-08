@@ -117,12 +117,14 @@ class TestRootFs(t.TestCase):
                 f"open(/a) = -1 errno = {errno.ELOOP}\n"
                 f"open(/y) = 0 errno = {errno.ELOOP}\n"
                 f"open(/x) = 0 errno = {errno.ELOOP}\n"
+                "/z -> /x\n"
                 f"access(/link) = -1 errno = {errno.ENOENT}\n"
                 f"access(/a) = -1 errno = {errno.ENOENT}\n"
                 f"access(/b) = -1 errno = {errno.ENOENT}\n"
                 f"access(/c) = -1 errno = {errno.ENOENT}\n"
                 f"access(/y) = -1 errno = {errno.ENOENT}\n"
                 f"access(/x) = 0 errno = {errno.ENOENT}\n"
+                f"access(/z) = -1 errno = {errno.ENOENT}\n"
             ),
         )
         self.assertEqual(ans.returncode, 0)

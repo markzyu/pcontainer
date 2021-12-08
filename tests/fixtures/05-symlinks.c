@@ -57,6 +57,15 @@ int main() {
     retval = open("/x", O_RDONLY);
     printf("open(/x) = %d errno = %d\n", retval >= 0 ? 0 : retval, errno);
 
+    // Rename
+    retval = rename("/y", "/z");
+    if (retval < 0) return errno;
+
+    memset(buffer, 0, 512);
+    retval = readlink("/z", buffer, 512);
+    if (retval < 0) return errno;
+    printf("/z -> %s\n", buffer);
+
     // Delete
     retval = unlink("/link");
     if (retval < 0) return errno;
@@ -66,7 +75,7 @@ int main() {
     if (retval < 0) return errno;
     retval = unlink("/c");
     if (retval < 0) return errno;
-    retval = unlink("/y");
+    retval = unlink("/z");
     if (retval < 0) return errno;
 
     // Double check whether links still exist
@@ -82,6 +91,8 @@ int main() {
     printf("access(/y) = %d errno = %d\n", retval, errno);
     retval = faccessat(AT_FDCWD, "/x", R_OK, AT_SYMLINK_NOFOLLOW);
     printf("access(/x) = %d errno = %d\n", retval, errno);
+    retval = faccessat(AT_FDCWD, "/z", R_OK, AT_SYMLINK_NOFOLLOW);
+    printf("access(/z) = %d errno = %d\n", retval, errno);
 
 	return 0;
 }
