@@ -230,10 +230,14 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
         if let Some(meta_path) = self._get_metadata_path(path)? {
             event!(
-                Level::TRACE,
+                Level::DEBUG,
                 "Writing metadata file: {:?}",
                 meta_path.to_string_lossy()
             );
+            let metadir = meta_path.parent().unwrap();
+            let _ = std::fs::create_dir_all(metadir)
+                .map_err(SysAugError::MetadataDir)
+                .map_err(common::display_err);
             return match std::fs::write(meta_path, META_INIT) {
                 Ok(_) => Ok(()),
                 Err(e) => match e.kind() {

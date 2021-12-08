@@ -63,6 +63,9 @@ pub enum SysAugError {
     #[error("Failed to write metadata: {0}")]
     WriteMetadata(String),
 
+    #[error("Failed to create .metadata folder: {0}")]
+    MetadataDir(std::io::Error),
+
     #[error("Failed to delete metadata: {0}")]
     DeleteMetadata(std::io::Error),
 

@@ -1,4 +1,4 @@
-from common import STAGING
+from common import METADATA, STAGING
 import common as c
 import errno
 import os
@@ -16,6 +16,7 @@ class TestRootFs(t.TestCase):
             f"""
             pwd >&2;
             rm -rf {STAGING}; 
+            rm -rf {METADATA}; 
             mkdir -p {STAGING}; 
             cd {STAGING};
             rm -f ../result.tar;
@@ -42,17 +43,15 @@ class TestRootFs(t.TestCase):
         )
         self.assertEqual(ans.returncode, 0)
 
-    def test_rootfs_reads_and_hides_metadata(self):
-        self._setup_untar("01-rootfs-metadata-raw.tar")
-
+    def compare_tar_with_dir(self, dir, tar):
         cmd = f"""
-        set -x;
-        cd {STAGING};
+        cd {dir};
+        rm ../result.tar;
         tar cf ../result.tar .
         """
-        ans = c.run_script(cmd.encode(), rootfs=True)
-        self.assertEqual(ans.returncode, 0)
-        with tarfile.open("tests/fixtures/01-rootfs-metadata-mounted.tar") as expect_tar:
+        ok = os.system(cmd)
+        self.assertEqual(ok, 0)
+        with tarfile.open(f"tests/fixtures/{tar}") as expect_tar:
             expect_val = _sort_tar_info(map(_tar_info_minimal, expect_tar.getmembers()))
         with tarfile.open("tests/fixtures/result.tar") as actual_tar:
             actual_val = _sort_tar_info(map(_tar_info_minimal, actual_tar.getmembers()))
@@ -60,18 +59,8 @@ class TestRootFs(t.TestCase):
 
     def test_rootfs_creates_metadata(self):
         self._setup_untar_in_container("01-rootfs-metadata-mounted.tar", rootfs=True)
-
-        cmd = f"""
-        cd {STAGING};
-        tar cf ../result.tar .
-        """
-        ok = os.system(cmd)
-        self.assertEqual(ok, 0)
-        with tarfile.open("tests/fixtures/01-rootfs-metadata-raw.tar") as expect_tar:
-            expect_val = _sort_tar_info(map(_tar_info_minimal, expect_tar.getmembers()))
-        with tarfile.open("tests/fixtures/result.tar") as actual_tar:
-            actual_val = _sort_tar_info(map(_tar_info_minimal, actual_tar.getmembers()))
-        self.assertEqual(expect_val, actual_val)
+        self.compare_tar_with_dir(METADATA, "01-rootfs-metadata-raw.tar")
+        self.compare_tar_with_dir(STAGING, "01-rootfs-metadata-mounted.tar")
 
     def test_rm_rf_after_rootfs_creates_metadata(self):
         """

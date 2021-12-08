@@ -3,6 +3,7 @@ import subprocess as sub
 
 
 STAGING = "tests/fixtures/staging"
+METADATA = "tests/fixtures/staging.metadata"
 
 
 def run(args, **kwargs):

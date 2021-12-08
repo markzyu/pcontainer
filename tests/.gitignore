@@ -1,5 +1,6 @@
 fixtures/result.tar
 fixtures/staging
+fixtures/staging.metadata
 fixtures/.*.tar
 __pycache__
 *.pyc

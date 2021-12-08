@@ -1,19 +1,13 @@
 use lazy_static::lazy_static;
 use std::collections::HashSet;
-use std::ffi::OsString;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use sysaug::mods::{Mod, ModAction, ModFeature, PathAction};
+use sysaug::mods::{Mod, ModAction, ModFeature};
 use sysaug::{PermType, SysAugError, SyscallInfo, TraceeHandlerStates};
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
-        ans.insert(ModFeature::IsMetadataPath);
-        ans.insert(ModFeature::OverrideFileRealPath);
-        ans.insert(ModFeature::OverrideFileFakePath);
-        ans.insert(ModFeature::OnFileRealPath);
         ans.insert(ModFeature::OnSetsPerms);
         ans.insert(ModFeature::ResolveMetadataPath);
         ans
@@ -28,33 +22,6 @@ impl RootfsMod {
     pub fn new_box(states: Arc<TraceeHandlerStates>) -> Box<dyn Mod> {
         Box::new(RootfsMod { states })
     }
-
-    fn map_components(
-        &self,
-        path: &Path,
-        mapper: fn(&[u8]) -> PathAction,
-    ) -> Result<PathAction, SysAugError> {
-        let mut buf = PathBuf::new();
-        let mut changed = false;
-        for component in path.components() {
-            let result = mapper(component.as_os_str().as_bytes());
-            match result {
-                PathAction::Override(override_path) => {
-                    buf.push(override_path);
-                    changed = true;
-                }
-                PathAction::None => {
-                    buf.push(component);
-                }
-                other => return Ok(other),
-            }
-        }
-        if changed {
-            Ok(PathAction::Override(buf))
-        } else {
-            Ok(PathAction::None)
-        }
-    }
 }
 
 impl Mod for RootfsMod {
@@ -68,31 +35,17 @@ impl Mod for RootfsMod {
         &*DEFAULT_LISTENER_SPEC
     }
 
-    fn override_file_real_path(
-        &self,
-        curr_path: &Path,
-        _syscall: &SyscallInfo,
-    ) -> Result<PathAction, SysAugError> {
-        self.map_components(curr_path, |bytes| {
-            if bytes == b"." || bytes == b".." {
-                return PathAction::None;
-            }
-            let maybe_n_dots = bytes.iter().position(|&x| x != b'.');
-            if maybe_n_dots != Some(0) {
-                let n_dots = maybe_n_dots.unwrap_or(bytes.len());
-                let mut result = b".".repeat(n_dots * 2);
-                result.extend_from_slice(&bytes[n_dots..]);
-                let osstring = OsString::from_vec(result);
-                return PathAction::Override(osstring.into());
-            }
-            PathAction::None
-        })
-    }
-
     fn resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
-        let path_str = path.to_string_lossy();
         let args = &self.states.args;
-        let maybe_rootfs = args.rootfs.as_ref().or_else(|| args.chroot.as_ref());
+        let rootfs = args
+            .rootfs
+            .as_ref()
+            .or_else(|| args.chroot.as_ref())
+            .unwrap();
+        if rootfs == Path::new("/") {
+            // If setting real root as chroot/rootfs, don't create metadata
+            return Ok(None);
+        }
         if !path.exists() {
             return Ok(None);
         }
@@ -100,59 +53,36 @@ impl Mod for RootfsMod {
         if canonical_path.is_err() {
             return Ok(None);
         }
-        if !canonical_path.unwrap().starts_with(maybe_rootfs.unwrap()) {
+        let canonical_path_unwrap = canonical_path.unwrap();
+
+        let mut metaname = rootfs.file_name().unwrap().to_os_string();
+        metaname.push(".metadata");
+        let mut metadir = rootfs.with_file_name(metaname);
+        metadir.push("rootfs");
+
+        let relative_path = canonical_path_unwrap.strip_prefix(rootfs);
+        if relative_path.is_err() {
             return Ok(None);
         }
-        if path.is_dir() {
-            Ok(Some(path.join("...")))
-        } else {
-            let filename = path
-                .file_name()
-                .ok_or_else(|| self.err("FailedToReadFilename", &path_str))?;
-            let mut new_filename = OsString::from(".");
-            new_filename.push(filename);
-            Ok(Some(path.with_file_name(new_filename)))
-        }
-    }
+        let relative_path_unwrap = relative_path.unwrap();
 
-    fn is_metadata_path(&self, path: &Path) -> Result<bool, SysAugError> {
-        if let Some(name) = path.file_name() {
-            let bytes = name.as_bytes();
-            if bytes == b"." || bytes == b".." {
-                Ok(false)
+        metadir.push("chld");
+        for component in relative_path_unwrap.components() {
+            if component == Component::CurDir {
+                continue;
+            }
+            if component == Component::RootDir {
+                continue;
+            }
+            if let Component::Normal(part) = component {
+                metadir.push(part);
+                metadir.push("chld");
             } else {
-                match bytes.iter().position(|&x| x != b'.') {
-                    None => Ok(bytes.len() % 2 == 1),
-                    Some(n) => Ok(n % 2 == 1),
-                }
+                return Ok(None);
             }
-        } else {
-            Ok(false)
         }
-    }
-
-    fn override_file_fake_path(
-        &self,
-        curr_path: &Path,
-        _syscall: &SyscallInfo,
-    ) -> Result<PathAction, SysAugError> {
-        self.map_components(curr_path, |bytes| {
-            if bytes == b"." || bytes == b".." {
-                return PathAction::None;
-            }
-            let maybe_n_dots = bytes.iter().position(|&x| x != b'.');
-            if maybe_n_dots != Some(0) {
-                let n_dots = maybe_n_dots.unwrap_or(bytes.len());
-                if n_dots % 2 == 1 {
-                    return PathAction::HidePath;
-                }
-                let mut result = b".".repeat(n_dots / 2);
-                result.extend_from_slice(&bytes[n_dots..]);
-                let osstring = OsString::from_vec(result);
-                return PathAction::Override(osstring.into());
-            }
-            PathAction::None
-        })
+        metadir.pop();
+        Ok(Some(metadir.join("meta")))
     }
 
     fn on_sets_perms(&self, syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
