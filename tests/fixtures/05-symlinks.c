@@ -11,9 +11,10 @@ int main() {
     char buffer[512];
        
     // Creation
-    retval = open("/x", O_CREAT);
-    if (retval < 0) return errno;
-    close(retval);
+    FILE *f = fopen("/x", "w");
+    if (f == NULL) return errno;
+    fprintf(f, "TEST");
+    fclose(f);
 
     retval = symlink("/x", "/y");
     if (retval < 0) return errno;

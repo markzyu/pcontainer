@@ -46,7 +46,9 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
     visited.insert(orig_path.into());
     let action = calc_real_path_simple(handler, orig_path, syscall)?;
     if let PathAction::Override(real_path) = &action {
-        if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
+        if syscall.dont_follow_symlink {
+            Ok(action)
+        } else if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
             if !metadata.file_type().is_symlink() {
                 return Ok(action);
             }
@@ -55,7 +57,7 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
                 return Ok(action);
             }
             if visited.contains(&link) {
-                return Ok(action);
+                return Ok(PathAction::ELOOP);
             }
             calc_real_path_recurse(handler, link.as_path(), syscall, visited)
         } else {

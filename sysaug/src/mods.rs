@@ -22,8 +22,16 @@ pub enum ModFeature {
 
 #[derive(Debug, PartialEq)]
 pub enum PathAction {
+    // Encountered a symlink loop
+    ELOOP,
+
+    // No action
     None,
+
+    // Hide this path from getdents
     HidePath,
+
+    // Override the name of this path
     Override(PathBuf),
 }
 

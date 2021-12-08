@@ -215,6 +215,7 @@ pub struct SyscallInfo {
     pub getdents_bits: Option<u8>,
     pub sets_file_perms: Option<PermType>,
     pub deletion_type: Option<DelType>,
+    pub dont_follow_symlink: bool,
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,

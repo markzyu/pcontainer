@@ -43,10 +43,10 @@ impl RootfsMod {
                     buf.push(override_path);
                     changed = true;
                 }
-                PathAction::HidePath => return Ok(PathAction::HidePath),
                 PathAction::None => {
                     buf.push(component);
                 }
+                other => return Ok(other),
             }
         }
         if changed {

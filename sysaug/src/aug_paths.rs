@@ -56,12 +56,19 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             // Calculate path_action, notify mods, and maybe update tracee
             let path_action = calc_real_path(&self.handler, &orig_path_buf, syscall)?;
             notify_mods_about_path(&self.handler, syscall, &orig_path_buf, &path_action)?;
-            if let PathAction::Override(new_path_val) = path_action {
-                save_paths[i] = Some(dirfd_path.join(&new_path_val));
-                **ref_arg_i = self.handler.tracee_stack_append_path(new_path_val)?;
-                need_write_regs = true;
-            } else {
-                save_paths[i] = Some(dirfd_path.join(orig_path_buf));
+            match path_action {
+                PathAction::Override(new_path_val) => {
+                    save_paths[i] = Some(dirfd_path.join(&new_path_val));
+                    **ref_arg_i = self.handler.tracee_stack_append_path(new_path_val)?;
+                    need_write_regs = true;
+                }
+                PathAction::ELOOP => {
+                    self.handler.skip_syscall(-libc::ELOOP as usize)?;
+                    return Ok(());
+                }
+                _ => {
+                    save_paths[i] = Some(dirfd_path.join(orig_path_buf));
+                }
             }
         }
 

@@ -69,6 +69,8 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             notify_mods_about_path(&self.handler, syscall, &new_elf_path, &path_action)?;
             if let PathAction::Override(new_path_val) = path_action {
                 new_elf_path = new_path_val;
+            } else if path_action == PathAction::ELOOP {
+                return Ok(false);
             }
         }
 
