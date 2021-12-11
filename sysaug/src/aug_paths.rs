@@ -47,7 +47,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
                 continue;
             }
 
-            let dirfd_path = self.get_dirfd_path(&copy_regs, syscall, i)?;
+            let dirfd_path = self
+                .get_dirfd_path(&copy_regs, syscall, i)?
+                .unwrap_or("".into());
 
             // Read orig_path from registers
             let path_bytes =
@@ -127,7 +129,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         regs: &GenericPurposeRegs,
         syscall: &SyscallInfo,
         i: usize,
-    ) -> Result<PathBuf, SysAugError> {
+    ) -> Result<Option<PathBuf>, SysAugError> {
         let maybe = if let Some(dirfd_reg) = syscall.dirfd_position {
             Some(dirfd_reg as isize)
         } else if syscall.dirfd_precedes_path {
@@ -146,7 +148,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             }
         }
         // Otherwise, use cwd of tracee
-        Ok(procfs::getcwd(self.handler.pid)?)
+        Ok(Some(procfs::getcwd(self.handler.pid)?))
     }
 
     fn replace_getdents_result<T>(
