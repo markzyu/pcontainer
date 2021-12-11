@@ -28,7 +28,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
 
         // Translate paths from host namespace to tracee namespace
         let copy_regs = regs.clone();
-        let mut possible_args = [
+        let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
+        let mut write_args = [
             &mut regs.arg0,
             &mut regs.arg1,
             &mut regs.arg2,
@@ -36,7 +37,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         ];
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 4] = Default::default();
-        for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
+        for (i, ref_arg_i) in write_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
                 continue;
@@ -54,7 +55,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             let orig_path_buf = path_from_bytes(path_bytes)?;
 
             // Calculate path_action, notify mods, and maybe update tracee
-            let path_action = calc_real_path(&self.handler, &orig_path_buf, syscall)?;
+            let path_action = calc_real_path(&self.handler, &orig_path_buf, syscall, &read_args)?;
             notify_mods_about_path(&self.handler, syscall, &orig_path_buf, &path_action)?;
             match path_action {
                 PathAction::Override(new_path_val) => {

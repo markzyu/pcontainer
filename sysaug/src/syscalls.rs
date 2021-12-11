@@ -220,13 +220,10 @@ lazy_static! {
         define_paths_syscall!(libc::SYS_listxattr, 1, ans);
         define_paths_syscall!(libc::SYS_removexattr, 1, ans);
         define_paths_syscall!(libc::SYS_setxattr, 1, ans);
-        define_paths_syscall!(libc::SYS_statfs, 1, ans);
         define_paths_syscall!(libc::SYS_swapoff, 1, ans);
         define_paths_syscall!(libc::SYS_swapon, 1, ans);
         define_paths_syscall!(libc::SYS_truncate, 1, ans);
         define_paths_syscall!(libc::SYS_umount2, 1, ans);
-        define_paths_syscall!(libc::SYS_lgetxattr, 1, ans);
-        define_paths_syscall!(libc::SYS_llistxattr, 1, ans);
         define_syscall!(libc::SYS_execve, Augments::Exec, ans);
 
         define_dirfd_syscall!(libc::SYS_openat, 2, 0, ans);
@@ -237,15 +234,32 @@ lazy_static! {
         define_dirfd2_syscall!(libc::SYS_linkat, 10, ans);
         define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
 
+        define_dirfd_syscall!(libc::SYS_readlinkat, 2, 0, ans);
         define_dirfd2_syscall!(libc::SYS_renameat, 10, ans);
         define_dirfd_syscall!(libc::SYS_symlinkat, 4, 1, ans);
         define_dirfd_deletion_syscall!(libc::SYS_unlinkat, 2, 0, DelType::File, ans);
+        define_paths_syscall!(libc::SYS_lgetxattr, 1, ans);
+        define_paths_syscall!(libc::SYS_llistxattr, 1, ans);
+        update_syscall!(ans, libc::SYS_readlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_renameat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_symlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_unlinkat, |x| x.dont_follow_symlink = true);
+        update_syscall!(ans, libc::SYS_lgetxattr, |x| x.dont_follow_symlink = true);
+        update_syscall!(ans, libc::SYS_llistxattr, |x| x.dont_follow_symlink = true);
+
+        define_paths_syscall!(libc::SYS_statfs, 1, ans);
+        define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
+        update_syscall!(ans, libc::SYS_statx, |x| {
+            x.flags = Some(2);
+            x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+        });
 
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
-        define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
+        update_syscall!(ans, libc::SYS_utimensat, |x| {
+            x.flags = Some(3);
+            x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+        });
+
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
 
         define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, ans);
@@ -275,6 +289,11 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 #[cfg(target_arch = "aarch64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
+    update_syscall!(ans, libc::SYS_newfstatat, |x| {
+        x.flags = Some(3);
+        x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+    });
+
     define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
 }
 
@@ -283,6 +302,11 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
     define_paths_syscall!(libc::SYS_rename, 3, ans);
     update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
+    update_syscall!(ans, libc::SYS_newfstatat, |x| {
+        x.flags = Some(3);
+        x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+    });
+
     define_paths_syscall!(libc::SYS_utime, 1, ans);
     define_getdents_syscall!(libc::SYS_getdents, 32, ans);
     add_xplat_syscalls2(ans);

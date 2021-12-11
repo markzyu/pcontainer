@@ -210,6 +210,8 @@ pub enum PermType {
 pub struct SyscallInfo {
     /// The type of augment that will handle this syscall
     pub augment: Augments,
+    /// The syscall argument that stores flags like AT_SYMLINK_NOFOLLOW
+    pub flags: Option<usize>,
 
     /// Bitwise representation. Bit0: arg0 is path. Bit1 = arg1 ...
     pub path_positions: usize,
@@ -219,6 +221,7 @@ pub struct SyscallInfo {
     pub sets_file_perms: Option<PermType>,
     pub deletion_type: Option<DelType>,
     pub dont_follow_symlink: bool,
+    pub flag_dont_follow_symlink: Option<usize>,
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,

@@ -61,11 +61,13 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         let argv_bytes = ptrace_client
             .execute(move || ptrace::read_bytes_until_num_zeroes(pid, arg1, *USIZE_SIZE))??;
 
+        let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
+
         // Translate elf path to real path
         let elf_path_buf = path_from_bytes(path_bytes)?;
         let mut new_elf_path = elf_path_buf.clone();
         {
-            let path_action = calc_real_path(&self.handler, &new_elf_path, syscall)?;
+            let path_action = calc_real_path(&self.handler, &new_elf_path, syscall, &read_args)?;
             notify_mods_about_path(&self.handler, syscall, &new_elf_path, &path_action)?;
             if let PathAction::Override(new_path_val) = path_action {
                 new_elf_path = new_path_val;
@@ -96,7 +98,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
 
             // Calculate real path of interpreter
             let interp_path_buf = path_from_bytes(buf)?;
-            let path_action = calc_real_path(&self.handler, &interp_path_buf, syscall)?;
+            let path_action = calc_real_path(&self.handler, &interp_path_buf, syscall, &read_args)?;
             notify_mods_about_path(&self.handler, syscall, &interp_path_buf, &path_action)?;
             let mut new_interp_path = interp_path_buf;
             if let PathAction::Override(new_path_val) = path_action {

@@ -41,14 +41,22 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
     orig_path: &Path,
     syscall: &SyscallInfo,
     mut visited: HashSet<PathBuf>,
+    args: &[usize],
 ) -> Result<PathAction, SysAugError> {
     event!(Level::DEBUG, "Following symlink {:?}", orig_path);
     visited.insert(orig_path.into());
     let action = calc_real_path_simple(handler, orig_path, syscall)?;
     if let PathAction::Override(real_path) = &action {
         if syscall.dont_follow_symlink {
-            Ok(action)
-        } else if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
+            return Ok(action);
+        } else if let (Some(flag), Some(flag_reg)) =
+            (syscall.flag_dont_follow_symlink, syscall.flags)
+        {
+            if args[flag_reg] | flag != 0 {
+                return Ok(action);
+            }
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
             if !metadata.file_type().is_symlink() {
                 return Ok(action);
             }
@@ -59,13 +67,10 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
             if visited.contains(&link) {
                 return Ok(PathAction::ELOOP);
             }
-            calc_real_path_recurse(handler, link.as_path(), syscall, visited)
-        } else {
-            Ok(action)
+            return calc_real_path_recurse(handler, link.as_path(), syscall, visited, args);
         }
-    } else {
-        Ok(action)
     }
+    Ok(action)
 }
 
 // Same as calc_real_path_recurse
@@ -73,8 +78,9 @@ pub fn calc_real_path<T: executor::PtraceClient>(
     handler: &HandlerArc<T>,
     orig_path: &Path,
     syscall: &SyscallInfo,
+    args: &[usize],
 ) -> Result<PathAction, SysAugError> {
-    calc_real_path_recurse(handler, orig_path, syscall, HashSet::new())
+    calc_real_path_recurse(handler, orig_path, syscall, HashSet::new(), args)
 }
 
 // Ask every mod to translate a path from rootfs point of view to real paths
