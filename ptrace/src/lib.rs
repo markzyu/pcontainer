@@ -12,6 +12,12 @@ const NT_PRSTATUS: libc::c_int = 1;
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 const MAX_STRUCT_SIZE: usize = 2048;
 
+#[cfg(any(target_env = "musl"))]
+const PTRACE_GETEVENTMSG: i32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as i32;
+
+#[cfg(any(target_env = "gnu"))]
+const PTRACE_GETEVENTMSG: u32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as u32;
+
 lazy_static! {
     pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 }
@@ -300,7 +306,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
     let res = unsafe {
         libc::ptrace(
             // PTRACE_GETREGS
-            12_u32,
+            12,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<i32>(),
             data.as_mut_ptr() as *mut _ as *mut libc::c_void,
@@ -334,7 +340,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
 pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
     let res = unsafe {
         libc::ptrace(
-            13_u32,
+            13,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<i32>(),
             &mut data as *mut _ as *mut libc::c_void,
@@ -753,7 +759,7 @@ pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         libc::ptrace(
-            sys::ptrace::Request::PTRACE_GETEVENTMSG as u32,
+            PTRACE_GETEVENTMSG,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<libc::c_void>(),
             data.as_mut_ptr() as *mut libc::c_void,
