@@ -18,6 +18,18 @@ const PTRACE_GETEVENTMSG: i32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as i32;
 #[cfg(any(target_env = "gnu"))]
 const PTRACE_GETEVENTMSG: u32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as u32;
 
+#[cfg(any(target_env = "musl"))]
+const PTRACE_GETREGSET: i32 = sys::ptrace::Request::PTRACE_GETREGSET as i32;
+
+#[cfg(any(target_env = "gnu"))]
+const PTRACE_GETREGSET: u32 = sys::ptrace::Request::PTRACE_GETREGSET as u32;
+
+#[cfg(any(target_env = "musl"))]
+const PTRACE_SETREGSET: i32 = sys::ptrace::Request::PTRACE_SETREGSET as i32;
+
+#[cfg(any(target_env = "gnu"))]
+const PTRACE_SETREGSET: u32 = sys::ptrace::Request::PTRACE_SETREGSET as u32;
+
 lazy_static! {
     pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 }
@@ -289,7 +301,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
             iov_len: std::mem::size_of::<GenericPurposeRegs>(),
         };
         libc::ptrace(
-            sys::ptrace::Request::PTRACE_GETREGSET as u32,
+            PTRACE_GETREGSET,
             libc::pid_t::from(pid),
             NT_PRSTATUS as *mut libc::c_void,
             &mut iov as *mut _ as *mut libc::c_void,
@@ -325,7 +337,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
             iov_len: std::mem::size_of::<GenericPurposeRegs>(),
         };
         libc::ptrace(
-            sys::ptrace::Request::PTRACE_SETREGSET as u32,
+            PTRACE_SETREGSET,
             libc::pid_t::from(pid),
             NT_PRSTATUS as *mut libc::c_void,
             &mut iov as *mut _ as *mut libc::c_void,
