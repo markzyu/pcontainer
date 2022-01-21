@@ -1,15 +1,16 @@
-## Why?
+## So this is just PRoot?
 
-I developed this project to solve the problem that FOSS developers cannot easily install an Open Source Linux Distro onto their phones if they want to develop software, or teach software development, on the go.
+The fundamental idea is not that different from proot. In fact, it's inspiried by proot -- both can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. 
 
-Here is a diagram explaining why the problem exists:
+However, there are a few differences:
 
-![](Why1.png)
+1. This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
+2. PRoot uses GPL Licenses. This project uses MIT & Apache dual Licensing to maximize software freedom.
+3. PRoot has a longer history of proven success. But this project is still in its early stage. This is both good and bad.
+    - The Good: There are no rules for contributors. If you have a patch that helps, I'm willing to throw away existing code and use yours instead.
+    - The Bad: This project barely works. Basic shell commands work but `apt-get` is broken.
 
-My solution is not that different from proot. In fact, it's inspiried by proot -- we can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. However, there are a few differences:
-
-1. This solution is multithreaded, while proot itself is single threaded.
-2. This solution is designed to run Linux Distros on phones, while proot itself needs patches to run on phones.
+Eventually, my goal is to be able to run any Docker container on any mobile device, without needing root. But there is a long way to go.
 
 ## Project structure
 
