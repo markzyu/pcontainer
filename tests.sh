@@ -5,7 +5,7 @@ cargo build
 for cfile in tests/fixtures/*.c; do
 	dir=$(dirname "$cfile")
 	base=$(basename "$cfile" .c)
-	gcc -o "$dir/${base}.out" "$dir/${base}.c"
+	gcc -O3 -o "$dir/${base}.out" "$dir/${base}.c"
 done
 
 python3 -m unittest discover -s tests/ "$@"

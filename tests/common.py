@@ -11,7 +11,7 @@ def run(args, **kwargs):
     return os.system(f"{cmd} {args} 1>/dev/null 2>/dev/null")
 
 
-def run_script(script, timeout=5, stderr=None, **kwargs):
+def run_script(script, timeout=7, stderr=None, **kwargs):
     cmd = _get_cmd(**kwargs)
     cmd_expr = " ".join(cmd)
     print(f"cmd = {cmd_expr} script = {script.strip()}")
@@ -24,7 +24,7 @@ def run_script(script, timeout=5, stderr=None, **kwargs):
     )
 
 
-def run_elf_chroot(elf_path, timeout=5, stderr=None, **kwargs):
+def run_elf_chroot(elf_path, timeout=7, stderr=None, **kwargs):
     """
     Run an ELF binary file with a proper --chroot
     """

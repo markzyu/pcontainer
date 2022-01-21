@@ -1,4 +1,5 @@
 import common as c
+import errno
 import os
 import subprocess
 import unittest as t
@@ -48,6 +49,14 @@ class TestBasics(t.TestCase):
             self.assertNotIn(b"waitpid failure", ans.stdout)
             self.assertNotIn(b"is exit: 0 is stop: 1 exit code:", ans.stdout)
             self.assertIn(b"is exit: 1 is stop: 0 exit code: 1", ans.stdout)
+
+    def test_wait4_details(self):
+        for run_method in (c.run_script, c.run_elf_chroot):
+            ans = run_method(b"./tests/fixtures/06-wait4-details.out")
+            EINTR = str(errno.EINTR).encode()
+            self.assertIn(b"case1, retval 0, status 0", ans.stdout)
+            self.assertIn(b"case2, retval -1, errno " + EINTR + b", status 0", ans.stdout)
+            self.assertIn(b"case3, retval pid, status 256", ans.stdout)
 
     def test_run_id_as_root(self):
         ans = c.run_script(b"id", root=True)
