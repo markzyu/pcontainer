@@ -41,3 +41,26 @@ proot slows down `git status` to about 5x its original run time.
 As long as our parallel proot doesn't slow down the tracee by more than 5x. It should be fine.
 
 
+How to cross-compile for Android:
+
+- Install `arm-linux-*-gcc` and `aarch64-linux-*-gcc`
+  - Depending on the license of these softwares, the `*` portion might differ
+  - We prefer [Musl libc toolchains](https://musl.cc/).
+- Update your `~/.cargo/config`:
+  ```
+  [target.armv7-unknown-linux-musleabihf]
+  rustflags = ["-C", "target-feature=+crt-static"]
+  linker = "arm-linux-foobar-gcc"
+
+  [target.armv7-unknown-linux-musl]
+  rustflags = ["-C", "target-feature=+crt-static"]
+  linker = "aarch64-linux-foobar-gcc"
+  ```
+- Run `cargo build --target=armv7-unknown-linux-musleabihf --release`
+- Or run `cargo build --target=aarch64-unknown-linux-musl --release`
+- **Android permissions**
+  - The terminal emulator must request specific permissions to unlock the ability to execute `./dockify`. The exact permission name is unknown.
+  - Older Android versions work better with https://f-droid.org/en/packages/org.galexander.sshd/
+  - [Android 10 and above require executables to be codesigned](https://github.com/greenaddress/abcore/issues/97)
+    - Termux is the only solution that works well in this situation. [Here is a page from their discussion.](https://github.com/termux/termux-app/issues/1072)
+    - But apparently, IT'S EASIER IF `dockify` IS CODE SIGNED AS part of the readonly APK.
