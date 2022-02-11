@@ -82,13 +82,17 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         event!(Level::INFO, "Binary file: {:?}", new_elf_path);
 
         let mut file = std::fs::File::open(new_elf_path.as_path()).map_err(SysAugError::ReadBin)?;
-        if let Ok(elf_file) = elf::File::open_stream(&mut file) {
-            let header = elf_file
-                .phdrs
-                .iter()
-                .find(|x| x.progtype.0 == libc::PT_INTERP)
-                .unwrap();
-
+        let maybe_elf_file = elf::File::open_stream(&mut file).ok();
+        let maybe_header = maybe_elf_file
+            .as_ref()
+            .map(|f| {
+                f.phdrs
+                    .iter()
+                    .find(|x| x.progtype.0 == libc::PT_INTERP)
+                    .copied()
+            })
+            .flatten();
+        if let Some(header) = maybe_header {
             // READ interpreter path FROM header.offset FOR header.filesz BYTES
             let mut buf: Vec<u8> = vec![0; header.filesz as usize];
             file.seek(std::io::SeekFrom::Start(header.offset))
@@ -123,6 +127,11 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             let new_argv_addr = self.handler.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
+            return Ok(true);
+        } else if maybe_elf_file.is_some() {
+            // Likely a statically linked binary, execute directly without interpreter
+            let path_addr = self.handler.tracee_stack_append_path(new_elf_path)?;
+            regs.arg0 = path_addr;
             return Ok(true);
         } else if let Some(shebang) = self.parse_shebang(&mut file)? {
             event!(Level::DEBUG, "Script file: {:?}", new_elf_path);
