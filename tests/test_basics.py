@@ -65,6 +65,12 @@ class TestBasics(t.TestCase):
         parts = ans.stdout.split(b" ")
         self.assertEqual(parts[0], b"uid=0(root)")
         self.assertEqual(parts[1], b"gid=0(root)")
+
+    def test_setuid_neg1(self):
+        for run_method in (c.run_script, c.run_elf_chroot):
+            ans = run_method(b"./tests/fixtures/07-perms-setuid-neg1.out", root=True)
+            EINVAL = str(errno.EINVAL).encode()
+            self.assertIn(b"result: -1 errno: " + EINVAL, ans.stdout)
     
     def test_ping_if_ping_is_available(self):
         ping_available = os.system("echo Making sure ping is available...; ping -c 4 localhost")

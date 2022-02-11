@@ -52,8 +52,17 @@ impl Mod for SimpleRootMod {
         &self,
         which: u8,
         uid: usize,
-        _syscall: &SyscallInfo,
+        syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
+        if uid as i32 == -1 {
+            if syscall.res_bits != 0 {
+                // These system calls ignore setting -1 as id
+                return Ok(ModAction::SkipSyscall(0));
+            } else {
+                // Otherwise, system call fails
+                return Ok(ModAction::SkipSyscall((-libc::EINVAL) as usize));
+            }
+        }
         event!(
             Level::INFO,
             "Setting {:b} id to {}",
