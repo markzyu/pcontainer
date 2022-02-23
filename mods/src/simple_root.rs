@@ -55,10 +55,11 @@ impl Mod for SimpleRootMod {
         syscall: &SyscallInfo,
     ) -> Result<ModAction, SysAugError> {
         if uid as i32 == -1 {
+            event!(Level::DEBUG, "Ignoring set*id where id is -1");
             if syscall.res_bits != 0 {
                 // These system calls ignore setting -1 as id
                 return Ok(ModAction::SkipSyscall(0));
-            } else {
+            } else if syscall.resf_bit != 0 {
                 // Otherwise, system call fails
                 return Ok(ModAction::SkipSyscall((-libc::EINVAL) as usize));
             }
