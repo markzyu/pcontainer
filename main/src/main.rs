@@ -171,6 +171,6 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     // Start tracee handler thread
     let ptrace_client2 = ptrace_client.clone();
     let new_tracee_handler =
-        sysaug::TraceeHandler::new(pid1, ptrace_client, mods, Some(Arc::new(states)), None)?;
+        sysaug::TraceeHandler::new(pid1, ptrace_client, mods, Some(Arc::new(states)), None, None)?;
     Ok(new_tracee_handler.start(move || ptrace_client2.stop()))
 }

@@ -50,6 +50,8 @@ struct AugmentContainer<PtraceClient: executor::PtraceClient> {
     waitpid: AugmentWaitpid<PtraceClient>,
 }
 
+type AllTracees = Arc<RwLock<HashSet<nix::unistd::Pid>>>;
+
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub mods: RwLock<ModsByFeature>,
     mod_providers: Vec<ModProvider>,
@@ -57,6 +59,9 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
+    
+    // All pids that are currently traced by any tracer / any thread.
+    all_tracees: AllTracees,
 
     pub curr_paths: RwLock<Option<[Option<PathBuf>; 4]>>,
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
@@ -86,11 +91,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         mods: Vec<ModProvider>,
         states: Option<Arc<TraceeHandlerStates>>,
         parent: Option<Arc<TraceeHandler<PtraceClient>>>,
+        all_tracees: Option<AllTracees>,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         let default_states = states.unwrap_or_default();
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
+            all_tracees: all_tracees.unwrap_or_default(),
             augments: RwLock::default(),
             last_syscall: RwLock::new(SyscallCounter::new()),
             mods: RwLock::new(HashMap::new()),
@@ -143,14 +150,26 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             self.mod_providers.clone(),
             Some(self.states.clone()),
             Some(Arc::clone(self)),
+            Some(Arc::clone(&self.all_tracees)),
         )
     }
 
     /// Create a new TraceeHandler for a child, and start event loop
-    fn fork(
+    pub fn fork(
         self: &Arc<TraceeHandler<PtraceClient>>,
         child_pid: nix::unistd::Pid,
     ) -> Result<(), SysAugError> {
+        {
+            let mut all_tracees = rwlock_write(&self.all_tracees)?;
+            if all_tracees.contains(&child_pid) {
+                event!(Level::DEBUG, "duplicate new_child event {:?}", &child_pid);
+                return Ok(());
+            }
+            all_tracees.insert(child_pid);
+        }
+
+        // This is a new tracee, create a new tracer thread.
+        event!(Level::INFO, "new child: {:?}", &child_pid);
         self.ptrace_client
             .prep_attach_to(child_pid, &self.ignore_sigstops)?;
         let new_tracee_handler = self.fork_alloc(child_pid)?;
@@ -300,7 +319,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn ptrace_syscall(&self) -> Result<(), SysAugError> {
         let pid = self.pid;
         let maybe_signal = rwoption_take(&self.signal_tracee)?;
-        event!(Level::TRACE, "PTRACE_SYSCALL");
         self.ptrace_client
             .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
             .map_err(SysAugError::PtraceSyscall)?;
@@ -308,6 +326,22 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
+        {
+            let mut all_tracees = rwlock_write(&self.all_tracees)?;
+            all_tracees.insert(self.pid);
+        }
+
+        let self2 = Arc::clone(&self);
+        let result = self2.event_loop_inner();
+
+        {
+            let mut all_tracees = rwlock_write(&self.all_tracees)?;
+            all_tracees.remove(&self.pid);
+        }
+        return result;
+    }
+
+    pub fn event_loop_inner(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
 
         self.ptrace_client.attach_to(pid)?;
@@ -317,7 +351,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
         loop {
             let status = ptrace::waitpid_hang(Pid::from_raw(-1 as i32))?;
-            let pid2 = status.pid();
+            let pid2 = match &status {
+                &WaitStatus::Exited(p, _) => Some(p),
+                &WaitStatus::Signaled(p, _, _) => Some(p),
+                &WaitStatus::Stopped(p, _) => Some(p),
+                &WaitStatus::PtraceEvent(p, _, _) => Some(p),
+                &WaitStatus::PtraceSyscall(p) => Some(p),
+                &WaitStatus::Continued(p) => Some(p),
+                &WaitStatus::StillAlive => None,
+            };
+            event!(Level::TRACE, "child {:?} status {:?}", pid2, &status);
 
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 info!("Process {:?} crashed: {:?}.", &pid, &status);
@@ -326,14 +369,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             if let (Some(child_pid), true) = (pid2, pid2 != Some(pid)) {
-                if !matches!(&status, &WaitStatus::Stopped(_, _)) {
-                    event!(Level::DEBUG, "ignoring grandchild event {:?}", &status);
-                    continue;
-                }
-
-                // This is a new tracee, create a new tracer thread.
-                event!(Level::INFO, "new child, status {:?}", &status);
                 self.fork(child_pid)?;
+                continue;
+            }
+
+            if pid2 != Some(pid) {
                 continue;
             }
 
