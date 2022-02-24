@@ -181,12 +181,14 @@ impl PtraceClient for LocalPtraceClient {
             pid
         );
 
+        /*
         let status = ptrace::waitpid_hang(pid)?;
         event!(Level::INFO, "child status {:?}", &status);
 
         if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
             return Err(PtraceExecutorError::TransferWaitpid(status));
         }
+        */
 
         let mut ignore_sigstops = locked_ignores
             .write()
