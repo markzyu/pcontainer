@@ -28,6 +28,10 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
             .ptrace_client
             .execute(move || ptrace::setregs(pid2, regs))??;
         event!(Level::TRACE, "C");
+
+        let mut wait = common::rwlock_write(&self.handler.pid_to_wait_for)?;
+        *wait = nix::unistd::Pid::from_raw(-1);
+
         Ok(())
     }
 
@@ -39,6 +43,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
         event!(Level::TRACE, "D");
         let raw_pid = regs.syscall_retval() as isize;
         if raw_pid > 0 {
+            let mut wait = common::rwlock_write(&self.handler.pid_to_wait_for)?;
+            *wait = self.handler.pid;
+            
             let child_pid = nix::unistd::Pid::from_raw(raw_pid as i32);
             self.handler.fork(child_pid)?;
         }
