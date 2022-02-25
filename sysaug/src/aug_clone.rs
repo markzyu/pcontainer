@@ -1,6 +1,8 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
+use crate::mods;
+use nix::sys;
 use ptrace::GenericPurposeRegs;
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -33,15 +35,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
 
     fn after_call(
         &self,
-        regs: GenericPurposeRegs,
+        _regs: GenericPurposeRegs,
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        event!(Level::TRACE, "D");
-        let raw_pid = regs.syscall_retval() as isize;
-        if raw_pid > 0 {
-            let child_pid = nix::unistd::Pid::from_raw(raw_pid as i32);
-            self.handler.fork(child_pid)?;
-        }
         Ok(())
     }
 }
