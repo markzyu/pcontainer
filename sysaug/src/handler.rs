@@ -48,6 +48,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
+    pub pid_to_wait_for: RwLock<nix::unistd::Pid>,
 
     pub curr_paths: RwLock<Option<[Option<PathBuf>; 4]>>,
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
@@ -82,6 +83,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             curr_paths: RwLock::default(),
             orig_request_regs: RwLock::default(),
             orig_wait_status: RwLock::default(),
+            pid_to_wait_for: RwLock::new(pid),
             ignore_sigstops: RwLock::default(),
             signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
             skip_syscall_retval: RwLock::default(),
@@ -272,7 +274,10 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
             avoid_syscall = false;
 
-            let status = ptrace::waitpid_hang(nix::unistd::Pid::from_raw(-1))?;
+            let status = {
+                let wait = rwlock_read(&self.pid_to_wait_for)?;
+                ptrace::waitpid_hang(*wait)?
+            };
             let pid2 = match &status {
                 &WaitStatus::Exited(p, _) => Some(p),
                 &WaitStatus::Signaled(p, _, _) => Some(p),
