@@ -258,37 +258,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let mut last_syscall = SyscallCounter::new();
         let pid = self.pid;
 
-        let mut avoid_syscall = false;
-
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
         loop {
-            if !avoid_syscall {
-                let maybe_signal = rwoption_take(&self.signal_tracee)?;
-                self.ptrace_client
-                    .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
-                    .map_err(SysAugError::PtraceSyscall)?;
-            }
-            avoid_syscall = false;
+            let maybe_signal = rwoption_take(&self.signal_tracee)?;
+            self.ptrace_client
+                .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
+                .map_err(SysAugError::PtraceSyscall)?;
 
-            let status = ptrace::waitpid_hang(nix::unistd::Pid::from_raw(-1))?;
-            let pid2 = match &status {
-                &WaitStatus::Exited(p, _) => Some(p),
-                &WaitStatus::Signaled(p, _, _) => Some(p),
-                &WaitStatus::Stopped(p, _) => Some(p),
-                &WaitStatus::PtraceEvent(p, _, _) => Some(p),
-                &WaitStatus::PtraceSyscall(p) => Some(p),
-                &WaitStatus::Continued(p) => Some(p),
-                &WaitStatus::StillAlive => None,
-            };
-
-            if pid2 != Some(pid) {
-                event!(Level::DEBUG, "pid {:?} status {:?}", pid2, status);
-                avoid_syscall = true;
-                continue;
-            }
-
+            let status = ptrace::waitpid_hang(pid)?;
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 info!("Process {:?} crashed: {:?}.", &pid, &status);
                 self.handle_exit(pid)?;
