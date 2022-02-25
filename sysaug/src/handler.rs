@@ -170,6 +170,10 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
             return Err(SysAugError::TraceeCrashed);
         }
+        self.set_ptrace_options_inner(pid)
+    }
+
+    fn set_ptrace_options_inner(&self, pid: nix::unistd::Pid) -> Result<(), SysAugError> {
         self.ptrace_client
             .execute(move || {
                 sys::ptrace::setoptions(
@@ -267,6 +271,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
         loop {
             if !avoid_syscall {
+                event!(Level::TRACE, "PTRACE_SYSCALL");
                 let maybe_signal = rwoption_take(&self.signal_tracee)?;
                 self.ptrace_client
                     .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
@@ -276,6 +281,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
             let status = {
                 let wait = rwlock_read(&self.pid_to_wait_for)?;
+                event!(Level::TRACE, "wait4({:?})", *wait);
                 ptrace::waitpid_hang(*wait)?
             };
             let pid2 = match &status {
@@ -288,9 +294,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 &WaitStatus::StillAlive => None,
             };
 
-            if pid2 != Some(pid) {
+            if pid2 != Some(pid) && pid2.is_some() {
+                self.set_ptrace_options_inner(pid2.unwrap())?;
                 event!(Level::DEBUG, "pid {:?} status {:?}", pid2, status);
                 avoid_syscall = true;
+                let mut wait = rwlock_write(&self.pid_to_wait_for)?;
+                *wait = self.pid;
                 continue;
             }
 
