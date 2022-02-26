@@ -325,11 +325,10 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             if signal == &sys::signal::Signal::SIGTRAP {
                 return Ok(false);
             }
-            let getsig_err = self
+            let getsig_ans = self
                 .ptrace_client
-                .execute(move || sys::ptrace::getsiginfo(pid))?
-                .err();
-            if getsig_err == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
+                .execute(move || sys::ptrace::getsiginfo(pid))?;
+            if getsig_ans.err() == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
                 return Ok(false);
             }
             if signal == &sys::signal::Signal::SIGSTOP {
@@ -343,18 +342,22 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             if signal == &sys::signal::Signal::SIGSYS {
                 // Android sometimes kills a process for using privileged syscalls like sysinfo()
                 // Instead of killing tracee, return -ENOSYS and let it resume
+                let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-                regs.set_syscall_retval((-libc::ENOSYS) as usize);
-                self.ptrace_client
-                    .execute(move || ptrace::setregs(pid, regs))??;
+                if siginfo.si_code > 0 {
+                    // Signal was sent by kernel, so it's safe to assume a syscall just happened.
+                    regs.set_syscall_retval((-libc::ENOSYS) as usize);
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
 
-                // TODO: This is bad for security. OTher processes can replace register by running
-                //              kill -NOSYS <tracee pid>
-                event!(
-                    Level::ERROR,
-                    "blocking SIGSYS and returning ENOSYS instead (UNSAFE)"
-                );
-                return Ok(false);
+                    // TODO: This is bad for security. OTher processes can replace register by running
+                    //              kill -NOSYS <tracee pid>
+                    event!(
+                        Level::WARN,
+                        "blocking SIGSYS and returning ENOSYS instead (UNSAFE)",
+                    );
+                    return Ok(false);
+                }
             }
             if signal == &sys::signal::Signal::SIGSEGV && self.states.args.gdb {
                 info!("Tracee segfault. Starting gdb");

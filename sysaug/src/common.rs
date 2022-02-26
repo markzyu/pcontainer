@@ -27,6 +27,9 @@ pub enum SysAugError {
     #[error("PTRACE_GETSIGINFO error")]
     PtraceGetSigInfo,
 
+    #[error("PTRACE_GETSIGINFO error: {0}")]
+    PtraceGetSigInfo2(nix::Error),
+
     #[error("PTRACE_PEEKDATA error: {0}")]
     PtraceRead(nix::Error),
 
