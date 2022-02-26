@@ -58,6 +58,13 @@ class TestBasics(t.TestCase):
             self.assertIn(b"case2, retval -1, errno " + EINTR + b", status 0", ans.stdout)
             self.assertIn(b"case3, retval pid, status 256", ans.stdout)
 
+    def test_vfork(self):
+        for run_method in (c.run_script, c.run_elf_chroot):
+            for test_name in ("08-vfork.out", "09-clone_vfork.out"):
+                ans = run_method(f"./tests/fixtures/{test_name}".encode())
+                self.assertIn(b"result: 22 errno: 0", ans.stdout)
+                self.assertNotIn(b"TracerPid:\t0", ans.stdout)
+
     def test_run_id_as_root(self):
         ans = c.run_script(b"id", root=True)
         self.assertEqual(ans.returncode, 0)
