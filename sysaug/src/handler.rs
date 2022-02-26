@@ -305,7 +305,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             let mut maybe_exit: Option<u8> = None;
-            let _ = self.on_tracee_stopped(&status, &mut maybe_exit)?
+            let _ = self.on_tracee_signaled(&status, &mut maybe_exit)?
                 && self.on_tracee_exited(&status, &mut maybe_exit)?
                 && self.on_tracee_syscall(&status, &mut maybe_exit)?
                 && self.on_tracee_clone(&status, &mut maybe_exit)?
@@ -318,7 +318,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         }
     }
 
-    fn on_tracee_stopped(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
+    fn on_tracee_signaled(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
         let pid = self.pid;
         if let WaitStatus::Stopped(_, signal) = s {
             event!(Level::DEBUG, "child stopped, status {:?}", &s);
@@ -339,6 +339,22 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         return Ok(false);
                     }
                 }
+            }
+            if signal == &sys::signal::Signal::SIGSYS {
+                // Android sometimes kills a process for using privileged syscalls like sysinfo()
+                // Instead of killing tracee, return -ENOSYS and let it resume
+                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                regs.set_syscall_retval((-libc::ENOSYS) as usize);
+                self.ptrace_client
+                    .execute(move || ptrace::setregs(pid, regs))??;
+
+                // TODO: This is bad for security. OTher processes can replace register by running
+                //              kill -NOSYS <tracee pid>
+                event!(
+                    Level::ERROR,
+                    "blocking SIGSYS and returning ENOSYS instead (UNSAFE)"
+                );
+                return Ok(false);
             }
             if signal == &sys::signal::Signal::SIGSEGV && self.states.args.gdb {
                 info!("Tracee segfault. Starting gdb");
