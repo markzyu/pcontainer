@@ -19,7 +19,7 @@ int main() {
 
     value = 0;
 
-    result = syscall(SYS_clone, CLONE_VFORK | SIGCHLD, NULL, NULL, NULL, NULL);
+    result = syscall(SYS_clone, CLONE_VFORK | CLONE_VM | SIGCHLD, NULL, NULL, NULL, NULL);
     if (result < 0) {
         printf("result: %d errno: %d\n", result, errno);
     } else if (result == 0) {

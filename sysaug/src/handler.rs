@@ -133,7 +133,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     /// Create a new TraceeHandler for a child, without starting event loop
-    pub fn fork(
+    fn fork(
         self: &Arc<TraceeHandler<PtraceClient>>,
         child_pid: Pid,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
@@ -198,7 +198,10 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 sys::ptrace::setoptions(
                     pid,
                     sys::ptrace::Options::PTRACE_O_TRACESYSGOOD
-                        | sys::ptrace::Options::PTRACE_O_TRACEEXIT,
+                        | sys::ptrace::Options::PTRACE_O_TRACEEXIT
+                        | sys::ptrace::Options::PTRACE_O_TRACECLONE
+                        | sys::ptrace::Options::PTRACE_O_TRACEFORK
+                        | sys::ptrace::Options::PTRACE_O_TRACEVFORK,
                 )
             })?
             .map_err(SysAugError::PtraceSetOptions)?;
@@ -293,6 +296,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
         loop {
             let status = ptrace::waitpid_hang(pid)?;
+            event!(Level::TRACE, "child status {:?}", &status);
 
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 info!("Process {:?} crashed: {:?}.", &pid, &status);
@@ -303,7 +307,9 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let mut maybe_exit: Option<u8> = None;
             let _ = self.on_tracee_stopped(&status, &mut maybe_exit)?
                 && self.on_tracee_exited(&status, &mut maybe_exit)?
-                && self.on_tracee_syscall(&status, &mut maybe_exit)?;
+                && self.on_tracee_syscall(&status, &mut maybe_exit)?
+                && self.on_tracee_clone(&status, &mut maybe_exit)?
+                && self.on_tracee_unknown_event(&status, &mut maybe_exit)?;
 
             if let Some(exit_code) = maybe_exit {
                 return Ok(exit_code);
@@ -358,6 +364,54 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             exit.replace(retcode as u8);
             return Ok(false);
         }
+        Ok(true)
+    }
+
+    /// This should cover all cases of clone, fork, vfork, etc.
+    fn on_tracee_clone(
+        self: &Arc<TraceeHandler<PtraceClient>>,
+        s: &WaitStatus,
+        _exit: &mut Option<u8>,
+    ) -> BoolResult {
+        let pid = self.pid;
+        if matches!(
+            s,
+            WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_CLONE)
+                | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_FORK)
+                | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_VFORK)
+        ) {
+            let raw_pid = self
+                .ptrace_client
+                .execute(move || ptrace::getevent(pid))?? as isize;
+            if raw_pid > 0 {
+                let child_pid: Pid = Pid::from_raw(raw_pid as i32);
+
+                self.ptrace_client
+                    .prep_attach_to(child_pid, &self.ignore_sigstops)?;
+
+                let new_tracee_handler = self.fork(child_pid)?;
+                let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
+                let root_pid = self.states.root_pid;
+                let fail_fast = self.states.args.fail_fast;
+                new_tracee_handler.start(move || {
+                    if fail_fast && new_tracee_handler2.failed() {
+                        let _ = sys::signal::kill(root_pid, Some(sys::signal::Signal::SIGKILL))
+                            .map_err(display_err);
+                    }
+                });
+
+                self.call_mods(ModFeature::OnCloneComplete, |m| {
+                    m.on_clone_complete(raw_pid as isize)
+                })?;
+            }
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// This should cover all cases of clone, fork, vfork, etc.
+    fn on_tracee_unknown_event(&self, s: &WaitStatus, _exit: &mut Option<u8>) -> BoolResult {
+        event!(Level::INFO, "Unknown ptrace event: {:?}", s);
         Ok(true)
     }
 

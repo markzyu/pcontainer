@@ -112,10 +112,7 @@ pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
 }
 
 pub fn is_syscall_stop(status: &wait::WaitStatus) -> bool {
-    matches!(
-        status,
-        wait::WaitStatus::PtraceEvent(_, _, _) | wait::WaitStatus::PtraceSyscall(_)
-    )
+    matches!(status, wait::WaitStatus::PtraceSyscall(_))
 }
 
 pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
