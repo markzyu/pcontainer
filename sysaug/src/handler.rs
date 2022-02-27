@@ -65,6 +65,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub ignore_sigstops: RwLock<HashSet<Pid>>,
     pub signal_tracee: RwLock<Option<sys::signal::Signal>>,
     pub skip_syscall_retval: RwLock<Option<usize>>,
+    pub nosys_syscall_retval: RwLock<Option<usize>>,
     pub tracee_stack_offset: RwLock<usize>,
 
     augments: RwLock<Option<AugmentContainer<PtraceClient>>>,
@@ -101,6 +102,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ignore_sigstops: RwLock::default(),
             signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
             skip_syscall_retval: RwLock::default(),
+            nosys_syscall_retval: RwLock::default(),
             tracee_stack_offset: RwLock::default(),
             states: Arc::new((*default_states).try_clone()?),
             parent,
@@ -346,9 +348,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
                 if siginfo.si_code > 0 {
                     // Signal was sent by kernel, so it's safe to assume a syscall just happened.
-                    regs.set_syscall_retval((-libc::ENOSYS) as usize);
-                    self.ptrace_client
-                        .execute(move || ptrace::setregs(pid, regs))??;
+                    let mut retval = (-libc::ENOSYS) as usize;
 
                     // TODO: This is bad for security. OTher processes can replace register by running
                     //              kill -NOSYS <tracee pid>
@@ -356,6 +356,26 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         Level::WARN,
                         "blocking SIGSYS and returning ENOSYS instead (UNSAFE)",
                     );
+
+                    // If we were trying to override a syscall, follow that override.
+                    if regs.syscall_num == NO_MOD_SYSCALL {
+                        let mut maybe_skip = rwlock_write(&self.nosys_syscall_retval)?;
+                        if let Some(new_retval) = maybe_skip.take() {
+                            event!(
+                                Level::DEBUG,
+                                "Replacing syscall return value {} with {}",
+                                retval,
+                                new_retval
+                            );
+                            retval = new_retval;
+                        }
+                    }
+
+                    // Otherwise, override return value to -ENOSYS
+                    regs.set_syscall_retval(retval);
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
+
                     return Ok(false);
                 }
             }
@@ -528,6 +548,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     fn maybe_skip_syscall(&self) -> Result<(), SysAugError> {
+        {
+            let mut maybe_nosys = rwlock_write(&self.nosys_syscall_retval)?;
+            let _ = maybe_nosys.take();
+        }
+
         let pid = self.pid;
         let mut last_syscall = rwlock_write(&self.last_syscall)?;
         if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
@@ -541,6 +566,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 return Ok(());
             }
             if let Some(retval) = maybe_skip.take() {
+                rwoption_replace(&self.nosys_syscall_retval, retval)?;
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
 
                 event!(
