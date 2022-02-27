@@ -27,6 +27,7 @@ pub struct CLIArgs {
     pub chroot: Option<PathBuf>,
     pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
+    pub fix_sigsys: bool,
     pub gdb: bool,
     pub gdb_at: Option<u64>,
 }
@@ -341,7 +342,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     }
                 }
             }
-            if signal == &sys::signal::Signal::SIGSYS {
+            if signal == &sys::signal::Signal::SIGSYS && self.states.args.fix_sigsys {
                 // Android sometimes kills a process for using privileged syscalls like sysinfo()
                 // Instead of killing tracee, return -ENOSYS and let it resume
                 let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;

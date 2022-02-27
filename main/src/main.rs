@@ -22,6 +22,10 @@ pub struct CLIArgs {
     #[clap(long)]
     pub fix_attach: bool,
 
+    /// If your tracee crashes due to SIGSYS, use this flag.
+    #[clap(long)]
+    pub fix_sigsys: bool,
+
     /// Make your applications think they are root when they are not.
     #[clap(long)]
     pub root: bool,
@@ -172,6 +176,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         chroot: canonicalize_clone(&args.chroot)?,
         rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
+        fix_sigsys: args.fix_sigsys,
         gdb: args.gdb,
         gdb_at: args.gdb_at,
     };
