@@ -5,4 +5,5 @@ members = [
   "main",
   "procfs",
   "ptrace",
+  "sysaug",
 ]
