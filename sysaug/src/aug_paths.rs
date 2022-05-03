@@ -4,7 +4,7 @@ use crate::handler::TraceeHandler;
 use crate::mods;
 use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -51,10 +51,10 @@ lazy_static! {
         add_xplat_syscalls(&mut ans);
         ans
     };
-    static ref SYSCALL_NAMES: HashSet<usize> = {
-        let mut ans = HashSet::new();
+    static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
+        let mut ans = HashMap::new();
         for key in SYSCALL_INFOS.keys() {
-            ans.insert(*key);
+            ans.insert(*key, common::Augments::Paths);
         }
         ans
     };
@@ -95,11 +95,11 @@ pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
 }
 
 impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPaths<PtraceClient> {
-    fn valid_calls(&self) -> &HashSet<usize> {
-        &*SYSCALL_NAMES
+    fn valid_calls() -> &'static HashMap<usize, common::Augments> {
+        &*VALID_SYSCALLS
     }
 
-    fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn before_call(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
@@ -157,13 +157,12 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             }
         }
         if need_write_regs {
-            let regs2 = regs.clone();
-            ptrace_client.execute(move || ptrace::setregs(pid, regs2.clone()))??;
+            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
         Ok(())
     }
 
-    fn after_call(&self, _regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(&self, _regs: GenericPurposeRegs) -> Result<(), SysAugError> {
         Ok(())
     }
 }
