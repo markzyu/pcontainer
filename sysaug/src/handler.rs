@@ -83,7 +83,7 @@ impl TraceeHandler {
         thread::sleep(Duration::from_millis(1));
         self.ptrace_client.execute(move || {
             sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
-        })??;
+        })?.map_err(SysAugError::PtraceSetOptions)?;
 
         let augment_clone = new_augment!(AugmentClone, self);
         let augment_paths = new_augment!(AugmentPaths, self);
@@ -94,7 +94,8 @@ impl TraceeHandler {
             let _span_enter = span.enter();
 
             self.ptrace_client
-                .execute(move || sys::ptrace::syscall(pid, None))??;
+                .execute(move || sys::ptrace::syscall(pid, None))?
+                .map_err(SysAugError::PtraceSyscall)?;
             let status = ptrace::waitpid_hang(pid)?;
             event!(Level::TRACE, "child status {:?}", &status);
 
