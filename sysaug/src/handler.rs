@@ -18,6 +18,7 @@ use tracing::{event, info, span, Level};
 
 pub struct TraceeHandlerStates {
     pub override_uid: RwLock<Option<usize>>,
+    pub override_gid: RwLock<Option<usize>>,
     pub path_prefix: RwLock<Option<PathBuf>>,
     pub pid: nix::unistd::Pid,
 }
@@ -322,6 +323,7 @@ impl Default for TraceeHandlerStates {
     fn default() -> TraceeHandlerStates {
         TraceeHandlerStates {
             override_uid: RwLock::default(),
+            override_gid: RwLock::default(),
             path_prefix: RwLock::default(),
             pid: nix::unistd::Pid::from_raw(0),
         }
@@ -332,6 +334,7 @@ impl TraceeHandlerStates {
     pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
             override_uid: clone_locked(&self.override_uid)?,
+            override_gid: clone_locked(&self.override_gid)?,
             path_prefix: clone_locked(&self.path_prefix)?,
             pid: self.pid,
         })
