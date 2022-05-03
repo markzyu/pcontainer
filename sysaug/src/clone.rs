@@ -64,6 +64,6 @@ impl common::AugmentSyscall for AugmentClone {
     }
 
     fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self {
-        return AugmentClone {pid, ptrace_client}
+        AugmentClone { pid, ptrace_client }
     }
 }
