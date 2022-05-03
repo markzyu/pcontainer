@@ -58,7 +58,7 @@ fn main() -> Result<(), CLIError> {
     // Start tracee handler thread
     let (proc1_client, ptrace_loop) = executor::new_ptrace_executor();
     let new_tracee_handler =
-        sysaug::TraceeHandler::new(pid1, mods, Some(states))?;
+        sysaug::TraceeHandler::new(pid1, proc1_client.clone(), mods, Some(states))?;
     thread::spawn(move || {
         let proc1_client2 = proc1_client.clone();
         let result = new_tracee_handler.event_loop();
