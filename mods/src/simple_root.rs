@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{SysAugError, TraceeHandlerStates};
+use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -48,7 +48,7 @@ impl Mod for SimpleRootMod {
         Ok(ModAction::None)
     }
 
-    fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+    fn on_setuid(&self, _uid: usize, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
         event!(Level::INFO, "Skipping setuid");
         Ok(ModAction::SkipSyscall(0))
     }

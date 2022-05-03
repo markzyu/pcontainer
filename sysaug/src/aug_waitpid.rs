@@ -1,39 +1,22 @@
 use crate::common;
-use crate::common::SysAugError;
+use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
-use lazy_static::lazy_static;
 use nix::sys;
 use ptrace::GenericPurposeRegs;
-use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Arc;
 use tracing::{event, Level};
-
-lazy_static! {
-    static ref SYSCALL_NAMES: HashSet<usize> = {
-        let mut ans = HashSet::new();
-        ans.insert(libc::SYS_wait4 as usize);
-        ans
-    };
-    static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
-        let mut ans = HashMap::new();
-        for item in SYSCALL_NAMES.iter() {
-            ans.insert(*item, common::Augments::Waitpid);
-        }
-        ans
-    };
-}
 
 pub struct AugmentWaitpid<PtraceClient: executor::PtraceClient> {
     pub handler: Arc<TraceeHandler<PtraceClient>>,
 }
 
 impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWaitpid<PtraceClient> {
-    fn valid_calls() -> &'static HashMap<usize, common::Augments> {
-        &*VALID_SYSCALLS
-    }
-
-    fn before_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn before_call(
+        &self,
+        regs: GenericPurposeRegs,
+        _syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError> {
         event!(
             Level::INFO,
             "before waitpid({}, {:x}, {:x})",
@@ -50,7 +33,11 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
         Ok(())
     }
 
-    fn after_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(
+        &self,
+        regs: GenericPurposeRegs,
+        _syscall: &SyscallInfo,
+    ) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         let retval = regs.syscall_retval() as isize;
         event!(Level::INFO, "after waitpid() = {}", retval);
