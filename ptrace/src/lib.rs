@@ -1,12 +1,16 @@
+use lazy_static::lazy_static;
 use nix::sys;
 use nix::sys::wait;
 use spawn_ptrace::CommandPtraceSpawn;
 use std::convert::TryInto;
-use std::num::TryFromIntError;
 use std::process;
 use thiserror::Error;
 
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
+
+lazy_static! {
+    static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
+}
 
 #[derive(Debug, Error)]
 pub enum PtraceError {
@@ -19,14 +23,11 @@ pub enum PtraceError {
     #[error("OS Error: {0}")]
     LinuxOSErr(#[from] nix::Error),
 
-    #[error("Integer conversion error: {0}")]
-    FromInt(TryFromIntError),
+    #[error("Integer overflow: {0} {1} {2}")]
+    IntOverflow(usize, &'static str, usize),
 }
 
-#[cfg(target_arch = "aarch64")]
-pub type SysNum = i64;
-#[cfg(target_arch = "arm")]
-pub type SysNum = i32;
+pub type SysNum = usize;
 
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
     matches!(
@@ -110,40 +111,40 @@ pub fn ptrace_get_data<T>(
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
-    pub arg0: i64,
-    pub arg1: i64,
-    pub arg2: i64,
-    unknown_x3: i64,
-    unknown_x4: i64,
-    unknown_x5: i64,
-    unknown_x6: i64,
-    unknown_x7: i64,
-    pub syscall_num: i64,
-    unknown_x9: i64,
-    unknown_x10: i64,
-    unknown_x11: i64,
-    unknown_x12: i64,
-    unknown_x13: i64,
-    unknown_x14: i64,
-    unknown_x15: i64,
-    unknown_x16: i64,
-    unknown_x17: i64,
-    unknown_x18: i64,
-    unknown_x19: i64,
-    unknown_x20: i64,
-    unknown_x21: i64,
-    unknown_x22: i64,
-    unknown_x23: i64,
-    unknown_x24: i64,
-    unknown_x25: i64,
-    unknown_x26: i64,
-    unknown_x27: i64,
-    unknown_x28: i64,
-    unknown_x29: i64,
-    unknown_x30: i64,
-    pub sp: i64,
-    pub pc: i64,
-    pstate: i64,
+    pub arg0: usize,
+    pub arg1: usize,
+    pub arg2: usize,
+    unknown_x3: usize,
+    unknown_x4: usize,
+    unknown_x5: usize,
+    unknown_x6: usize,
+    unknown_x7: usize,
+    pub syscall_num: usize,
+    unknown_x9: usize,
+    unknown_x10: usize,
+    unknown_x11: usize,
+    unknown_x12: usize,
+    unknown_x13: usize,
+    unknown_x14: usize,
+    unknown_x15: usize,
+    unknown_x16: usize,
+    unknown_x17: usize,
+    unknown_x18: usize,
+    unknown_x19: usize,
+    unknown_x20: usize,
+    unknown_x21: usize,
+    unknown_x22: usize,
+    unknown_x23: usize,
+    unknown_x24: usize,
+    unknown_x25: usize,
+    unknown_x26: usize,
+    unknown_x27: usize,
+    unknown_x28: usize,
+    unknown_x29: usize,
+    unknown_x30: usize,
+    pub sp: usize,
+    pub pc: usize,
+    pstate: usize,
 }
 
 #[cfg(target_arch = "arm")]
@@ -151,24 +152,24 @@ pub struct GenericPurposeRegs {
 #[repr(C)]
 #[allow(dead_code)]
 pub struct GenericPurposeRegs {
-    pub arg0: i32,
-    pub arg1: i32,
-    pub arg2: i32,
-    unknown_x3: i32,
-    unknown_x4: i32,
-    unknown_x5: i32,
-    unknown_x6: i32,
-    pub syscall_num: i32,
-    unknown_x8: i32,
-    unknown_x9: i32,
-    unknown_x10: i32,
-    unknown_x11: i32,
-    unknown_x12: i32,
-    pub sp: i32,
-    unknown_x14: i32,
-    pub pc: i32,
-    unknown_x16: i32,
-    pub orig_r0: i32,
+    pub arg0: usize,
+    pub arg1: usize,
+    pub arg2: usize,
+    unknown_x3: usize,
+    unknown_x4: usize,
+    unknown_x5: usize,
+    unknown_x6: usize,
+    pub syscall_num: usize,
+    unknown_x8: usize,
+    unknown_x9: usize,
+    unknown_x10: usize,
+    unknown_x11: usize,
+    unknown_x12: usize,
+    pub sp: usize,
+    unknown_x14: usize,
+    pub pc: usize,
+    unknown_x16: usize,
+    pub orig_r0: usize,
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
@@ -248,49 +249,62 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
     Ok(())
 }
 
-pub fn bytes_to_clongs(bytes: &[u8]) -> Vec<libc::c_long> {
-    let mut result: Vec<libc::c_long> = Vec::new();
-    let clong_size = std::mem::size_of::<libc::c_long>();
-    let iter = bytes.chunks_exact(clong_size);
-    for chunk in iter {
-        result.push(libc::c_long::from_ne_bytes(chunk.try_into().unwrap()));
-    }
-
-    let mut remainder_vec: Vec<u8> = Vec::new();
-    remainder_vec.resize(clong_size, 0);
-    for (i, byte) in bytes.iter().skip(result.len() * clong_size).enumerate() {
-        remainder_vec[i] = *byte;
-    }
-    result.push(libc::c_long::from_ne_bytes(
-        (&remainder_vec[..]).try_into().unwrap(),
-    ));
-    result
+#[inline]
+fn checked_add(a: usize, b: usize) -> Result<usize, PtraceError> {
+    a.checked_add(b).ok_or(PtraceError::IntOverflow(a, "+", b))
 }
 
-pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<libc::c_long, PtraceError> {
-    let clongs = bytes_to_clongs(bytes);
-    let clong_size: usize = std::mem::size_of::<libc::c_long>();
-    let size = clongs.len() * clong_size;
+#[inline]
+fn checked_sub(a: usize, b: usize) -> Result<usize, PtraceError> {
+    a.checked_sub(b).ok_or(PtraceError::IntOverflow(a, "-", b))
+}
+
+#[inline]
+fn checked_mul(a: usize, b: usize) -> Result<usize, PtraceError> {
+    a.checked_mul(b).ok_or(PtraceError::IntOverflow(a, "*", b))
+}
+
+pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
+    let mut result: Vec<usize> = Vec::new();
+    let iter = bytes.chunks_exact(*USIZE_SIZE);
+    for chunk in iter {
+        result.push(usize::from_ne_bytes(chunk.try_into().unwrap()));
+    }
+
+    let remainder_pos = checked_mul(result.len(), *USIZE_SIZE)?;
+    let mut remainder_vec: Vec<u8> = Vec::new();
+    remainder_vec.resize(*USIZE_SIZE, 0);
+
+    for (i, byte) in bytes.iter().skip(remainder_pos).enumerate() {
+        remainder_vec[i] = *byte;
+    }
+    result.push(usize::from_ne_bytes(
+        (&remainder_vec[..]).try_into().unwrap(),
+    ));
+    Ok(result)
+}
+
+pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, PtraceError> {
+    let usizes = bytes_to_usizes(bytes)?;
+    let size = checked_mul(usizes.len(), *USIZE_SIZE)?;
     let regs = getregs(pid)?;
-    let sp: usize = regs.sp.try_into().map_err(PtraceError::FromInt)?;
-    let start: usize = sp - (STACK_SAFE_ZONE_SIZE + size);
-    let mut addr: usize = start;
-    for value in clongs.iter() {
+    let start: usize = checked_sub(regs.sp, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
+    let mut addr = start;
+    for value in usizes.iter() {
         unsafe {
             sys::ptrace::write(pid, addr as *mut libc::c_void, *value as *mut libc::c_void)?;
         }
-        addr += clong_size;
+        addr = checked_add(addr, *USIZE_SIZE)?;
     }
-    start.try_into().map_err(PtraceError::FromInt)
+    Ok(start)
 }
 
 pub fn read_bytes_until_zero(
     pid: nix::unistd::Pid,
-    addr: libc::c_long,
+    addr: usize,
 ) -> Result<Vec<u8>, PtraceError> {
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
-    let clong_size: libc::c_long = std::mem::size_of::<libc::c_long>().try_into().unwrap();
     loop {
         let machine_word = sys::ptrace::read(pid, curr_addr as *mut libc::c_void)?;
         for byte in machine_word.to_ne_bytes().iter() {
@@ -299,7 +313,7 @@ pub fn read_bytes_until_zero(
                 return Ok(result);
             }
         }
-        curr_addr += clong_size;
+        curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
 }
 
@@ -318,18 +332,18 @@ mod tests {
 
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn test_convert_bytes_to_clongs_exact() {
+    fn test_convert_bytes_to_usizes_exact() {
         let bytes: &[u8] = b"abcdefghijklmnop";
-        let expect: Vec<libc::c_long> = vec![7523094288207667809, 8101815670912281193];
-        assert!(matches!(crate::bytes_to_clongs(bytes), expect));
+        let expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193];
+        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(expect)));
     }
 
     #[cfg(target_arch = "aarch64")]
     #[test]
-    fn test_convert_bytes_to_clongs_remainder() {
+    fn test_convert_bytes_to_usizes_remainder() {
         let bytes: &[u8] = b"abcdefghijklmnop9";
-        let expect: Vec<libc::c_long> = vec![7523094288207667809, 8101815670912281193, 57];
-        assert!(matches!(crate::bytes_to_clongs(bytes), expect));
+        let expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193, 57];
+        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(expect)));
     }
 
     #[test]
