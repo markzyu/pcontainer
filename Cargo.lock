@@ -229,6 +229,7 @@ version = "0.1.0"
 dependencies = [
  "executor",
  "lazy_static",
+ "libc",
  "nix",
  "sysaug",
  "tracing",

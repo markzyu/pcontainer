@@ -36,13 +36,21 @@ impl Mod for StraceMod {
         &*DEFAULT_LISTENER_SPEC
     }
 
-    fn on_file_path(&self, path: &Path) -> Result<(), SysAugError> {
-        event!(Level::INFO, "Input Path: {:?}", path,);
+    fn on_file_path(&self, path: &Path, syscall: usize) -> Result<(), SysAugError> {
+        if syscall == libc::SYS_execve as usize {
+            event!(Level::INFO, "Execve pid {:?} input Path: {:?}", self.states.pid, path);
+        } else {
+            event!(Level::DEBUG, "Input Path: {:?}", path);
+        }
         Ok(())
     }
 
-    fn on_file_real_path(&self, path: &Path) -> Result<(), SysAugError> {
-        event!(Level::INFO, "Real Path: {:?}", path,);
+    fn on_file_real_path(&self, path: &Path, syscall: usize) -> Result<(), SysAugError> {
+        if syscall == libc::SYS_execve as usize {
+            event!(Level::INFO, "Execve pid {:?} real Path: {:?}", self.states.pid, path);
+        } else {
+            event!(Level::DEBUG, "Real Path: {:?}", path);
+        }
         Ok(())
     }
 }

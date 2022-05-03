@@ -103,7 +103,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
-        let syscall = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
+        let syscall_num = regs.syscall_num;
+        let syscall = SYSCALL_INFOS.get(&syscall_num).unwrap();
         let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
 
         let mut need_write_regs = false;
@@ -120,7 +121,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             let orig_path: &Path = Path::new(path_osstr);
 
             self.handler
-                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(orig_path))?;
+                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(orig_path, syscall_num))?;
 
             let mut new_path: Option<PathBuf> = None;
             let prefix_maybe = self
@@ -135,7 +136,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
                     let val = prefix.as_path().join(orig_path.strip_prefix("/").unwrap());
                     self.handler
                         .call_mods(mods::ModFeature::OnFileRealPath, |m| {
-                            m.on_file_real_path(&val)
+                            m.on_file_real_path(&val, syscall_num)
                         })?;
                     new_path.replace(val);
                 }
@@ -150,7 +151,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             } else {
                 self.handler
                     .call_mods(mods::ModFeature::OnFileRealPath, |m| {
-                        m.on_file_real_path(orig_path)
+                        m.on_file_real_path(orig_path, syscall_num)
                     })?;
             }
         }
