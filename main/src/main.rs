@@ -90,15 +90,15 @@ impl AugmentSyscall for AugmentClone {
 }
 
 struct SyscallCounter {
-    name: Option<String>,
+    syscall: Option<ptrace::SysNum>,
     times: u64,
 }
 
 impl SyscallCounter {
-    fn count(&mut self, syscall_name: &str) {
-        let curr_syscall = Some(syscall_name.to_string());
-        if self.name != curr_syscall {
-            self.name = curr_syscall;
+    fn count(&mut self, syscall_name: ptrace::SysNum) {
+        let curr_syscall = Some(syscall_name);
+        if self.syscall != curr_syscall {
+            self.syscall = curr_syscall;
             self.times = 1;
         } else {
             self.times += 1;
@@ -107,7 +107,7 @@ impl SyscallCounter {
 
     fn new() -> SyscallCounter {
         SyscallCounter {
-            name: None,
+            syscall: None,
             times: 0,
         }
     }
@@ -147,7 +147,7 @@ pub fn event_thread(
         let unknown: String = "Unknown syscall".into();
         let name = SYSCALL_NAMES.get(&regs.syscall_num).unwrap_or(&unknown);
 
-        last_syscall.count(&name);
+        last_syscall.count(regs.syscall_num);
         if last_syscall.times % 2 == 1 {
             event!(
                 Level::DEBUG,
@@ -159,7 +159,7 @@ pub fn event_thread(
                 arg2 = regs.arg2,
             );
         }
-        if name == "clone" {
+        if regs.syscall_num == libc::SYS_clone {
             augment_clone.dispatch(last_syscall.times, &regs)?;
         }
     }
