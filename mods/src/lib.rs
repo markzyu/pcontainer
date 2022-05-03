@@ -15,11 +15,3 @@ mod trace_child;
 pub use crate::chroot::ChrootMod;
 pub use crate::strace::StraceMod;
 pub use crate::trace_child::TraceChildMod;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
