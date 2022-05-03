@@ -3,7 +3,7 @@ use crate::mods;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -62,6 +62,8 @@ pub enum SysAugError {
     },
 }
 
+// ------------------- MODS -------------------
+
 pub type ModProvider = fn(Arc<TraceeHandlerStates>) -> Box<dyn mods::Mod>;
 pub type ModBox = Box<dyn mods::Mod + Send + Sync>;
 pub type ModsByFeature = HashMap<mods::ModFeature, Vec<ModBox>>;
@@ -79,10 +81,7 @@ pub fn clone_mods_by_feature(src: &ModsByFeature) -> ModsByFeature {
     ans
 }
 
-pub fn display_err<E: Display>(e: E) -> E {
-    event!(Level::ERROR, "Error: {}", e);
-    e
-}
+// ------------------- AUGMENTS -------------------
 
 pub trait AugmentSyscall {
     fn before_call(
@@ -124,6 +123,8 @@ impl Default for Augments {
         Augments::None
     }
 }
+
+// ------------------- SYSCALLS -------------------
 
 #[derive(Debug)]
 pub struct SyscallCounter {
@@ -181,3 +182,36 @@ impl SyscallInfo {
 
 // We promise not to modify this system call
 pub const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;
+
+// ------------------- MISC -------------------
+
+pub fn display_err<E: Display>(e: E) -> E {
+    event!(Level::ERROR, "Error: {}", e);
+    e
+}
+
+pub fn rwlock_read<T>(lock: &RwLock<T>) -> Result<RwLockReadGuard<'_, T>, SysAugError> {
+    lock.read().or(Err(SysAugError::LockTraceeHandler))
+}
+
+pub fn rwlock_write<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<'_, T>, SysAugError> {
+    lock.write().or(Err(SysAugError::LockTraceeHandler))
+}
+
+pub fn rwlock_replace<T>(lock: &RwLock<T>, val: T) -> Result<(), SysAugError> {
+    let mut guard = rwlock_write(lock)?;
+    *guard = val;
+    Ok(())
+}
+
+/// Useful for accessing Option-typed fields in TraceeHandlerStates
+pub fn rwoption_replace<T>(lock: &RwLock<Option<T>>, val: T) -> Result<Option<T>, SysAugError> {
+    let mut guard = rwlock_write(lock)?;
+    Ok(guard.replace(val))
+}
+
+/// Useful for accessing Option-typed fields in TraceeHandlerStates
+pub fn rwoption_take<T>(lock: &RwLock<Option<T>>) -> Result<Option<T>, SysAugError> {
+    let mut guard = rwlock_write(lock)?;
+    Ok(guard.take())
+}

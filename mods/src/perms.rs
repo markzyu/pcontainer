@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
+use sysaug::{rwoption_replace, SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -26,12 +26,7 @@ impl PermsMod {
     }
 
     fn setuid(&self, uid: usize) -> Result<(), SysAugError> {
-        let mut maybe_uid = self
-            .states
-            .override_uid
-            .write()
-            .or(Err(SysAugError::LockTraceeHandler))?;
-        maybe_uid.replace(uid);
+        rwoption_replace(&self.states.override_uid, uid)?;
         Ok(())
     }
 }

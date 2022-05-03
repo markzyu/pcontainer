@@ -1,9 +1,9 @@
 // Make sure children of tracees are also traced.
 use lazy_static::lazy_static;
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use sysaug::mods::{Mod, ModAction, ModFeature};
-use sysaug::{SysAugError, SyscallInfo, TraceeHandlerStates};
+use sysaug::{rwoption_replace, SysAugError, SyscallInfo, TraceeHandlerStates};
 use tracing::{event, Level};
 
 lazy_static! {
@@ -23,12 +23,6 @@ impl SimpleRootMod {
     pub fn new_box(states: Arc<TraceeHandlerStates>) -> Box<dyn Mod> {
         Box::new(SimpleRootMod { states })
     }
-
-    fn setid(&self, target: &RwLock<Option<usize>>, val: usize) -> Result<(), SysAugError> {
-        let mut maybe_id = target.write().or(Err(SysAugError::LockTraceeHandler))?;
-        maybe_id.replace(val);
-        Ok(())
-    }
 }
 
 impl Mod for SimpleRootMod {
@@ -43,8 +37,8 @@ impl Mod for SimpleRootMod {
     }
 
     fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
-        self.setid(&self.states.override_uid, 0)?;
-        self.setid(&self.states.override_gid, 0)?;
+        rwoption_replace(&self.states.override_uid, 0)?;
+        rwoption_replace(&self.states.override_gid, 0)?;
         Ok(ModAction::None)
     }
 
