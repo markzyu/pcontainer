@@ -9,7 +9,7 @@ use std::time::Duration;
 use tracing::{event, span, Level};
 
 lazy_static! {
-    static ref SYSCALL_NAMES: HashMap<ptrace::SysNum, String> = {
+    static ref SYSCALL_NAMES: HashMap<usize, String> = {
         let mut map = HashMap::new();
         map.insert(libc::SYS_openat as usize, "openat".into());
         map.insert(libc::SYS_close as usize, "close".into());

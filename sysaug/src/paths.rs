@@ -7,7 +7,7 @@ use std::path;
 use tracing::{event, Level};
 
 lazy_static! {
-    static ref SYSCALL_NAMES: HashSet<ptrace::SysNum> = {
+    static ref SYSCALL_NAMES: HashSet<usize> = {
         let mut ans = HashSet::new();
         ans.insert(libc::SYS_acct as usize);
         ans.insert(libc::SYS_chdir as usize);
@@ -31,7 +31,7 @@ lazy_static! {
 }
 
 #[cfg(target_arch = "arm")]
-fn add_xplat_syscalls(ans: &mut HashSet<ptrace::SysNum>) {
+fn add_xplat_syscalls(ans: &mut HashSet<usize>) {
     ans.insert(libc::SYS_access as usize);
     ans.insert(libc::SYS_chmod as usize);
     ans.insert(libc::SYS_chown as usize);
@@ -56,7 +56,7 @@ fn add_xplat_syscalls(ans: &mut HashSet<ptrace::SysNum>) {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn add_xplat_syscalls(_ans: &mut HashSet<ptrace::SysNum>) {}
+fn add_xplat_syscalls(_ans: &mut HashSet<usize>) {}
 
 pub struct AugmentPaths {
     pub pid: nix::unistd::Pid,
@@ -80,7 +80,7 @@ impl AugmentPaths {
 }
 
 impl common::AugmentSyscall for AugmentPaths {
-    fn valid_calls(&self) -> &HashSet<ptrace::SysNum> {
+    fn valid_calls(&self) -> &HashSet<usize> {
         &*SYSCALL_NAMES
     }
 

@@ -9,7 +9,7 @@ use std::thread;
 use tracing::{event, Level};
 
 lazy_static! {
-    static ref SYSCALL_NAMES: HashSet<ptrace::SysNum> = {
+    static ref SYSCALL_NAMES: HashSet<usize> = {
         let mut ans = HashSet::new();
         ans.insert(libc::SYS_clone as usize);
         ans
@@ -22,14 +22,14 @@ pub struct AugmentClone {
 }
 
 impl common::AugmentSyscall for AugmentClone {
-    fn valid_calls(&self) -> &HashSet<ptrace::SysNum> {
+    fn valid_calls(&self) -> &HashSet<usize> {
         &*SYSCALL_NAMES
     }
 
     fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
         let mut new_regs = regs.clone();
         let pid2 = self.pid;
-        let new_flag: ptrace::SysNum = libc::CLONE_PTRACE
+        let new_flag: usize = libc::CLONE_PTRACE
             .try_into()
             .or(Err(SysAugError::IntoInt))?;
         new_regs.arg0 |= new_flag;
