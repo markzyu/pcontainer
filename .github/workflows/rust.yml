@@ -12,6 +12,13 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+          - arch: armv7
+            target: armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -22,35 +29,55 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+          target: ${{ matrix.target }}
 
       - name: Run cargo check
         uses: actions-rs/cargo@v1
         with:
           command: check
+          args: --target ${{ matrix.target }}
+          use-cross: true
 
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all --no-fail-fast
+# This doesn't work right now. 'cross' cannot simulate spawning new processes
+#  test:
+#    name: Tests
+#    runs-on: ubuntu-latest
+#    strategy:
+#      matrix:
+#        include:
+#          - arch: aarch64
+#            target: aarch64-unknown-linux-gnu
+#          - arch: armv7
+#            target: armv7-unknown-linux-gnueabihf
+#    steps:
+#      - name: Checkout sources
+#        uses: actions/checkout@v2
+# 
+#      - name: Install stable toolchain
+#        uses: actions-rs/toolchain@v1
+#        with:
+#          profile: minimal
+#          toolchain: stable
+#          override: true
+#          target: ${{ matrix.target }}
+# 
+#      - name: Run cargo test
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: test
+#          args: --all --no-fail-fast --target ${{ matrix.target }}
+#          use-cross: true
 
   lints:
     name: Lints
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+          - arch: armv7
+            target: armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -62,15 +89,18 @@ jobs:
           toolchain: stable
           override: true
           components: rustfmt, clippy
+          target: ${{ matrix.target }}
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
+          use-cross: true
 
       - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --target ${{ matrix.target }}
+          use-cross: true
