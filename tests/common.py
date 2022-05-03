@@ -2,6 +2,9 @@ import os
 import subprocess as sub
 
 
+STAGING = "tests/fixtures/staging"
+
+
 def run(args, **kwargs):
     cmd = " ".join(_get_cmd(**kwargs))
     return os.system(f"{cmd} {args} 1>/dev/null 2>/dev/null")
@@ -24,5 +27,6 @@ def _get_cmd(root=False, rootfs=False):
         "target/debug/dockify",
         "--root" if root else "",
         "--rootfs" if rootfs else "",
+        STAGING if rootfs else "",
     ]
     return list(filter(bool, args))
