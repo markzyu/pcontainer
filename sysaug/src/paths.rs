@@ -5,7 +5,9 @@ use crate::mods;
 use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
-use std::path;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 struct SyscallInfo {
@@ -90,22 +92,6 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 
 pub struct AugmentPaths {
     pub handler: Arc<TraceeHandler>,
-    pub chroot: Option<path::PathBuf>,
-}
-
-impl AugmentPaths {
-    pub fn set_chroot(&mut self, chroot: path::PathBuf) -> Result<(), SysAugError> {
-        let is_usable = {
-            let chroot_path = chroot.as_path();
-            chroot_path.is_absolute() && chroot_path.is_dir()
-        };
-        if is_usable {
-            self.chroot = Some(chroot);
-            Ok(())
-        } else {
-            Err(SysAugError::AbsolutePath(chroot))
-        }
-    }
 }
 
 impl common::AugmentSyscall for AugmentPaths {
@@ -113,36 +99,73 @@ impl common::AugmentSyscall for AugmentPaths {
         &*SYSCALL_NAMES
     }
 
-    fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let pid = self.handler.pid;
         let ptrace_client = &self.handler.ptrace_client;
 
         let syscall = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
-        let possible_args = [regs.arg0, regs.arg1, regs.arg2];
+        let mut possible_args = [&mut regs.arg0, &mut regs.arg1, &mut regs.arg2];
 
-        for (i, ref_arg_i) in possible_args.iter().enumerate() {
+        let mut need_write_regs = false;
+        for (i, ref_arg_i) in possible_args.iter_mut().enumerate() {
             let check_bit: usize = 1 << i;
             if (check_bit & syscall.path_positions) == 0 {
                 continue;
             }
 
-            let arg_i = *ref_arg_i;
-            let path =
+            let arg_i = **ref_arg_i;
+            let path_bytes =
                 ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
+            let path_osstr: &OsStr = OsStrExt::from_bytes(&path_bytes);
+            let orig_path: &Path = Path::new(path_osstr);
+
             self.handler
-                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(&path))?;
+                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(orig_path))?;
+
+            let mut new_path: Option<PathBuf> = None;
+            let prefix_maybe = self
+                .handler
+                .states
+                .path_prefix
+                .read()
+                .or(Err(SysAugError::LockTraceeHandler))?;
+
+            if let Some(prefix) = prefix_maybe.as_ref() {
+                if orig_path.is_absolute() {
+                    let val = prefix.as_path().join(orig_path.strip_prefix("/").unwrap());
+                    self.handler
+                        .call_mods(mods::ModFeature::OnFileRealPath, |m| {
+                            m.on_file_real_path(&val)
+                        })?;
+                    new_path.replace(val);
+                }
+            }
+            if let Some(new_path_val) = new_path {
+                let addr = ptrace_client.execute(move || {
+                    let final_bytes: &[u8] = new_path_val.as_os_str().as_bytes();
+                    ptrace::bytes_to_stack(pid, final_bytes)
+                })??;
+                **ref_arg_i = addr;
+                need_write_regs = true;
+            } else {
+                self.handler
+                    .call_mods(mods::ModFeature::OnFileRealPath, |m| {
+                        m.on_file_real_path(orig_path)
+                    })?;
+            }
+        }
+        if need_write_regs {
+            let regs2 = regs.clone();
+            ptrace_client.execute(move || ptrace::setregs(pid, regs2.clone()))??;
         }
         Ok(())
     }
 
-    fn after_call(&self, _regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
+    fn after_call(&self, _regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         Ok(())
     }
 
     fn new(handler: Arc<TraceeHandler>) -> Self {
-        AugmentPaths {
-            handler,
-            chroot: None,
-        }
+        AugmentPaths { handler }
     }
 }

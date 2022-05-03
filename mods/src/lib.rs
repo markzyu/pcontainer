@@ -1,8 +1,6 @@
-// Provide a business-level getter/setter for Augment* structs.
+// Provide a business-level event-handler for tracee events like on_clone_complete
 //
-// Mods are used from tracee-thread to initialize/configure Augment*
-//
-// All mods are stateless. States are stored by Augment* structs, so
+// All mods are stateless. States are stored by TraceeHandlerStates, so
 // that tracee threads don't need to loop over all mods for every syscall.
 // (Their internal state already knows what to do)
 //

@@ -61,8 +61,8 @@ pub fn display_err<E: Display>(e: E) -> E {
 }
 
 pub trait AugmentSyscall {
-    fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
-    fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
+    fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
+    fn after_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
     fn valid_calls(&self) -> &HashSet<usize>;
 
     fn new(handler: Arc<TraceeHandler>) -> Self;
@@ -70,7 +70,7 @@ pub trait AugmentSyscall {
     fn dispatch(
         &self,
         last_syscall: &SyscallCounter,
-        regs: &GenericPurposeRegs,
+        regs: &mut GenericPurposeRegs,
     ) -> Result<(), SysAugError> {
         if let Some(syscall) = last_syscall.syscall.as_ref() {
             if !self.valid_calls().contains(syscall) {
@@ -78,10 +78,10 @@ pub trait AugmentSyscall {
             }
         }
         if last_syscall.times % 2 == 1 {
-            self.before_call(&regs)?;
+            self.before_call(regs)?;
         }
         if last_syscall.times % 2 == 0 {
-            self.after_call(&regs)?;
+            self.after_call(regs)?;
         }
         Ok(())
     }
