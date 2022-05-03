@@ -5,6 +5,8 @@ use std::convert::TryInto;
 use std::fmt;
 use std::process;
 use std::sync::{Arc, RwLock};
+#[cfg(test)]
+use mockers_derive::mocked;
 
 type AnyErr = Box<dyn std::error::Error>;
 type AnyResult<V> = Result<V, AnyErr>;
@@ -26,10 +28,10 @@ impl std::error::Error for PTraceError {
 
 type SysNum = libc::c_long;
 
-#[cfg_attr(test, mockall::automock)]
-pub trait SysOverride : std::any::Any {
+#[mocked]
+pub trait SysOverride {
     fn get_syscalls(&self) -> &[SysNum];
-    fn on_syscall<'a>(&self, n: &SysNum, child: Option<&'a process::Child>) -> AnyResult<()>;
+    fn on_syscall(&self, n: &SysNum, child: Option<i32>) -> AnyResult<()>;
 }
 
 type SysOverrideBox = Box<dyn SysOverride>;
@@ -39,6 +41,7 @@ type OverrideBySysNum = Vec<Lock<SysOverrideBox>>;
 pub struct SysOverrideList {
     overrides: HashMap<SysNum, OverrideBySysNum>,
 }
+
 impl SysOverrideList {
     pub fn new() -> SysOverrideList {
         SysOverrideList{overrides: HashMap::new()}
@@ -70,7 +73,7 @@ impl SysOverrideList {
         }
     }
 
-    pub fn on_syscall(&mut self, n: &SysNum, child: Option<&process::Child>) -> AnyResult<()> {
+    pub fn on_syscall(&mut self, n: &SysNum, child: Option<i32>) -> AnyResult<()> {
         if let Some(vec) = self.overrides.get(&n) {
             let results = vec.iter().map(|val| val.read().unwrap().on_syscall(&n, child.clone()));
             self._summarize_errors(
@@ -112,10 +115,10 @@ mod tests {
     use nix::sys::ptrace;
     use nix::sys::wait;
     use ntest::timeout;
-    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
-    use mockall::Sequence;
+		use mockers::Scenario;
+		use mockers::matchers::ANY;
 
     fn _start_cmd() -> std::process::Child {
         let mut cmd = std::process::Command::new("ls");
@@ -150,40 +153,22 @@ mod tests {
     const MOCK_SYSCALLS1: &'static [crate::SysNum] = &[libc::SYS_read, libc::SYS_write];
 
     #[test]
-    #[timeout(100)]
     fn test_add_override_and_call() {
-        let mut mock = Box::new(crate::MockSysOverride::new());
+				let scenario = Scenario::new();
         let mut list = crate::SysOverrideList::new();
 
-        let mut mock_arc = list.add_override(mock);
-        list.on_syscall(&libc::SYS_openat, None);
-        {
-					let mut handle = mock_arc.write().unwrap();
-					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
-					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
-          mock.checkpoint();
-        }
+				let tmp_vec = &MOCK_SYSCALLS1.to_vec();
 
-        let mut seq = Sequence::new();
-        {
-					let mut handle = mock_arc.write().unwrap();
-					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
-					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
-          mock.expect_get_syscalls().times(2).return_const(MOCK_SYSCALLS1.to_vec());
-          mock.expect_on_syscall()
-            .times(1).in_sequence(&mut seq)
-            .withf(|n, _| n == &libc::SYS_write).return_once(move |_, _| Ok(()));
-          mock.expect_on_syscall()
-            .times(1).in_sequence(&mut seq)
-            .withf(|n, _| n == &libc::SYS_read).return_once(move |_, _| Ok(()));
-        }
+				scenario.expect(mock_handle.get_syscalls().and_return(&tmp_vec));
+        list.add_override(Box::new(mock));
+        list.on_syscall(&libc::SYS_openat, None);
+				scenario.checkpoint();
+
+				scenario.expect(mock_handle.get_syscalls().and_return(&tmp_vec));
+				scenario.expect(mock_handle.on_syscall(&libc::SYS_write, ANY).and_return(Ok(())));
+				scenario.expect(mock_handle.on_syscall(&libc::SYS_read, ANY).and_return(Ok(())));
         list.on_syscall(&libc::SYS_write, None);
         list.on_syscall(&libc::SYS_read, None);
-        {
-					let mut handle = mock_arc.write().unwrap();
-					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
-					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
-          mock.checkpoint();
-        }
+				scenario.checkpoint();
     }
 }
