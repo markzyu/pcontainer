@@ -25,3 +25,16 @@ class TestBasics(t.TestCase):
             # Linux exitcode is 0-255. Exit 257 should return 1
             ans = c.run_script(b"exit 257")
             self.assertEqual(ans.returncode, 1)
+
+    def test_run_man(self):
+        ans = c.run_script(b"man bash | head -n 1")
+        self.assertEqual(ans.returncode, 0)
+        self.assertEqual(ans.stdout.split(b"(")[0].lower(), b"bash")
+
+    def test_run_id_as_root(self):
+        ans = c.run_script(b"id", root=True)
+        self.assertEqual(ans.returncode, 0)
+
+        parts = ans.stdout.split(b" ")
+        self.assertEqual(parts[0], b"uid=0(root)")
+        self.assertEqual(parts[1], b"gid=0(root)")
