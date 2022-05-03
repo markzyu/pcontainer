@@ -10,6 +10,7 @@ use tracing::{event, Level};
 
 const NT_PRSTATUS: libc::c_int = 1;
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
+const MAX_STRUCT_SIZE: usize = 2048;
 
 lazy_static! {
     static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
@@ -23,6 +24,9 @@ pub enum PtraceError {
     #[error("Failed to parse pid {0}: {1}")]
     ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
 
+    #[error("Failed to parse usize {0:#x}: {1}")]
+    ParseUsize(i64, <i64 as TryInto<usize>>::Error),
+
     #[error("PTRACE_GETEVENTMSG error: {0}")]
     GetEventMsg(nix::Error),
 
@@ -35,6 +39,24 @@ pub enum PtraceError {
     #[error("Cannot read tracee memory: {0}")]
     Read(nix::Error),
 
+    #[error("Cannot read tracee memory of size {0} (not aligned)")]
+    ReadItemNotAligned(usize),
+
+    #[error("Cannot read tracee memory: item too big: {0} > {1}")]
+    ReadItemTooBig(usize, usize),
+
+    #[error("Cannot read tracee memory: header too big: {1} > {0}")]
+    ReadInvalidItemSize1(usize, usize),
+
+    #[error("Accessing tracee memory: buffer overflow: {1:#x} + {0} > {2:#x}")]
+    BufferOverflow(usize, usize, usize),
+
+    #[error("Accessing tracee memory: object header is too big: {0} > {1}")]
+    HeaderTooBig(usize, usize),
+
+    #[error("Accessing tracee memory: failed to convert pointers")]
+    Pointer,
+
     #[error("Cannot write tracee memory: {0}")]
     Write(nix::Error),
 
@@ -43,6 +65,18 @@ pub enum PtraceError {
 
     #[error("Integer overflow: {0} {1} {2}")]
     IntOverflow(usize, &'static str, usize),
+}
+
+pub trait CHeader {
+    /// See read_bytes_to_structs
+    fn item_size_deducer(&self) -> usize;
+
+    /// See structs_to_tracee_buffer
+    fn item_size_updater(&mut self, _size: usize) -> ();
+}
+
+pub trait CStruct {
+    type H: CHeader;
 }
 
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
@@ -270,6 +304,11 @@ fn checked_mul(a: usize, b: usize) -> Result<usize, PtraceError> {
     a.checked_mul(b).ok_or(PtraceError::IntOverflow(a, "*", b))
 }
 
+#[inline]
+fn checked_div(a: usize, b: usize) -> Result<usize, PtraceError> {
+    a.checked_div(b).ok_or(PtraceError::IntOverflow(a, "*", b))
+}
+
 pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
     let mut result: Vec<usize> = Vec::new();
     let iter = bytes.chunks_exact(*USIZE_SIZE);
@@ -297,22 +336,185 @@ pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, Ptra
     let start: usize = checked_sub(regs.sp, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
     let mut addr = start;
     for value in usizes.iter() {
-        unsafe {
-            sys::ptrace::write(pid, addr as *mut libc::c_void, *value as *mut libc::c_void)
-                .map_err(PtraceError::Write)?;
-        }
+        write(pid, addr, *value)?;
         addr = checked_add(addr, *USIZE_SIZE)?;
     }
     Ok(start)
+}
+
+pub fn write(pid: nix::unistd::Pid, addr: usize, value: usize) -> Result<(), PtraceError> {
+    unsafe {
+        sys::ptrace::write(pid, addr as *mut libc::c_void, value as *mut libc::c_void)
+            .map_err(PtraceError::Write)?;
+    }
+    Ok(())
+}
+
+pub fn checked_write(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    overflow_addr: usize,
+    value: usize,
+) -> Result<(), PtraceError> {
+    event!(Level::TRACE, "PTRACE_WRITE addr: {:x}", addr);
+    if addr >= overflow_addr {
+        Err(PtraceError::BufferOverflow(0, addr, overflow_addr))
+    } else {
+        write(pid, addr, value)
+    }
+}
+
+/// Read multiple C syscall structures from tracee memory.
+/// Here is an explannation:
+///
+/// Syscalls layout [ ..int.. ..char.. ..char.. (up to 512 chars) ]
+/// T struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ] + #[repr(C)]
+///
+/// The function returns values in the layout of Rust structs, not C structs.
+///
+/// Input arguments:
+///     T: Rust version of the C structure
+///     T::H: Rust version of the header part of the C structure, which should
+///                  contain enough information for item_size_deducer to deduce
+///                  item_size of this specific structure.
+///     item_size: the size of one of the C structure, in syscall layout
+///     item_size_deducer: This function will receive T::H,
+///                        which only contains the header information. The remaining
+///                        information is instantiated as if their byte representations
+///                        were zeroed out. This function should return the item_size
+///     total_size: The number of bytes representing the entire list of C structures,
+///                 as seen in tracee memory.
+///
+/// Note: The Rust struct must align to the size of machine word:
+///             sizeof(T) % sizeof(usize) == 0
+///       Otherwise, this function will fail with ReadItemNotAligned
+///
+/// Note: If Rust struct didn't reserve enough space for item_size, this function will
+///       fail with ReadItemTooBig.
+///
+/// Note: This function reserves a buffer of MAX_STRUCT_SIZE bytes to represent T. If T is bigger,
+///       it will fail with ReadItemTooBig.
+///
+/// Note: If item_size_deducer returns a value smaller than sizeof(T::H), this function
+///       will fail with ReadInvalidItemSize1.
+///
+/// Note: If item_size_deducer returns a value too big for total_size, this function
+///       will fail with BufferOverflow.
+///
+/// Note: Any pointer conversion failure will be reported as Pointer
+pub fn read_bytes_to_structs<T>(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    total_size: usize,
+) -> Result<Vec<T>, PtraceError>
+where
+    T: Sized + Clone + CStruct,
+{
+    let mut result: Vec<T> = Vec::new();
+    let mut curr_addr = addr;
+    let final_addr = checked_add(addr, total_size)?;
+    let t_size = std::mem::size_of::<T>();
+    let header_size = std::mem::size_of::<T::H>();
+    if t_size % *USIZE_SIZE != 0 {
+        return Err(PtraceError::ReadItemNotAligned(t_size));
+    }
+    if t_size > MAX_STRUCT_SIZE {
+        return Err(PtraceError::ReadItemTooBig(t_size, MAX_STRUCT_SIZE));
+    }
+    if t_size < header_size {
+        return Err(PtraceError::HeaderTooBig(header_size, t_size));
+    }
+
+    while curr_addr < final_addr {
+        let mut buffer = [0_u8; MAX_STRUCT_SIZE];
+        let header: &T::H = unsafe {
+            (buffer.as_ptr() as *const T::H)
+                .as_ref()
+                .ok_or(PtraceError::Pointer)?
+        };
+        let item: &T = unsafe {
+            (buffer.as_ptr() as *const T)
+                .as_ref()
+                .ok_or(PtraceError::Pointer)?
+        };
+
+        // Read header
+        if checked_add(curr_addr, header_size)? > final_addr {
+            return Err(PtraceError::BufferOverflow(
+                header_size,
+                curr_addr,
+                final_addr,
+            ));
+        }
+        read_bytes(pid, curr_addr, header_size, &mut buffer[..])?;
+        curr_addr = checked_add(curr_addr, header_size)?;
+
+        // Deduce item_size, remainder_size
+        let item_size = header.item_size_deducer();
+        let remainder_size = item_size - header_size;
+        if item_size < header_size {
+            return Err(PtraceError::ReadInvalidItemSize1(item_size, header_size));
+        }
+        if item_size > t_size {
+            return Err(PtraceError::ReadItemTooBig(item_size, t_size));
+        }
+        if checked_add(curr_addr, remainder_size)? > final_addr {
+            return Err(PtraceError::BufferOverflow(
+                remainder_size,
+                curr_addr,
+                final_addr,
+            ));
+        }
+
+        // Read remainder of item
+        read_bytes(pid, curr_addr, remainder_size, &mut buffer[header_size..])?;
+        curr_addr = checked_add(curr_addr, remainder_size)?;
+
+        // Save item to result
+        result.push(item.clone());
+    }
+    Ok(result)
+}
+
+pub fn read_bytes(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    size: usize,
+    result: &mut [u8],
+) -> Result<(), PtraceError> {
+    let mut curr_addr = addr;
+
+    let mut n_bytes_read = 0;
+    while n_bytes_read < size {
+        event!(Level::TRACE, "PTRACE_READ addr: {:x}", curr_addr);
+        let new_n_bytes_read = checked_add(n_bytes_read, *USIZE_SIZE)?;
+        if new_n_bytes_read > size {
+            let machine_word = read(pid, curr_addr)?;
+            for (i, byte) in machine_word
+                .to_ne_bytes()
+                .iter()
+                .take(size - n_bytes_read)
+                .enumerate()
+            {
+                result[n_bytes_read + i] = *byte;
+            }
+        } else {
+            unsafe {
+                let ptr = &mut result[n_bytes_read] as *mut u8 as *mut usize;
+                *ptr = read(pid, curr_addr)?;
+            }
+        }
+        curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+        n_bytes_read = new_n_bytes_read;
+    }
+    Ok(())
 }
 
 pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, PtraceError> {
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
     loop {
-        event!(Level::TRACE, "PTRACE_READ addr: {:x}", curr_addr);
-        let machine_word =
-            sys::ptrace::read(pid, curr_addr as *mut libc::c_void).map_err(PtraceError::Read)?;
+        let machine_word = read(pid, curr_addr)?;
         for byte in machine_word.to_ne_bytes().iter() {
             if *byte == b'\0' {
                 return Ok(result);
@@ -321,6 +523,131 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
         }
         curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
+}
+
+/// Write multiple C syscall structures back to tracee memory.
+/// Here is an explannation:
+///
+/// Syscalls layout [ ..int.. ..char.. ..char.. (up to 512 chars) ]
+/// T struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ] + #[repr(C)]
+///
+/// The function consumes a list of T objects, and writes them out as structs in
+/// syscall layouts, by shrinking down the size of T structs, whenever there are
+/// too many repeated recurrances of zeroed bytes.
+///
+/// Input arguments:
+///     T: Rust version of the C structure
+///     T::H: Rust version of the header part of the C structure, which should
+///                  contain a field representing the size of the C structure
+///                  itself. Bytes in the header part of the structure will never
+///                  be shrunk (see shrink_criteria).
+///     shrink_criteria: how many words of consecutive zeroes must be seen before
+///                      the remaining consecutive zeroes will be deleted. One word
+///                      is the same size as one usize integer. Bytes in T::H will
+///                      never be shrunk.
+///     item_size_updater: This closure will receive T::H, which is the header part of
+///                        the T object, and also receive the correct size after
+///                        T is shrunk to syscall format. This closure must update
+///                        the correct field in T::H to reflect the change in size.
+///                        (Usually this is the `size` field in the structure itself)
+///     buffer_size: The maximum number of bytes that can be safely written to
+///                  tracee's buffer.
+///
+/// Returns: Number of bytes written
+///
+/// Note: The Rust struct must align to the size of machine word:
+///             sizeof(T) % sizeof(usize) == 0
+///       Otherwise, this function will fail with ReadItemNotAligned
+///
+/// Note: This function reserves a buffer of MAX_STRUCT_SIZE bytes to represent T. If T is bigger,
+///       it will fail with ReadItemTooBig.
+///
+/// Note: Any pointer conversion failure will be reported as Pointer
+pub fn structs_to_tracee_buffer<T>(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    buffer_size: usize,
+    mut items: Vec<T>,
+    shrink_criteria: usize,
+) -> Result<usize, PtraceError>
+where
+    T: Sized + CStruct,
+{
+    let mut curr_addr = addr;
+    let max_addr = checked_add(addr, buffer_size)?;
+    let t_size = std::mem::size_of::<T>();
+    let header_size = std::mem::size_of::<T::H>();
+    if t_size % *USIZE_SIZE != 0 {
+        return Err(PtraceError::ReadItemNotAligned(t_size));
+    }
+    if t_size > MAX_STRUCT_SIZE {
+        return Err(PtraceError::ReadItemTooBig(t_size, MAX_STRUCT_SIZE));
+    }
+    if t_size < header_size {
+        return Err(PtraceError::HeaderTooBig(header_size, t_size));
+    }
+    let skip_header = checked_div(
+        checked_sub(checked_add(header_size, *USIZE_SIZE)?, 1)?,
+        *USIZE_SIZE,
+    )?;
+    let skip_header_bytes = checked_mul(skip_header, *USIZE_SIZE)?;
+
+    for item in items.iter_mut() {
+        let mut curr_remainder_addr = checked_add(curr_addr, skip_header_bytes)?;
+        let buffer: &mut [usize] = unsafe {
+            let ptr = item as *mut T as *mut usize;
+            let len = t_size / *USIZE_SIZE;
+            std::slice::from_raw_parts_mut(ptr, len)
+        };
+        let header: &mut T::H = unsafe {
+            (buffer.as_mut_ptr() as *mut T::H)
+                .as_mut()
+                .ok_or(PtraceError::Pointer)?
+        };
+        if curr_remainder_addr > max_addr {
+            return Err(PtraceError::BufferOverflow(
+                skip_header_bytes,
+                curr_addr,
+                max_addr,
+            ));
+        }
+
+        // Remove excess zeroes and write T without writing T::H
+        let mut count_zeroes: usize = 0;
+        let mut skipped_zeroes: usize = 0;
+        for machine_word in buffer.iter().skip(skip_header) {
+            if *machine_word == 0 {
+                count_zeroes = checked_add(count_zeroes, 1)?;
+                if count_zeroes > shrink_criteria {
+                    skipped_zeroes = checked_add(skipped_zeroes, 1)?;
+                    continue;
+                }
+                checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
+            } else {
+                count_zeroes = 0;
+                checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
+            }
+            curr_remainder_addr = checked_add(curr_remainder_addr, *USIZE_SIZE)?;
+        }
+
+        // Update T::H and write T::H
+        if skipped_zeroes > 0 {
+            header.item_size_updater(checked_sub(t_size, skipped_zeroes * *USIZE_SIZE)?);
+        }
+        for machine_word in buffer.iter().take(skip_header) {
+            write(pid, curr_addr, *machine_word)?;
+            curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+        }
+        curr_addr = curr_remainder_addr;
+    }
+    Ok(curr_addr - addr)
+}
+
+/// Our version of sys::ptrace::read, which returns an integer of the correct size
+pub fn read(pid: nix::unistd::Pid, addr: usize) -> Result<usize, PtraceError> {
+    event!(Level::TRACE, "PTRACE_READ addr: {:x}", addr);
+    let raw_data = sys::ptrace::read(pid, addr as *mut libc::c_void).map_err(PtraceError::Read)?;
+    Ok(raw_data as usize)
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
