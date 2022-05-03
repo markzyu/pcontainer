@@ -43,6 +43,7 @@ lazy_static! {
         let mut ans = HashMap::new();
         ans.extend(AugmentClone::<executor::LocalPtraceClient>::valid_calls());
         ans.extend(AugmentPaths::<executor::LocalPtraceClient>::valid_calls());
+        ans.extend(AugmentPerms::<executor::LocalPtraceClient>::valid_calls());
         ans.extend(AugmentWaitpid::<executor::LocalPtraceClient>::valid_calls());
         ans.remove(&NO_MOD_SYSCALL);
         ans

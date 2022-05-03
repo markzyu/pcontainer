@@ -6,6 +6,7 @@ use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::{event, Level};
 
 struct SyscallInfo {
     // true -> setuid/setgid, false -> getuid/getgid
@@ -31,7 +32,7 @@ lazy_static! {
     static ref SYSCALL_INFOS: HashMap<usize, SyscallInfo> = {
         let mut ans = HashMap::new();
         define_syscall!(libc::SYS_getuid, false, true, ans);
-        // define_syscall!(libc::SYS_geteuid, false, true, ans);
+        define_syscall!(libc::SYS_geteuid, false, true, ans);
         define_syscall!(libc::SYS_setuid, true, true, ans);
         define_syscall!(libc::SYS_getgid, false, false, ans);
         // define_syscall!(libc::SYS_getegid, false, false, ans);
@@ -66,15 +67,21 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
     }
 
     fn after_call(&self, mut regs: GenericPurposeRegs) -> Result<(), SysAugError> {
-        if regs.syscall_num == libc::SYS_getuid as usize {
+        let info = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
+        if !info.is_setter && info.is_uid {
             let maybe_override = self
                 .handler
                 .states
                 .override_uid
                 .read()
                 .or(Err(SysAugError::LockTraceeHandler))?;
-            if let Some(uid) = *maybe_override {
-                regs.set_syscall_retval(uid);
+            event!(Level::INFO, "Override getuid() = {:?}", maybe_override);
+            if let Some(uid) = &*maybe_override {
+                regs.set_syscall_retval(*uid);
+                let pid = self.handler.pid;
+                self.handler
+                    .ptrace_client
+                    .execute(move || ptrace::setregs(pid, regs))??;
             }
         }
         Ok(())

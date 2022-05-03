@@ -317,10 +317,10 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
     loop {
         let machine_word = sys::ptrace::read(pid, curr_addr as *mut libc::c_void)?;
         for byte in machine_word.to_ne_bytes().iter() {
-            result.push(*byte);
             if *byte == b'\0' {
                 return Ok(result);
             }
+            result.push(*byte);
         }
         curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
