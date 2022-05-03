@@ -37,6 +37,9 @@ lazy_static! {
         define_syscall!(libc::SYS_getgid, false, false, ans);
         // define_syscall!(libc::SYS_getegid, false, false, ans);
         define_syscall!(libc::SYS_setgid, true, false, ans);
+        define_syscall!(libc::SYS_setgroups, true, false, ans);
+        define_syscall!(libc::SYS_setresgid, true, false, ans);
+        define_syscall!(libc::SYS_setresuid, true, false, ans);
         ans
     };
     static ref VALID_SYSCALLS: HashMap<usize, common::Augments> = {
@@ -58,10 +61,18 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPer
     }
 
     fn before_call(&self, regs: GenericPurposeRegs) -> Result<(), SysAugError> {
+        let info = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
         if regs.syscall_num == libc::SYS_setuid as usize {
             self.handler.call_mods(mods::ModFeature::OnSetuid, |m| {
                 m.on_setuid(regs.arg0, regs.syscall_num)
             })?;
+        } else if info.is_setter {
+            event!(
+                Level::INFO,
+                "Attempting to skip syscall {}",
+                regs.syscall_num
+            );
+            self.handler.skip_syscall(0)?;
         }
         Ok(())
     }
