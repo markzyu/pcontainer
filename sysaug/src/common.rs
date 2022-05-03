@@ -81,6 +81,7 @@ pub trait AugmentSyscall {
 pub enum Augments {
     Clone,
     Paths,
+    Perms,
     Waitpid,
 }
 
