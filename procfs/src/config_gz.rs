@@ -13,6 +13,16 @@ pub struct ConfigGz {
   pub lines: Vec<ConfigGzLine>
 }
 
+const WHITESPACES: &[u8] = b" \t\n\r";
+
+fn _strip_slice(input: &[u8]) -> &[u8] {
+  if let Some(left) = input.iter().position(|x| !WHITESPACES.contains(x)) {
+    let right = input.iter().rposition(|x| !WHITESPACES.contains(x)).unwrap();
+    return &input[left..right+1]
+  }
+  return &input[0..0]
+}
+
 impl ConfigGzLine {
   fn preproc(&self) -> Option<(&[u8], usize)> {
     let mut content = self.content.as_slice();
@@ -23,18 +33,18 @@ impl ConfigGzLine {
     return Some((content, eq_idx));
   }
 
-  pub fn maybeValue(&self) -> Option<(&[u8], usize)> {
+  pub fn maybe_value(&self) -> Option<(&[u8], usize)> {
     let (content, idx) = self.preproc()?;
     return Some((
-      content.get(idx+1..).unwrap_or(b""),
+      _strip_slice(content.get(idx+1..).unwrap_or(b"")),
       idx
     ));
   }
 
-  pub fn maybeName(&self) -> Option<(&[u8], usize)> {
+  pub fn maybe_name(&self) -> Option<(&[u8], usize)> {
     let (content, idx) = self.preproc()?;
     return Some((
-      content.get(..idx).unwrap_or(b""),
+      _strip_slice(content.get(..idx).unwrap_or(b"")),
       idx
     ));
   }
@@ -70,7 +80,7 @@ mod tests {
 
     #[test]
     fn config_gz_line_maybe_value() {
-        let testCases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
+        let test_cases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
           (config_gz::ConfigGzLine{content: b"".to_vec()}, None),
           (config_gz::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
           (config_gz::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
@@ -79,14 +89,14 @@ mod tests {
           (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"xy", 14))),
           (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF= xy \t # def".to_vec()}, Some((b"xy", 14))),
         ];
-        for (line, expect) in testCases {
-          assert_eq!(line.maybeValue(), expect);
+        for (line, expect) in test_cases {
+          assert_eq!(line.maybe_value(), expect);
         }
     }
 
     #[test]
     fn config_gz_line_maybe_name() {
-        let testCases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
+        let test_cases: Vec<(config_gz::ConfigGzLine, Option<(&[u8], usize)>)> = vec![
           (config_gz::ConfigGzLine{content: b"".to_vec()}, None),
           (config_gz::ConfigGzLine{content: b"#comment a=123".to_vec()}, None),
           (config_gz::ConfigGzLine{content: b"INVALID_VAR".to_vec()}, None),
@@ -95,8 +105,8 @@ mod tests {
           (config_gz::ConfigGzLine{content: b" CONFIG_ABC_DEF=xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
           (config_gz::ConfigGzLine{content: b"CONFIG_ABC_DEF = xy \t # def".to_vec()}, Some((b"CONFIG_ABC_DEF", 15))),
         ];
-        for (line, expect) in testCases {
-          assert_eq!(line.maybeName(), expect);
+        for (line, expect) in test_cases {
+          assert_eq!(line.maybe_name(), expect);
         }
     }
 }

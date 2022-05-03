@@ -8,8 +8,8 @@ fn main() {
     let mut config = config_gz::ConfigGz {lines: vec![]};
     config.init_from_host_os().unwrap();
     for line in config.lines() {
-      if let Some((name, _)) = line.maybeName() {
-        if let Some((value, _)) = line.maybeValue() {
+      if let Some((name, _)) = line.maybe_name() {
+        if let Some((value, _)) = line.maybe_value() {
           println!("{:?} = {:?}", std::str::from_utf8(name), std::str::from_utf8(value));
         }
       }
