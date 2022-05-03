@@ -1,3 +1,5 @@
+Disclaimer: This is a **toy project** in its very early stage. Please don't use it in production.
+
 ## Project structure
 
 ![project structure](ProjectStructure.png)
@@ -11,14 +13,3 @@ Sysaug is a backend while mods are the frontend.
 Mods are dynamic but sysaug isn't.
 - `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
 - `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
-
-## What's a good performance overhead?
-
-Tested on Android Termux:
-
-proot slows down `git status` to about 5x its original run time.
-
-- original total wall time: about 10ms
-- proot total wall time: about 50ms
-
-As long as our parallel proot doesn't slow down the tracee by more than 5x. It should be fine.
