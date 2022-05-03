@@ -22,6 +22,8 @@ pub trait AugmentSyscall {
     fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError>;
     fn valid_calls(&self) -> &HashSet<ptrace::SysNum>;
 
+    fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self;
+
     fn dispatch(
         &self,
         last_syscall: &SyscallCounter,
