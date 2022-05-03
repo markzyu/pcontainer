@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::process;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 type AnyErr = Box<dyn std::error::Error>;
 type AnyResult<V> = Result<V, AnyErr>;
@@ -33,7 +33,8 @@ pub trait SysOverride : std::any::Any {
 }
 
 type SysOverrideBox = Box<dyn SysOverride>;
-type OverrideBySysNum = Vec<Arc<SysOverrideBox>>;
+type Lock<T> = Arc<RwLock<T>>;
+type OverrideBySysNum = Vec<Lock<SysOverrideBox>>;
 
 pub struct SysOverrideList {
     overrides: HashMap<SysNum, OverrideBySysNum>,
@@ -43,12 +44,12 @@ impl SysOverrideList {
         SysOverrideList{overrides: HashMap::new()}
     }
 
-    pub fn add_override(&mut self, val: SysOverrideBox) -> Arc<SysOverrideBox> {
+    pub fn add_override(&mut self, val: SysOverrideBox) -> Lock<SysOverrideBox> {
         let mut old_vec: OverrideBySysNum;
         let mut new_vec: OverrideBySysNum = Vec::new();
-        let mut override_arc = Arc::new(val);
+        let mut override_arc = Arc::new(RwLock::new(val));
         let mut override_arc2 = Arc::clone(&override_arc);
-        let override_ref = Arc::get_mut(&mut override_arc2).unwrap();
+        let override_ref = override_arc2.read().unwrap();
         for n in override_ref.get_syscalls().iter() {
             if !self.overrides.contains_key(&n) {
                 old_vec = new_vec;
@@ -71,7 +72,7 @@ impl SysOverrideList {
 
     pub fn on_syscall(&mut self, n: &SysNum, child: Option<&process::Child>) -> AnyResult<()> {
         if let Some(vec) = self.overrides.get(&n) {
-            let results = vec.iter().map(|val| val.on_syscall(&n, child.clone()));
+            let results = vec.iter().map(|val| val.read().unwrap().on_syscall(&n, child.clone()));
             self._summarize_errors(
               results.filter_map(|x| x.err()).collect(),
               format!("Errors(s) starting syscall {}", n),
@@ -157,14 +158,16 @@ mod tests {
         let mut mock_arc = list.add_override(mock);
         list.on_syscall(&libc::SYS_openat, None);
         {
-					let mut value_any = Arc::get_mut(&mut mock_arc).unwrap() as &mut dyn std::any::Any;
+					let mut handle = mock_arc.write().unwrap();
+					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
 					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
           mock.checkpoint();
         }
 
         let mut seq = Sequence::new();
         {
-					let mut value_any = Arc::get_mut(&mut mock_arc).unwrap() as &mut dyn std::any::Any;
+					let mut handle = mock_arc.write().unwrap();
+					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
 					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
           mock.expect_get_syscalls().times(2).return_const(MOCK_SYSCALLS1.to_vec());
           mock.expect_on_syscall()
@@ -177,7 +180,8 @@ mod tests {
         list.on_syscall(&libc::SYS_write, None);
         list.on_syscall(&libc::SYS_read, None);
         {
-					let mut value_any = Arc::get_mut(&mut mock_arc).unwrap() as &mut dyn std::any::Any;
+					let mut handle = mock_arc.write().unwrap();
+					let mut value_any = &mut handle.as_mut() as &mut dyn std::any::Any;
 					let mock: &mut crate::MockSysOverride = value_any.downcast_mut().unwrap();
           mock.checkpoint();
         }
