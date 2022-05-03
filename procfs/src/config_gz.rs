@@ -11,6 +11,7 @@ pub struct ConfigGzLine {
 #[derive(Debug)]
 pub struct ConfigGz {
     pub lines: Vec<ConfigGzLine>,
+    override_lines: Vec<ConfigGzLine>,
 }
 
 const WHITESPACES: &[u8] = b" \t\n\r";
@@ -48,6 +49,10 @@ impl ConfigGzLine {
 }
 
 impl ConfigGz {
+    pub fn new() -> ConfigGz {
+        return ConfigGz {lines: vec![], override_lines: vec![]}
+    }
+
     pub fn init_from_host_os(&mut self) -> Result<(), Box<dyn error::Error>> {
         let f = io::BufReader::new(std::fs::File::open("/proc/config.gz")?);
         let mut gunzip = io::BufReader::new(GzDecoder::new(f));
