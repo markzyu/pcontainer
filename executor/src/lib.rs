@@ -1,8 +1,9 @@
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{sync_channel, SyncSender, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
 use std::time::Duration;
 
-pub type SharedBool = Arc<Mutex<bool>>;
+pub type SharedBool = Arc<AtomicBool>;
 pub type PtraceRequest = Box<dyn Fn() + Send>;
 
 pub struct PtraceServer {
@@ -17,7 +18,7 @@ pub struct PtraceClient {
 
 pub fn new_ptrace_executor() -> (PtraceClient, PtraceServer) {
     let (send, recv) = sync_channel(1);
-    let should_serve = Arc::new(Mutex::new(false));
+    let should_serve = Arc::new(AtomicBool::new(false));
     let client = PtraceClient {
         send_req: send,
         should_serve: Arc::clone(&should_serve),
@@ -26,20 +27,16 @@ pub fn new_ptrace_executor() -> (PtraceClient, PtraceServer) {
         recv_req: recv,
         should_serve: Arc::clone(&should_serve),
     };
-    return (client, server);
+    (client, server)
 }
 
 impl PtraceServer {
     fn read_should_serve(&self) -> bool {
-        let data = self.should_serve.lock().unwrap();
-        data.clone()
+        self.should_serve.load(Ordering::Relaxed)
     }
 
     pub fn serve(&self) {
-        {
-            let mut data = self.should_serve.lock().unwrap();
-            *data = true;
-        }
+        self.should_serve.store(true, Ordering::Relaxed);
         while self.read_should_serve() {
             let item = self.recv_req.recv_timeout(Duration::from_millis(100));
             if let Ok(req) = item {
@@ -49,27 +46,30 @@ impl PtraceServer {
     }
 }
 
-impl PtraceClient {
-    pub fn clone(&self) -> PtraceClient {
+impl Clone for PtraceClient {
+    fn clone(&self) -> PtraceClient {
         PtraceClient {
             send_req: self.send_req.clone(),
             should_serve: Arc::clone(&self.should_serve),
         }
     }
+}
 
+impl PtraceClient {
     pub fn stop(&self) {
-        let mut data = self.should_serve.lock().unwrap();
-        *data = false;
+        self.should_serve.store(false, Ordering::Relaxed);
     }
 
     fn send(&self, req: PtraceRequest) {
         self.send_req.clone().send(req).unwrap();
     }
 
-    pub fn execute<T, F> (&self, f: F) -> T 
-    where F: Fn() -> T,
-          F: Send + 'static,
-          T: Send + 'static {
+    pub fn execute<T, F>(&self, f: F) -> T
+    where
+        F: Fn() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
         let (send, recv) = sync_channel(1);
         let final_func = move || {
             let result = f();
@@ -80,14 +80,14 @@ impl PtraceClient {
         self.send(Box::new(final_func));
 
         // Return results
-        return recv.recv().unwrap();
+        recv.recv().unwrap()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
     use crate::new_ptrace_executor;
+    use std::thread;
 
     #[test]
     fn it_works() {
