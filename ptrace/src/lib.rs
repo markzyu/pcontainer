@@ -5,8 +5,6 @@ use std::convert::TryInto;
 use std::fmt;
 use std::process;
 use std::sync::{Arc, RwLock};
-#[cfg(test)]
-use mockers_derive::mocked;
 
 type AnyErr = Box<dyn std::error::Error>;
 type AnyResult<V> = Result<V, AnyErr>;
@@ -28,7 +26,6 @@ impl std::error::Error for PTraceError {
 
 type SysNum = libc::c_long;
 
-#[mocked]
 pub trait SysOverride {
     fn get_syscalls(&self) -> &[SysNum];
     fn on_syscall(&self, n: &SysNum, child: Option<i32>) -> AnyResult<()>;
@@ -50,8 +47,8 @@ impl SysOverrideList {
     pub fn add_override(&mut self, val: SysOverrideBox) -> Lock<SysOverrideBox> {
         let mut old_vec: OverrideBySysNum;
         let mut new_vec: OverrideBySysNum = Vec::new();
-        let mut override_arc = Arc::new(RwLock::new(val));
-        let mut override_arc2 = Arc::clone(&override_arc);
+        let override_arc = Arc::new(RwLock::new(val));
+        let override_arc2 = Arc::clone(&override_arc);
         let override_ref = override_arc2.read().unwrap();
         for n in override_ref.get_syscalls().iter() {
             if !self.overrides.contains_key(&n) {
@@ -117,8 +114,6 @@ mod tests {
     use ntest::timeout;
     use std::thread;
     use std::time::Duration;
-		use mockers::Scenario;
-		use mockers::matchers::ANY;
 
     fn _start_cmd() -> std::process::Child {
         let mut cmd = std::process::Command::new("ls");
@@ -151,24 +146,45 @@ mod tests {
     }
 
     const MOCK_SYSCALLS1: &'static [crate::SysNum] = &[libc::SYS_read, libc::SYS_write];
+		use std::sync::{Arc, RwLock};
+
+		struct TestSysOverride {
+				result: Arc<RwLock<Option<crate::SysNum>>>,
+		}
+		impl crate::SysOverride for TestSysOverride {
+				fn get_syscalls(&self) -> &[crate::SysNum] {
+						MOCK_SYSCALLS1
+				}
+				fn on_syscall(&self, n: &crate::SysNum, _child: Option<i32>) -> crate::AnyResult<()> {
+						let mut maybe = self.result.write().unwrap();
+						maybe.replace(n.clone());
+						Ok(())
+				}
+		}
+
+		fn _reset_syscall_result(result: Arc<RwLock<Option<crate::SysNum>>>) {
+				let mut maybe = result.write().unwrap();
+				maybe.take();
+		}
+
+		fn _run_syscall_and_assert(result: Arc<RwLock<Option<crate::SysNum>>>, call_num: &crate::SysNum, want_sys_num: Option<crate::SysNum>, list: &mut crate::SysOverrideList) {
+        list.on_syscall(&call_num, None).unwrap();
+				let maybe = result.read().unwrap();
+				assert!(*maybe == want_sys_num);
+		}
 
     #[test]
     fn test_add_override_and_call() {
-				let scenario = Scenario::new();
+				let result = Arc::new(RwLock::new(None));
+				let fake = TestSysOverride{result: result.clone()};
         let mut list = crate::SysOverrideList::new();
 
-				let tmp_vec = &MOCK_SYSCALLS1.to_vec();
+        list.add_override(Box::new(fake));
+				_reset_syscall_result(result.clone());
+				_run_syscall_and_assert(result.clone(), &libc::SYS_openat, None, &mut list);
 
-				scenario.expect(mock_handle.get_syscalls().and_return(&tmp_vec));
-        list.add_override(Box::new(mock));
-        list.on_syscall(&libc::SYS_openat, None);
-				scenario.checkpoint();
-
-				scenario.expect(mock_handle.get_syscalls().and_return(&tmp_vec));
-				scenario.expect(mock_handle.on_syscall(&libc::SYS_write, ANY).and_return(Ok(())));
-				scenario.expect(mock_handle.on_syscall(&libc::SYS_read, ANY).and_return(Ok(())));
-        list.on_syscall(&libc::SYS_write, None);
-        list.on_syscall(&libc::SYS_read, None);
-				scenario.checkpoint();
+				_reset_syscall_result(result.clone());
+				_run_syscall_and_assert(result.clone(), &libc::SYS_write, Some(libc::SYS_write.clone()), &mut list);
+				_run_syscall_and_assert(result.clone(), &libc::SYS_read, Some(libc::SYS_read.clone()), &mut list);
     }
 }
