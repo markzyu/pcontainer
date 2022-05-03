@@ -6,9 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use sysaug::mods::{Mod, ModFeature, PathAction};
 use sysaug::{SysAugError, TraceeHandlerStates};
-use tracing::{event, Level};
-
-const META_INIT: &'static str = "{}\n";
 
 lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
@@ -16,6 +13,7 @@ lazy_static! {
         ans.insert(ModFeature::OnTraceeStartup);
         ans.insert(ModFeature::OverrideFileRealPath);
         ans.insert(ModFeature::OverrideFileFakePath);
+        ans.insert(ModFeature::ResolveMetadataPath);
         ans
     };
 }
@@ -73,7 +71,7 @@ impl Mod for RootfsMod {
         curr_path: &Path,
         _syscall: usize,
     ) -> Result<PathAction, SysAugError> {
-        let action = self.map_components(curr_path, |bytes| {
+        self.map_components(curr_path, |bytes| {
             if bytes == b"." {
                 return PathAction::None;
             }
@@ -85,24 +83,16 @@ impl Mod for RootfsMod {
                 return PathAction::Override(osstring.into());
             }
             PathAction::None
-        })?;
-        if action == PathAction::HidePath {
-            return Ok(action);
-        }
-        let path = if let PathAction::Override(override_path) = &action {
-            override_path.as_path()
-        } else {
-            curr_path
-        };
+        })
+    }
 
+    fn resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let path_str = path.to_string_lossy();
-        event!(Level::DEBUG, "Checking metadata for: {:?}", path_str);
         if !path.exists() {
-            return Ok(action);
+            return Ok(None);
         }
-
-        let meta_path = if path.is_dir() {
-            path.join("...")
+        if path.is_dir() {
+            Ok(Some(path.join("...")))
         } else {
             let parent = path
                 .parent()
@@ -112,20 +102,7 @@ impl Mod for RootfsMod {
                 .ok_or(self.err("FailedToReadFilename", &path_str))?;
             let mut new_filename = OsString::from(".");
             new_filename.push(filename);
-            parent.join(new_filename)
-        };
-        event!(
-            Level::DEBUG,
-            "Writing metadata file: {:?}",
-            meta_path.to_string_lossy()
-        );
-        match std::fs::write(meta_path, META_INIT) {
-            Ok(_) => Ok(action),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::PermissionDenied => Ok(action),
-                std::io::ErrorKind::NotFound => Ok(action),
-                _ => Err(self.err("FailedWritingMetaFile", &e.to_string())),
-            },
+            Ok(Some(parent.join(new_filename)))
         }
     }
 

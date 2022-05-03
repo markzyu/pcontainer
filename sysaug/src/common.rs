@@ -45,6 +45,9 @@ pub enum SysAugError {
     #[error("Tracee process exited/crashed unexpectedly")]
     TraceeCrashed,
 
+    #[error("Failed to write metadata: {0}")]
+    WriteMetadata(String),
+
     #[error("{kind} error from '{mod_name}' mod: {message}")]
     Mod {
         kind: String,

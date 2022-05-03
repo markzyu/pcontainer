@@ -15,6 +15,7 @@ pub enum ModFeature {
     OnTraceeStartup,
     OverrideFileFakePath,
     OverrideFileRealPath,
+    ResolveMetadataPath,
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,6 +52,11 @@ pub trait Mod {
 
     fn get_features(&self) -> &'static HashSet<ModFeature> {
         &*DEFAULT_LISTENER_SPEC
+    }
+
+    // Return None if we don't want to keep metadata around for a specific path
+    fn resolve_metadata_path(&self, _path: &Path) -> Result<Option<PathBuf>, SysAugError> {
+        Ok(None)
     }
 
     fn on_chroot(&self, _raw_path: &Path) -> Result<ModAction, SysAugError> {
