@@ -203,7 +203,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         libc::ptrace(
-            12 as u32,
+            12_u32,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<i32>(),
             data.as_mut_ptr() as *mut _ as *mut libc::c_void,
@@ -237,7 +237,7 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
 pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
     let res = unsafe {
         libc::ptrace(
-            13 as u32,
+            13_u32,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<i32>(),
             &mut data as *mut _ as *mut libc::c_void,

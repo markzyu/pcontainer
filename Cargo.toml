@@ -3,6 +3,7 @@
 members = [
   "executor",
   "main",
+  "mods",
   "procfs",
   "ptrace",
   "sysaug",

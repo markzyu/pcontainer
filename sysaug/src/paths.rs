@@ -1,10 +1,12 @@
 use crate::common;
 use crate::common::SysAugError;
+use crate::handler::TraceeHandler;
+use crate::mods;
 use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::path;
-use tracing::{event, Level};
+use std::sync::Arc;
 
 struct SyscallInfo {
     /// Bitwise representation
@@ -13,7 +15,12 @@ struct SyscallInfo {
 
 macro_rules! define_syscall {
     ($name:expr, $path_positions:expr, $ans:ident) => {
-        $ans.insert($name as usize, SyscallInfo {path_positions: $path_positions})
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                path_positions: $path_positions,
+            },
+        )
     };
 }
 
@@ -39,11 +46,9 @@ lazy_static! {
         define_syscall!(libc::SYS_openat, 2, ans);
         define_syscall!(libc::SYS_name_to_handle_at, 2, ans);
         define_syscall!(libc::SYS_faccessat, 2, ans);
-        define_syscall!(libc::SYS_newfstatat, 2, ans);
         add_xplat_syscalls(&mut ans);
         ans
     };
-
     static ref SYSCALL_NAMES: HashSet<usize> = {
         let mut ans = HashSet::new();
         for key in SYSCALL_INFOS.keys() {
@@ -79,11 +84,12 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 }
 
 #[cfg(target_arch = "aarch64")]
-fn add_xplat_syscalls(_ans: &mut HashMap<usize, SyscallInfo>) {}
+fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
+    define_syscall!(libc::SYS_newfstatat, 2, ans);
+}
 
 pub struct AugmentPaths {
-    pub pid: nix::unistd::Pid,
-    pub ptrace_client: executor::PtraceClient,
+    pub handler: Arc<TraceeHandler>,
     pub chroot: Option<path::PathBuf>,
 }
 
@@ -108,7 +114,9 @@ impl common::AugmentSyscall for AugmentPaths {
     }
 
     fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
-        let pid = self.pid;
+        let pid = self.handler.pid;
+        let ptrace_client = &self.handler.ptrace_client;
+
         let syscall = SYSCALL_INFOS.get(&regs.syscall_num).unwrap();
         let possible_args = [regs.arg0, regs.arg1, regs.arg2];
 
@@ -119,10 +127,10 @@ impl common::AugmentSyscall for AugmentPaths {
             }
 
             let arg_i = *ref_arg_i;
-            let path = self
-                .ptrace_client
-                .execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
-            event!(Level::INFO, "Input Path: {:?}", String::from_utf8_lossy(&path));
+            let path =
+                ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
+            self.handler
+                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(&path))?;
         }
         Ok(())
     }
@@ -131,10 +139,9 @@ impl common::AugmentSyscall for AugmentPaths {
         Ok(())
     }
 
-    fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self {
+    fn new(handler: Arc<TraceeHandler>) -> Self {
         AugmentPaths {
-            pid,
-            ptrace_client,
+            handler,
             chroot: None,
         }
     }

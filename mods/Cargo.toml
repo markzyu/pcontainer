@@ -1,5 +1,5 @@
 [package]
-name = "dockify"
+name = "mods"
 version = "0.1.0"
 edition = "2018"
 
@@ -7,10 +7,7 @@ edition = "2018"
 
 [dependencies]
 executor = {path = "../executor"}
-mods = {path = "../mods"}
-procfs = {path = "../procfs"}
-ptrace = {path = "../ptrace"}
 sysaug = {path = "../sysaug"}
-thiserror = "1.0.25"
+lazy_static = "1.4.0"
+nix = "0.19.1"
 tracing = "0.1.26"
-tracing-subscriber = "0.2"

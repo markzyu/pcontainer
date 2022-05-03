@@ -1,11 +1,12 @@
 use crate::common;
 use crate::common::SysAugError;
-use crate::handler;
+use crate::handler::TraceeHandler;
+use crate::mods;
 use lazy_static::lazy_static;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashSet;
 use std::convert::TryInto;
-use std::thread;
+use std::sync::Arc;
 use tracing::{event, Level};
 
 lazy_static! {
@@ -17,8 +18,7 @@ lazy_static! {
 }
 
 pub struct AugmentClone {
-    pub pid: nix::unistd::Pid,
-    pub ptrace_client: executor::PtraceClient,
+    pub handler: Arc<TraceeHandler>,
 }
 
 impl common::AugmentSyscall for AugmentClone {
@@ -28,16 +28,15 @@ impl common::AugmentSyscall for AugmentClone {
 
     fn before_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
         let mut new_regs = regs.clone();
-        let pid2 = self.pid;
+        let pid2 = self.handler.pid;
+        let ptrace_client = &self.handler.ptrace_client;
+
         let new_flag: usize = libc::CLONE_PTRACE
             .try_into()
             .or(Err(SysAugError::IntoInt))?;
         new_regs.arg0 |= new_flag;
-        self.ptrace_client
-            .execute(move || ptrace::setregs(pid2, new_regs.clone()))??;
-        let confirm_regs = self
-            .ptrace_client
-            .execute(move || ptrace::getregs(pid2))??;
+        ptrace_client.execute(move || ptrace::setregs(pid2, new_regs.clone()))??;
+        let confirm_regs = ptrace_client.execute(move || ptrace::getregs(pid2))??;
         event!(
             Level::DEBUG,
             "Clone new arg: {:x}, {:x}, {:x}",
@@ -50,20 +49,13 @@ impl common::AugmentSyscall for AugmentClone {
 
     fn after_call(&self, regs: &GenericPurposeRegs) -> Result<(), SysAugError> {
         let raw_pid = regs.syscall_retval();
-        if raw_pid > 0 {
-            let child_pid: nix::unistd::Pid =
-                nix::unistd::Pid::from_raw(raw_pid.try_into().or(Err(SysAugError::IntoInt))?);
-            event!(Level::INFO, "Clone pid {}", child_pid);
-            let new_ptrace_client = self.ptrace_client.clone();
-            let new_tracee_handler = handler::TraceeHandler::new(child_pid, new_ptrace_client);
-            thread::spawn(move || {
-                new_tracee_handler.event_loop().unwrap();
-            });
-        }
-        Ok(())
+        self.handler
+            .call_mods(mods::ModFeature::OnCloneComplete, |m| {
+                m.on_clone_complete(raw_pid as isize)
+            })
     }
 
-    fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> Self {
-        AugmentClone { pid, ptrace_client }
+    fn new(handler: Arc<TraceeHandler>) -> Self {
+        AugmentClone { handler }
     }
 }
