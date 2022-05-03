@@ -11,6 +11,12 @@ pub struct TraceeHandler {
     ptrace_client: executor::PtraceClient,
 }
 
+macro_rules! new_augment {
+    ($type:ty, $self:ident, $pid:ident) => {
+        <$type>::new($pid, $self.ptrace_client.clone())
+    };
+}
+
 impl TraceeHandler {
     pub fn new(pid: nix::unistd::Pid, ptrace_client: executor::PtraceClient) -> TraceeHandler {
         TraceeHandler { pid, ptrace_client }
@@ -24,11 +30,8 @@ impl TraceeHandler {
             sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
         })??;
 
-        let augment_clone = AugmentClone {
-            pid,
-            ptrace_client: self.ptrace_client.clone(),
-        };
-        let augment_paths = AugmentPaths::new(pid, self.ptrace_client.clone());
+        let augment_clone = new_augment!(AugmentClone, self, pid);
+        let augment_paths = new_augment!(AugmentPaths, self, pid);
 
         let mut last_syscall = SyscallCounter::new();
         loop {
