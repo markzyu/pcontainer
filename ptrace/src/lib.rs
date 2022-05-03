@@ -299,10 +299,7 @@ pub fn bytes_to_stack(pid: nix::unistd::Pid, bytes: &[u8]) -> Result<usize, Ptra
     Ok(start)
 }
 
-pub fn read_bytes_until_zero(
-    pid: nix::unistd::Pid,
-    addr: usize,
-) -> Result<Vec<u8>, PtraceError> {
+pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, PtraceError> {
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
     loop {
@@ -334,16 +331,16 @@ mod tests {
     #[test]
     fn test_convert_bytes_to_usizes_exact() {
         let bytes: &[u8] = b"abcdefghijklmnop";
-        let expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193];
-        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(expect)));
+        let _expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193];
+        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(_expect)));
     }
 
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_convert_bytes_to_usizes_remainder() {
         let bytes: &[u8] = b"abcdefghijklmnop9";
-        let expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193, 57];
-        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(expect)));
+        let _expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193, 57];
+        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(_expect)));
     }
 
     #[test]
