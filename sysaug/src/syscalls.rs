@@ -49,6 +49,23 @@ macro_rules! define_paths_syscall {
     };
 }
 
+macro_rules! define_dirfd_syscall {
+    ($name:expr, $path_positions:expr, $dirfd_position:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Paths,
+                name: stringify!($name),
+                num: $name as usize,
+                path_positions: $path_positions,
+                dirfd_position: Some($dirfd_position),
+                getdents_bits: None,
+                ..Default::default()
+            },
+        )
+    };
+}
+
 macro_rules! define_getdents_syscall {
     ($name:expr, $getdents_bits:expr, $ans:ident) => {
         $ans.insert(
@@ -101,11 +118,11 @@ lazy_static! {
         define_paths_syscall!(libc::SYS_llistxattr, 1, ans);
         define_paths_syscall!(libc::SYS_execve, 1, ans);
 
-        define_paths_syscall!(libc::SYS_openat, 2, ans);
-        define_paths_syscall!(libc::SYS_name_to_handle_at, 2, ans);
-        define_paths_syscall!(libc::SYS_faccessat, 2, ans);
-        define_paths_syscall!(libc::SYS_mkdirat, 2, ans);
-        define_paths_syscall!(libc::SYS_utimensat, 2, ans);
+        define_dirfd_syscall!(libc::SYS_openat, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, ans);
+        define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         define_getdents_syscall!(libc::SYS_getdents64, 64, ans);
         add_xplat_syscalls(&mut ans);
         ans.remove(&NO_MOD_SYSCALL);
@@ -140,12 +157,12 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
 
 #[cfg(target_arch = "aarch64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_paths_syscall!(libc::SYS_newfstatat, 2, ans);
+    define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
 }
 
 #[cfg(target_arch = "x86_64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_paths_syscall!(libc::SYS_newfstatat, 2, ans);
+    define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
     define_paths_syscall!(libc::SYS_chmod, 1, ans);
     define_paths_syscall!(libc::SYS_utime, 1, ans);
     define_paths_syscall!(libc::SYS_utimes, 1, ans);

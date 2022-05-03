@@ -85,28 +85,34 @@ impl Mod for RootfsMod {
         })
     }
 
-    fn resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
+    fn resolve_metadata_path(
+        &self,
+        rel_path: &Path,
+        dirfd_path: &Path,
+    ) -> Result<Option<PathBuf>, SysAugError> {
+        let path = dirfd_path.join(rel_path);
         let path_str = path.to_string_lossy();
         let args = &self.states.args;
         let maybe_rootfs = args.rootfs.as_ref().or(args.chroot.as_ref());
-        if !path.starts_with(maybe_rootfs.unwrap()) {
+        if !path.exists() {
             return Ok(None);
         }
-        if !path.exists() {
+        let canonical_path = path.canonicalize();
+        if canonical_path.is_err() {
+            return Ok(None);
+        }
+        if !canonical_path.unwrap().starts_with(maybe_rootfs.unwrap()) {
             return Ok(None);
         }
         if path.is_dir() {
             Ok(Some(path.join("...")))
         } else {
-            let parent = path
-                .parent()
-                .ok_or(self.err("FileWithoutParent", &path_str))?;
             let filename = path
                 .file_name()
                 .ok_or(self.err("FailedToReadFilename", &path_str))?;
             let mut new_filename = OsString::from(".");
             new_filename.push(filename);
-            Ok(Some(parent.join(new_filename)))
+            Ok(Some(path.with_file_name(new_filename)))
         }
     }
 
