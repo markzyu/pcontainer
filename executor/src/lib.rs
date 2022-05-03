@@ -1,10 +1,10 @@
 use nix::{sys, unistd};
-use std::convert::TryInto;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SendError, SyncSender};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::{event, Level};
 
 pub type SharedBool = Arc<AtomicBool>;
 pub type PtraceRequest = Box<dyn Fn() -> Result<(), PtraceExecutorError> + Send>;
@@ -18,11 +18,7 @@ pub trait PtraceClient: Clone + Send + Sync + 'static {
         Ok(())
     }
 
-    fn set_clone_flags(
-        &self,
-        _pid: unistd::Pid,
-        _regs: &mut ptrace::GenericPurposeRegs,
-    ) -> Result<(), PtraceExecutorError> {
+    fn prep_attach_to(&self, _pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
         Ok(())
     }
 
@@ -67,8 +63,11 @@ pub enum PtraceExecutorError {
     #[error("{0}")]
     PtraceError(#[from] ptrace::PtraceError),
 
-    #[error("Interger conversion error")]
-    IntoInt,
+    #[error("Cannot transfer tracee. PTRACE_DETACH error: {0}")]
+    TransferDetach(nix::Error),
+
+    #[error("Cannot transfer tracee. Waitpid error: {0:?}")]
+    TransferWaitpid(sys::wait::WaitStatus),
 }
 
 /// Run ptrace() syscalls on main thread only (requires tracees to be attached through PTRACE_TRACEME)
@@ -136,20 +135,6 @@ impl PtraceClient for MainThreadClient {
         self.should_serve.store(false, Ordering::Relaxed);
     }
 
-    fn set_clone_flags(
-        &self,
-        pid: unistd::Pid,
-        regs: &mut ptrace::GenericPurposeRegs,
-    ) -> Result<(), PtraceExecutorError> {
-        let new_flag: usize = libc::CLONE_PTRACE
-            .try_into()
-            .or(Err(PtraceExecutorError::IntoInt))?;
-        regs.arg0 |= new_flag;
-        let regs2 = regs.clone();
-        self.execute(move || ptrace::setregs(pid, regs2.clone()))??;
-        Ok(())
-    }
-
     fn execute<T, F>(&self, f: F) -> Result<T, PtraceExecutorError>
     where
         F: Fn() -> T,
@@ -173,7 +158,26 @@ impl PtraceClient for MainThreadClient {
 
 impl PtraceClient for LocalPtraceClient {
     fn attach_to(&self, pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+        event!(Level::INFO, "LocalPtraceClient attaching to {:?}", pid);
         sys::ptrace::attach(pid).map_err(PtraceExecutorError::Attach)
+    }
+
+    fn prep_attach_to(&self, pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+        event!(
+            Level::INFO,
+            "LocalPtraceClient prepping to attach to {:?}",
+            pid
+        );
+
+        let status = ptrace::waitpid_hang(pid)?;
+        event!(Level::INFO, "child status {:?}", &status);
+
+        if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
+            return Err(PtraceExecutorError::TransferWaitpid(status));
+        }
+
+        sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP)
+            .map_err(PtraceExecutorError::TransferDetach)
     }
 
     fn stop(&self) {}

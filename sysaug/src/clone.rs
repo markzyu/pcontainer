@@ -27,7 +27,15 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
 
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError> {
         let pid2 = self.handler.pid;
-        self.handler.ptrace_client.set_clone_flags(pid2, regs)?;
+
+        let new_flag: usize = libc::CLONE_PTRACE
+            .try_into()
+            .or(Err(SysAugError::IntoInt))?;
+        regs.arg0 |= new_flag;
+        let regs2 = regs.clone();
+        self.handler
+            .ptrace_client
+            .execute(move || ptrace::setregs(pid2, regs2.clone()))??;
         Ok(())
     }
 
@@ -36,6 +44,8 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
         if raw_pid > 0 {
             let child_pid: nix::unistd::Pid =
                 nix::unistd::Pid::from_raw(raw_pid.try_into().or(Err(SysAugError::IntoInt))?);
+
+            self.handler.ptrace_client.prep_attach_to(child_pid)?;
 
             let new_tracee_handler = self.handler.fork(child_pid)?;
             std::thread::spawn(move || {

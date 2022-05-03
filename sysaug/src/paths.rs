@@ -120,8 +120,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             let path_osstr: &OsStr = OsStrExt::from_bytes(&path_bytes);
             let orig_path: &Path = Path::new(path_osstr);
 
-            self.handler
-                .call_mods(mods::ModFeature::OnFilePath, |m| m.on_file_path(orig_path, syscall_num))?;
+            self.handler.call_mods(mods::ModFeature::OnFilePath, |m| {
+                m.on_file_path(orig_path, syscall_num)
+            })?;
 
             let mut new_path: Option<PathBuf> = None;
             let prefix_maybe = self

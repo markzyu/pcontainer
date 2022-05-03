@@ -79,8 +79,10 @@ fn actual_main<PtraceClient: executor::PtraceClient>(
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
 
     // Setup tracee handler states
-    let mut states = sysaug::TraceeHandlerStates::default(); 
-    states.path_prefix = RwLock::new(args.chroot.as_ref().map(|s| s.into()));
+    let states = sysaug::TraceeHandlerStates {
+        path_prefix: RwLock::new(args.chroot.as_ref().map(|s| s.into())),
+        ..Default::default()
+    };
 
     // Start tracee handler thread
     let new_tracee_handler =
