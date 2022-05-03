@@ -12,8 +12,20 @@ pub enum SysAugError {
     #[error("Unexpected internal error from ptrace() executor: {0}")]
     InternalExecutor(#[from] executor::PtraceExecutorError),
 
+    #[error("Failed to parse waitpid result: {0}")]
+    ParseWaitStatus(nix::Error),
+
     #[error("Ptrace error: {0}")]
     Ptrace(#[from] ptrace::PtraceError),
+
+    #[error("PTRACE_DETACH error")]
+    PtraceDetach(nix::Error),
+
+    #[error("PTRACE_GETSIGINFO error")]
+    PtraceGetSigInfo,
+
+    #[error("PTRACE_PEEKDATA error: {0}")]
+    PtraceRead(nix::Error),
 
     #[error("PTRACE_SETOPTIONS error: {0}")]
     PtraceSetOptions(nix::Error),

@@ -70,7 +70,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             mod_providers: mods,
             orig_request_regs: RwLock::default(),
             ignore_sigstops: RwLock::default(),
-            signal_tracee: RwLock::default(),
+            signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
             skip_syscall_retval: RwLock::default(),
             states: Arc::new((*default_states).clone()?),
         });
@@ -137,10 +137,21 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         }
         self.ptrace_client
             .execute(move || {
-                sys::ptrace::setoptions(pid, sys::ptrace::Options::PTRACE_O_TRACESYSGOOD)
+                sys::ptrace::setoptions(
+                    pid,
+                    sys::ptrace::Options::PTRACE_O_TRACESYSGOOD
+                        | sys::ptrace::Options::PTRACE_O_TRACEEXIT,
+                )
             })?
             .map_err(SysAugError::PtraceSetOptions)?;
         Ok(())
+    }
+
+    pub fn handle_exit(&self, pid: nix::unistd::Pid) -> Result<(), SysAugError> {
+        info!("Process {:?} exited.", &pid);
+        self.ptrace_client
+            .execute(move || sys::ptrace::detach(pid, None))?
+            .map_err(SysAugError::PtraceDetach)
     }
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
@@ -155,7 +166,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
         loop {
-            let span = span!(Level::TRACE, "event_loop", ?pid);
+            let span = span!(Level::INFO, "event_loop", ?pid);
             let _span_enter = span.enter();
 
             let maybe_signal = {
@@ -170,15 +181,24 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 .map_err(SysAugError::PtraceSyscall)?;
 
             let status = ptrace::waitpid_hang(pid)?;
-            event!(Level::TRACE, "child status {:?}", &status);
+            event!(Level::DEBUG, "child status {:?}", &status);
 
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
+                self.handle_exit(pid)?;
                 return Ok(());
             }
             match &status {
                 // Decide whether to deliver signal to tracee
                 &WaitStatus::Stopped(pid2, signal) => {
+                    event!(Level::INFO, "child stopped, status {:?}", &status);
                     if pid2 != pid || signal == sys::signal::Signal::SIGTRAP {
+                        continue;
+                    }
+                    let getsig_err = self
+                        .ptrace_client
+                        .execute(move || sys::ptrace::getsiginfo(pid))?
+                        .err();
+                    if getsig_err == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
                         continue;
                     }
                     info!("Will deliver signal {:?} to {:?}", &signal, &pid);
@@ -189,11 +209,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     maybe_signal.replace(signal);
                 }
                 // Killed by signal
-                &WaitStatus::Signaled(pid2, signal, _) => {
+                &WaitStatus::PtraceEvent(pid2, _, libc::PTRACE_EVENT_EXIT) => {
                     if pid2 != pid {
                         continue;
                     }
-                    info!("Process {:?} killed by signal {:?}", &pid, &signal);
+                    self.handle_exit(pid)?;
                     return Ok(());
                 }
                 // SYSTEM CALL
