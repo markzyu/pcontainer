@@ -1,6 +1,7 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
+use crate::rwoption_take_ok;
 use nix::sys;
 use ptrace::GenericPurposeRegs;
 use std::convert::TryInto;
@@ -63,7 +64,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
             // Restart system call with orignal arguments, stack pointer, etc.
             event!(Level::INFO, "restarting waitpid()");
             let pid2 = self.handler.pid;
-            let orig_regs = common::rwoption_take(&self.handler.orig_request_regs)?.unwrap();
+            let orig_regs = rwoption_take_ok!(self.handler.orig_request_regs)?;
             self.handler
                 .ptrace_client
                 .execute(move || ptrace::setregs(pid2, orig_regs))??;
