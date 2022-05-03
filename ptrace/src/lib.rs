@@ -112,15 +112,20 @@ pub fn pid(child: &process::Child) -> AnyResult<nix::unistd::Pid> {
     Ok(nix::unistd::Pid::from_raw(pid))
 }
 
+pub fn waitpid(pid: nix::unistd::Pid) -> AnyResult<wait::WaitStatus> {
+    Ok(wait::waitpid(pid, Some(wait::WaitPidFlag::WNOHANG))?)
+}
+
 pub fn wait(child: &process::Child) -> AnyResult<wait::WaitStatus> {
-    Ok(wait::waitpid(
-        pid(&child)?,
-        Some(wait::WaitPidFlag::WNOHANG),
-    )?)
+    waitpid(pid(&child)?)
+}
+
+pub fn waitpid_hang(pid: nix::unistd::Pid) -> AnyResult<wait::WaitStatus> {
+    Ok(wait::waitpid(pid, None)?)
 }
 
 pub fn wait_hang(child: &process::Child) -> AnyResult<wait::WaitStatus> {
-    Ok(wait::waitpid(pid(&child)?, None)?)
+    waitpid_hang(pid(&child)?)
 }
 
 bitflags::bitflags! {
