@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 fn main() {
-    let mut config = config_gz::ConfigGz { lines: vec![] };
+    let mut config = config_gz::ConfigGz::default();
     config.init_from_host_os().unwrap();
     for line in config.lines() {
         if let Some((name, _)) = line.maybe_name() {
