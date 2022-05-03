@@ -13,14 +13,19 @@ use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use std::thread;
 use tracing::{event, info, span, Level};
 
 pub struct TraceeHandlerStates {
+    pub fail_fast: bool,
+    pub failed: AtomicBool,
     pub override_uid: RwLock<Option<usize>>,
     pub override_gid: RwLock<Option<usize>>,
     pub path_prefix: RwLock<Option<PathBuf>>,
     pub pid: nix::unistd::Pid,
+    pub root_pid: nix::unistd::Pid,
 }
 
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
@@ -166,6 +171,27 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         return span!(Level::INFO, "event_loop", "{:?}", self.pid);
     }
 
+    pub fn start<F>(self: Arc<TraceeHandler<PtraceClient>>, callback: F) -> thread::JoinHandle<()>
+    where
+        F: FnOnce() -> () + Send + 'static,
+    {
+        thread::spawn(move || {
+            let self2 = Arc::clone(&self);
+            let _span = self.trace_span().entered();
+            let result = self.event_loop().map_err(display_err);
+            if result.is_err() {
+                let _ = sys::signal::kill(self2.pid, Some(sys::signal::Signal::SIGKILL))
+                    .map_err(display_err);
+                self2.states.failed.store(true, Ordering::Relaxed);
+            }
+            callback();
+        })
+    }
+
+    pub fn failed(&self) -> bool {
+        self.states.failed.load(Ordering::Relaxed)
+    }
+
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
         let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
         let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
@@ -177,6 +203,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
+        self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
         loop {
             let maybe_signal = {
                 let mut lock = self
@@ -330,10 +357,13 @@ fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
 impl Default for TraceeHandlerStates {
     fn default() -> TraceeHandlerStates {
         TraceeHandlerStates {
+            fail_fast: true,
+            failed: AtomicBool::new(false),
             override_uid: RwLock::default(),
             override_gid: RwLock::default(),
             path_prefix: RwLock::default(),
             pid: nix::unistd::Pid::from_raw(0),
+            root_pid: nix::unistd::Pid::from_raw(0),
         }
     }
 }
@@ -341,10 +371,13 @@ impl Default for TraceeHandlerStates {
 impl TraceeHandlerStates {
     pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
+            fail_fast: self.fail_fast,
+            failed: AtomicBool::new(false),
             override_uid: clone_locked(&self.override_uid)?,
             override_gid: clone_locked(&self.override_gid)?,
             path_prefix: clone_locked(&self.path_prefix)?,
             pid: self.pid,
+            root_pid: self.root_pid,
         })
     }
 }

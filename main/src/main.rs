@@ -2,7 +2,7 @@ use clap::Clap;
 use executor::PtraceServer;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use sysaug::{display_err, ModProvider};
+use sysaug::ModProvider;
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -32,6 +32,10 @@ pub struct CLIArgs {
     /// Override the command to execute
     #[clap(long, default_value = "bash")]
     pub cmd: String,
+
+    /// Quit as soon as any application fails
+    #[clap(long)]
+    pub fail_fast: bool,
 }
 
 #[derive(Debug, Error)]
@@ -106,18 +110,15 @@ fn actual_main<PtraceClient: executor::PtraceClient>(
 
     // Setup tracee handler states
     let states = sysaug::TraceeHandlerStates {
+        fail_fast: args.fail_fast,
         path_prefix: RwLock::new(args.chroot.as_ref().map(|s| s.into())),
+        root_pid: pid1,
         ..Default::default()
     };
 
     // Start tracee handler thread
+    let ptrace_client2 = ptrace_client.clone();
     let new_tracee_handler =
         sysaug::TraceeHandler::new(pid1, ptrace_client.clone(), mods, Some(Arc::new(states)))?;
-    Ok(thread::spawn(move || {
-        let _span = new_tracee_handler.trace_span().entered();
-        let ptrace_client2 = ptrace_client.clone();
-        let result = new_tracee_handler.event_loop();
-        ptrace_client2.stop();
-        result.map_err(display_err).unwrap()
-    }))
+    Ok(new_tracee_handler.start(move || ptrace_client2.stop()))
 }
