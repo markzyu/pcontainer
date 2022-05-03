@@ -18,8 +18,11 @@ lazy_static! {
 
 #[derive(Debug, Error)]
 pub enum PtraceError {
-    #[error("Cannot run initial command: {0}")]
+    #[error("Failed to run the command specified in --cmd: {0}")]
     StartInitCmd(nix::Error),
+
+    #[error("Failed to run the command specified in --cmd: {0}")]
+    InitCmdFailed(std::io::Error),
 
     #[error("Failed to parse pid {0}: {1}")]
     ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
@@ -109,8 +112,8 @@ pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid,
                 // Pause child execution and wait for tracer to PTRACE_ATTACH
                 sys::signal::raise(sys::signal::Signal::SIGSTOP).unwrap();
             }
-            cmd.exec();
-            Ok(unistd::Pid::from_raw(0))
+            let e = cmd.exec();
+            Err(PtraceError::InitCmdFailed(e))
         }
         Err(e) => Err(PtraceError::StartInitCmd(e)),
     }
