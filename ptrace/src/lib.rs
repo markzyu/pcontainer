@@ -208,6 +208,43 @@ pub struct GenericPurposeRegs {
     pub orig_r0: usize,
 }
 
+// https://man7.org/linux/man-pages/man2/syscall.2.html
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug, Clone)]
+#[repr(C)]
+#[allow(dead_code)]
+pub struct GenericPurposeRegs {
+    unknown_x1: usize,
+    unknown_x2: usize,
+    unknown_x3: usize,
+    unknown_x4: usize,
+    unknown_x5: usize,
+    unknown_x6: usize,
+    unknown_x7: usize,
+    arg3: usize,
+    arg5: usize,
+    arg4: usize,
+    // "rax"
+    rax: usize,
+    unknown_x12: usize,
+    pub arg2: usize,
+    pub arg1: usize,
+    pub arg0: usize,
+    // "orig_rax"
+    pub syscall_num: usize,
+    pub pc: usize,
+    unknown_x18: usize,
+    unknown_x19: usize,
+    pub sp: usize,
+    unknown_x21: usize,
+    unknown_x22: usize,
+    unknown_x23: usize,
+    unknown_x24: usize,
+    unknown_x25: usize,
+    unknown_x26: usize,
+    unknown_x27: usize,
+}
+
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 impl GenericPurposeRegs {
     pub fn syscall_retval(&self) -> usize {
@@ -219,8 +256,19 @@ impl GenericPurposeRegs {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+impl GenericPurposeRegs {
+    pub fn syscall_retval(&self) -> usize {
+        self.rax
+    }
+
+    pub fn set_syscall_retval(&mut self, val: usize) {
+        self.rax = val
+    }
+}
+
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
@@ -245,6 +293,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         libc::ptrace(
+            // PTRACE_GETREGS
             12_u32,
             libc::pid_t::from(pid),
             std::ptr::null_mut::<i32>(),
@@ -256,7 +305,7 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
 }
 
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
     let res = unsafe {
         let mut iov = libc::iovec {
@@ -650,7 +699,6 @@ pub fn read(pid: nix::unistd::Pid, addr: usize) -> Result<usize, PtraceError> {
     Ok(raw_data as usize)
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
@@ -665,7 +713,6 @@ pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
     Ok(unsafe { data.assume_init() })
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
     let mut regs = getregs(pid)?;
     event!(
