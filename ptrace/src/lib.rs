@@ -1,6 +1,7 @@
 use lazy_static::lazy_static;
 use nix::sys;
 use nix::sys::wait;
+use nix::unistd;
 use std::convert::TryInto;
 use std::os::unix::process::CommandExt;
 use std::process;
@@ -16,7 +17,7 @@ lazy_static! {
 #[derive(Debug, Error)]
 pub enum PtraceError {
     #[error("Cannot run initial command: {0}")]
-    StartInitCmd(std::io::Error),
+    StartInitCmd(nix::Error),
 
     #[error("Failed to parse pid {0}: {1}")]
     ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
@@ -47,14 +48,21 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
-pub fn start(cmd: &mut process::Command) -> Result<process::Child, PtraceError> {
-    unsafe {
-        cmd.pre_exec(|| {
-            nix::sys::ptrace::traceme()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-        })
-        .spawn()
-        .map_err(PtraceError::StartInitCmd)
+pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid, PtraceError> {
+    match unsafe { unistd::fork() } {
+        Ok(unistd::ForkResult::Parent { child, .. }) => Ok(child),
+        Ok(unistd::ForkResult::Child) => {
+            if no_attach {
+                // Use PTRACE_TRACEME, and wait for tracer's main thread
+                nix::sys::ptrace::traceme().unwrap();
+            } else {
+                // Pause child execution and wait for tracer to PTRACE_ATTACH
+                sys::signal::raise(sys::signal::Signal::SIGSTOP).unwrap();
+            }
+            cmd.exec();
+            Ok(unistd::Pid::from_raw(0))
+        }
+        Err(e) => Err(PtraceError::StartInitCmd(e)),
     }
 }
 

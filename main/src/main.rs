@@ -1,5 +1,6 @@
 use clap::Clap;
-use std::sync::RwLock;
+use executor::PtraceServer;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use sysaug::{display_err, ModProvider};
 use thiserror::Error;
@@ -14,6 +15,11 @@ pub struct CLIArgs {
     /// Chroot to this path upon tracee startup.
     #[clap(long)]
     pub chroot: Option<String>,
+
+    /// Only use this flag if you see "PTRACE_ATTACH error: EPERM: Permission denied".
+    /// This will solve those permission errors, but will also cause slowdowns.
+    #[clap(long)]
+    pub fix_attach: bool,
 }
 
 #[derive(Debug, Error)]
@@ -29,6 +35,9 @@ pub enum CLIError {
 
     #[error("Invalid command line arguments: {0}")]
     ParseArgs(String),
+
+    #[error("Unable to complete")]
+    UnableToComplete,
 }
 
 fn main() -> Result<(), CLIError> {
@@ -36,38 +45,51 @@ fn main() -> Result<(), CLIError> {
     tracing_subscriber::fmt::init();
     let args = CLIArgs::parse();
 
-    // Spawn first tracee
-    let pid1 = {
-        let mut cmd = std::process::Command::new("bash");
-        let child = ptrace::start(&mut cmd)?;
-        ptrace::pid(&child)?
-    };
-    event!(Level::INFO, "First tracee pid: {:?}", pid1);
-
     // Setup mods
     let mut mods: Vec<ModProvider> = vec![mods::ChrootMod::new_box, mods::TraceChildMod::new_box];
     if args.strace {
         mods.push(mods::StraceMod::new_box);
     }
 
+    if args.fix_attach {
+        let (ptrace_client, ptrace_loop) = executor::new_main_thread_executor();
+        let join = actual_main(&args, mods, ptrace_client)?;
+        ptrace_loop.serve()?;
+        join.join().map_err(|_| CLIError::UnableToComplete)?;
+    } else {
+        actual_main(&args, mods, executor::new_local_executor())?
+            .join()
+            .map_err(|_| CLIError::UnableToComplete)?;
+    }
+
+    event!(Level::INFO, "Done. (all tracees exited)");
+    Ok(())
+}
+
+fn actual_main<PtraceClient: executor::PtraceClient>(
+    args: &CLIArgs,
+    mods: Vec<ModProvider>,
+    ptrace_client: PtraceClient,
+) -> Result<thread::JoinHandle<()>, CLIError> {
+    // Spawn first tracee
+    let pid1 = {
+        let mut cmd = std::process::Command::new("bash");
+        ptrace::start(&mut cmd, args.fix_attach)?
+    };
+    event!(Level::INFO, "First tracee pid: {:?}", pid1);
+
     // Setup tracee handler states
     let states = sysaug::TraceeHandlerStates {
-        path_prefix: RwLock::new(args.chroot.map(|s| s.into())),
+        path_prefix: RwLock::new(args.chroot.as_ref().map(|s| s.into())),
     };
 
     // Start tracee handler thread
-    let (proc1_client, ptrace_loop) = executor::new_ptrace_executor();
     let new_tracee_handler =
-        sysaug::TraceeHandler::new(pid1, proc1_client.clone(), mods, Some(states))?;
-    thread::spawn(move || {
-        let proc1_client2 = proc1_client.clone();
+        sysaug::TraceeHandler::new(pid1, ptrace_client.clone(), mods, Some(Arc::new(states)))?;
+    Ok(thread::spawn(move || {
+        let ptrace_client2 = ptrace_client.clone();
         let result = new_tracee_handler.event_loop();
-        proc1_client2.stop();
+        ptrace_client2.stop();
         result.map_err(display_err).unwrap()
-    });
-
-    ptrace_loop.serve()?;
-    event!(Level::INFO, "Done. (all tracees exited)");
-
-    Ok(())
+    }))
 }

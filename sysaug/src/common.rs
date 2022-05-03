@@ -1,4 +1,4 @@
-use crate::handler::TraceeHandler;
+use crate::handler::TraceeHandlerStates;
 use crate::mods;
 use ptrace::GenericPurposeRegs;
 use std::collections::{HashMap, HashSet};
@@ -38,7 +38,7 @@ pub enum SysAugError {
     },
 }
 
-pub type ModProvider = fn(Arc<TraceeHandler>) -> Box<dyn mods::Mod>;
+pub type ModProvider = fn(Arc<TraceeHandlerStates>) -> Box<dyn mods::Mod>;
 pub type ModBox = Box<dyn mods::Mod + Send + Sync>;
 pub type ModsByFeature = HashMap<mods::ModFeature, Vec<ModBox>>;
 
@@ -64,8 +64,6 @@ pub trait AugmentSyscall {
     fn before_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
     fn after_call(&self, regs: &mut GenericPurposeRegs) -> Result<(), SysAugError>;
     fn valid_calls(&self) -> &HashSet<usize>;
-
-    fn new(handler: Arc<TraceeHandler>) -> Self;
 
     fn dispatch(
         &self,

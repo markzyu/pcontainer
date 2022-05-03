@@ -15,12 +15,12 @@ pub struct TraceeHandlerStates {
     pub path_prefix: RwLock<Option<PathBuf>>,
 }
 
-pub struct TraceeHandler {
+pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub mods: RwLock<ModsByFeature>,
     mod_providers: Vec<ModProvider>,
     pub pid: nix::unistd::Pid,
-    pub ptrace_client: executor::PtraceClient,
-    pub states: TraceeHandlerStates,
+    pub ptrace_client: PtraceClient,
+    pub states: Arc<TraceeHandlerStates>,
 }
 
 macro_rules! new_augment {
@@ -29,13 +29,13 @@ macro_rules! new_augment {
     };
 }
 
-impl TraceeHandler {
+impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn new(
         pid: nix::unistd::Pid,
-        ptrace_client: executor::PtraceClient,
+        ptrace_client: PtraceClient,
         mods: Vec<ModProvider>,
-        states: Option<TraceeHandlerStates>,
-    ) -> Result<Arc<TraceeHandler>, SysAugError> {
+        states: Option<Arc<TraceeHandlerStates>>,
+    ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
@@ -46,7 +46,7 @@ impl TraceeHandler {
 
         let mut mod_map: ModsByFeature = HashMap::new();
         for provider in ans.mod_providers.iter() {
-            let m = provider(Arc::clone(&ans));
+            let m = provider(Arc::clone(&ans.states));
             for feature in m.get_features().iter() {
                 if !mod_map.contains_key(feature) {
                     mod_map.insert(feature.clone(), Vec::new());
@@ -63,12 +63,15 @@ impl TraceeHandler {
     }
 
     /// Create a new TraceeHandler for a child, without starting event loop
-    pub fn fork(&self, child_pid: nix::unistd::Pid) -> Result<Arc<TraceeHandler>, SysAugError> {
+    pub fn fork(
+        &self,
+        child_pid: nix::unistd::Pid,
+    ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         TraceeHandler::new(
             child_pid,
             self.ptrace_client.clone(),
             self.mod_providers.clone(),
-            Some(self.states.clone()?),
+            Some(self.states.clone()),
         )
     }
 
@@ -85,13 +88,15 @@ impl TraceeHandler {
         Ok(())
     }
 
-    pub fn event_loop(self: Arc<TraceeHandler>) -> Result<(), SysAugError> {
-        let augment_clone = new_augment!(AugmentClone, self);
-        let augment_paths = new_augment!(AugmentPaths, self);
+    pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
+        let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
+        let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
 
         let mut did_set_options = false;
         let mut last_syscall = SyscallCounter::new();
         let pid = self.pid;
+
+        self.ptrace_client.attach_to(pid)?;
         loop {
             let span = span!(Level::TRACE, "event_loop", ?pid);
             let _span_enter = span.enter();
@@ -155,7 +160,7 @@ fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
 }
 
 impl TraceeHandlerStates {
-    fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
+    pub fn clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
             path_prefix: clone_locked(&self.path_prefix)?,
         })
