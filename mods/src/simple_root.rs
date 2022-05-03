@@ -9,6 +9,7 @@ lazy_static! {
     static ref DEFAULT_LISTENER_SPEC: HashSet<ModFeature> = {
         let mut ans = HashSet::new();
         ans.insert(ModFeature::OnTraceeStartup);
+        ans.insert(ModFeature::OnSetuid);
         ans
     };
 }
@@ -44,5 +45,9 @@ impl Mod for SimpleRootMod {
         self.setid(&self.states.override_uid, 0)?;
         self.setid(&self.states.override_gid, 0)?;
         Ok(ModAction::None)
+    }
+
+    fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+        Ok(ModAction::SkipSyscall(0))
     }
 }

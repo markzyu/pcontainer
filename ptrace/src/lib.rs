@@ -307,7 +307,7 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
     loop {
-        event!(Level::DEBUG, "PTRACE_READ addr: {:x}", curr_addr);
+        event!(Level::TRACE, "PTRACE_READ addr: {:x}", curr_addr);
         let machine_word =
             sys::ptrace::read(pid, curr_addr as *mut libc::c_void).map_err(PtraceError::Read)?;
         for byte in machine_word.to_ne_bytes().iter() {
@@ -318,6 +318,31 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
         }
         curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
+    let mut regs = getregs(pid)?;
+    event!(
+        Level::INFO,
+        "Replacing syscall {} with {}",
+        regs.syscall_num,
+        val,
+    );
+
+    regs.syscall_num = val;
+    setregs(pid, regs)?;
+
+    let regs2 = getregs(pid)?;
+    event!(
+        Level::TRACE,
+        "Confirm regs: syscall {} with {:x} {:x} {:x}",
+        regs2.syscall_num,
+        regs2.arg0,
+        regs2.arg1,
+        regs2.arg2,
+    );
+    Ok(())
 }
 
 #[cfg(test)]
