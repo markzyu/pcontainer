@@ -1,8 +1,9 @@
-mod clone;
+mod aug_clone;
+mod aug_paths;
+mod aug_waitpid;
 mod common;
 mod handler;
 pub mod mods;
-mod paths;
 
 pub use crate::common::{display_err, ModProvider, SysAugError};
 pub use crate::handler::{TraceeHandler, TraceeHandlerStates};

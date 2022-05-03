@@ -1,7 +1,8 @@
 use nix::{sys, unistd};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SendError, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{event, Level};
@@ -18,7 +19,7 @@ pub trait PtraceClient: Clone + Send + Sync + 'static {
         Ok(())
     }
 
-    fn prep_attach_to(&self, _pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+    fn prep_attach_to(&self, _pid: unistd::Pid, _ignore_sigstops: &RwLock<HashSet<unistd::Pid>>) -> Result<(), PtraceExecutorError> {
         Ok(())
     }
 
@@ -65,6 +66,9 @@ pub enum PtraceExecutorError {
 
     #[error("Cannot transfer tracee. PTRACE_DETACH error: {0}")]
     TransferDetach(nix::Error),
+
+    #[error("Cannot transfer tracee. Lock failure.")]
+    TransferLock,
 
     #[error("Cannot transfer tracee. Waitpid error: {0:?}")]
     TransferWaitpid(sys::wait::WaitStatus),
@@ -162,7 +166,7 @@ impl PtraceClient for LocalPtraceClient {
         sys::ptrace::attach(pid).map_err(PtraceExecutorError::Attach)
     }
 
-    fn prep_attach_to(&self, pid: unistd::Pid) -> Result<(), PtraceExecutorError> {
+    fn prep_attach_to(&self, pid: unistd::Pid, locked_ignores: &RwLock<HashSet<unistd::Pid>>) -> Result<(), PtraceExecutorError> {
         event!(
             Level::INFO,
             "LocalPtraceClient prepping to attach to {:?}",
@@ -176,6 +180,8 @@ impl PtraceClient for LocalPtraceClient {
             return Err(PtraceExecutorError::TransferWaitpid(status));
         }
 
+        let mut ignore_sigstops = locked_ignores.write().or(Err(PtraceExecutorError::TransferLock))?;
+        ignore_sigstops.insert(pid);
         sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP)
             .map_err(PtraceExecutorError::TransferDetach)
     }
