@@ -25,7 +25,10 @@ impl std::error::Error for PTraceError {
     }
 }
 
-type SysNum = libc::c_long;
+#[cfg(target_arch = "aarch64")]
+pub type SysNum = i64;
+#[cfg(target_arch = "arm")]
+pub type SysNum = i32;
 
 pub trait SysOverride {
     fn get_syscalls(&self) -> &[SysNum];
@@ -89,7 +92,11 @@ impl SysOverrideList {
 }
 
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
-    matches!(status, wait::WaitStatus::PtraceEvent(_, _, _))
+    match status {
+        wait::WaitStatus::PtraceEvent(_, _, _) => true,
+        wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP) => true,
+        _ => false,
+    }
 }
 
 pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
@@ -144,8 +151,10 @@ pub fn ptrace_get_data<T>(request: sys::ptrace::Request, pid: nix::unistd::Pid) 
 }
 
 /// For Android, See https://android.googlesource.com/platform/prebuilts/ndk/+/1b55d7b281f282232ee58da5d09d3da5969ff11d/9/platforms/android-19/arch-arm64/usr/include/sys/user.h
+#[cfg(target_arch = "aarch64")]
 #[derive(Debug)]
 #[repr(C)]
+#[allow(dead_code)]
 pub struct GenericPurposeRegs {
 		pub arg0: i64,
 		pub arg1: i64,
@@ -168,8 +177,34 @@ pub struct GenericPurposeRegs {
 		unknown_x18: i64,
 }
 
+#[cfg(target_arch = "arm")]
+#[derive(Debug)]
+#[repr(C)]
+#[allow(dead_code)]
+pub struct GenericPurposeRegs {
+		pub arg0: i32,
+		pub arg1: i32,
+		pub arg2: i32,
+		unknown_x3: i32,
+		unknown_x4: i32,
+		unknown_x5: i32,
+		unknown_x6: i32,
+		pub syscall_num: i32,
+		unknown_x8: i32,
+		unknown_x9: i32,
+		unknown_x10: i32,
+		unknown_x11: i32,
+		unknown_x12: i32,
+		unknown_x13: i32,
+		unknown_x14: i32,
+		unknown_x15: i32,
+		unknown_x16: i32,
+		unknown_x17: i32,
+}
+
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
-pub fn getregset1(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
+#[cfg(target_arch = "aarch64")]
+pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
     let mut data = std::mem::MaybeUninit::uninit();
     let res = unsafe {
         let mut iov = libc::iovec {
@@ -183,12 +218,20 @@ pub fn getregset1(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
     };
     nix::errno::Errno::result(res)?;
     Ok(unsafe{ data.assume_init() })
+}
 
-    /*
-		let iov = ptrace_get_data::<libc::iovec>(sys::ptrace::Request::PTRACE_GETREGSET, pid)?;
-    dbg!(iov);
-    Err(Box::new(PTraceError{reason: "testing".to_string()}))
-    */
+/// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
+#[cfg(target_arch = "arm")]
+pub fn getregs(pid: nix::unistd::Pid) -> AnyResult<GenericPurposeRegs> {
+    let mut data = std::mem::MaybeUninit::uninit();
+    let res = unsafe {
+        libc::ptrace(12 as u32,
+                     libc::pid_t::from(pid),
+                     std::ptr::null_mut::<i32>(),
+                     data.as_mut_ptr() as *mut _ as *mut libc::c_void)
+    };
+    nix::errno::Errno::result(res)?;
+    Ok(unsafe{ data.assume_init() })
 }
 
 #[cfg(test)]
