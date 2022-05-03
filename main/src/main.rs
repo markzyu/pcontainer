@@ -81,26 +81,26 @@ fn main() -> Result<(), CLIError> {
         mods.push(mods::PermsMod::new_box);
     }
 
-    if args.fix_attach {
+    let retcode = if args.fix_attach {
         let (ptrace_client, ptrace_loop) = executor::new_main_thread_executor();
         let join = actual_main(&args, mods, ptrace_client)?;
         ptrace_loop.serve()?;
-        join.join().map_err(|_| CLIError::UnableToComplete)?;
+        join.join().map_err(|_| CLIError::UnableToComplete)?
     } else {
         actual_main(&args, mods, executor::new_local_executor())?
             .join()
-            .map_err(|_| CLIError::UnableToComplete)?;
-    }
+            .map_err(|_| CLIError::UnableToComplete)?
+    };
 
     event!(Level::INFO, "Done. (all tracees exited)");
-    Ok(())
+    std::process::exit(retcode.unwrap() as i32);
 }
 
 fn actual_main<PtraceClient: executor::PtraceClient>(
     args: &CLIArgs,
     mods: Vec<ModProvider>,
     ptrace_client: PtraceClient,
-) -> Result<thread::JoinHandle<()>, CLIError> {
+) -> Result<thread::JoinHandle<Option<u8>>, CLIError> {
     // Spawn first tracee
     let pid1 = {
         let mut cmd = std::process::Command::new(&args.cmd);

@@ -168,10 +168,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 
     pub fn trace_span(&self) -> tracing::Span {
-        return span!(Level::INFO, "event_loop", "{:?}", self.pid);
+        return span!(Level::ERROR, "event_loop", "{:?}", self.pid);
     }
 
-    pub fn start<F>(self: Arc<TraceeHandler<PtraceClient>>, callback: F) -> thread::JoinHandle<()>
+    pub fn start<F>(
+        self: Arc<TraceeHandler<PtraceClient>>,
+        callback: F,
+    ) -> thread::JoinHandle<Option<u8>>
     where
         F: FnOnce() -> () + Send + 'static,
     {
@@ -185,6 +188,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 self2.states.failed.store(true, Ordering::Relaxed);
             }
             callback();
+            result.ok()
         })
     }
 
@@ -192,7 +196,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.states.failed.load(Ordering::Relaxed)
     }
 
-    pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<(), SysAugError> {
+    pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let augment_clone = new_augment!(AugmentClone<PtraceClient>, self);
         let augment_paths = new_augment!(AugmentPaths<PtraceClient>, self);
         let augment_perms = new_augment!(AugmentPerms<PtraceClient>, self);
@@ -218,8 +222,9 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
             let status = ptrace::waitpid_hang(pid)?;
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
+                info!("Process {:?} crashed: {:?}.", &pid, &status);
                 self.handle_exit(pid)?;
-                return Ok(());
+                return Err(SysAugError::TraceeCrashed);
             }
             match &status {
                 // Decide whether to deliver signal to tracee
@@ -242,13 +247,18 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         .or(Err(SysAugError::LockTraceeHandler))?;
                     maybe_signal.replace(signal);
                 }
-                // Killed by signal
+                // Tracee Exits
                 &WaitStatus::PtraceEvent(pid2, _, libc::PTRACE_EVENT_EXIT) => {
                     if pid2 != pid {
                         continue;
                     }
+                    let rawret = self
+                        .ptrace_client
+                        .execute(move || ptrace::getevent(pid))??;
+                    let retcode = (rawret as u32) >> 8;
+                    info!("Exit status = {}", retcode);
                     self.handle_exit(pid)?;
-                    return Ok(());
+                    return Ok(retcode as u8);
                 }
                 // SYSTEM CALL
                 &WaitStatus::PtraceEvent(_, _, _) | &WaitStatus::PtraceSyscall(_) => {

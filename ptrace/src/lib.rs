@@ -23,6 +23,9 @@ pub enum PtraceError {
     #[error("Failed to parse pid {0}: {1}")]
     ParsePid(u64, <u64 as TryInto<libc::pid_t>>::Error),
 
+    #[error("PTRACE_GETEVENTMSG error: {0}")]
+    GetEventMsg(nix::Error),
+
     #[error("Cannot get tracee's CPU registers: {0}")]
     GetRegs(nix::Error),
 
@@ -318,6 +321,21 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
         }
         curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
     }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
+    let mut data = std::mem::MaybeUninit::uninit();
+    let res = unsafe {
+        libc::ptrace(
+            sys::ptrace::Request::PTRACE_GETEVENTMSG as u32,
+            libc::pid_t::from(pid),
+            0 as *mut libc::c_void,
+            data.as_mut_ptr() as *mut libc::c_void,
+        )
+    };
+    nix::errno::Errno::result(res).map_err(PtraceError::GetEventMsg)?;
+    Ok(unsafe { data.assume_init() })
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
