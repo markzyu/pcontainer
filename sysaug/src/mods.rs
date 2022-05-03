@@ -11,6 +11,7 @@ pub enum ModFeature {
     OnChroot,
     OnCloneComplete,
     OnSetuid,
+    OnTraceeStartup,
 }
 
 pub enum ModAction {
@@ -59,6 +60,10 @@ pub trait Mod {
     }
 
     fn on_setuid(&self, _uid: usize, _syscall: usize) -> Result<ModAction, SysAugError> {
+        Ok(ModAction::None)
+    }
+
+    fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
 

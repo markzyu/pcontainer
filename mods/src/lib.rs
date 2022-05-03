@@ -8,8 +8,10 @@
 // configuraitons through procfs.
 mod chroot;
 mod perms;
+mod simple_root;
 mod strace;
 
 pub use crate::chroot::ChrootMod;
 pub use crate::perms::PermsMod;
+pub use crate::simple_root::SimpleRootMod;
 pub use crate::strace::StraceMod;

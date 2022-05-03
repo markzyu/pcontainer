@@ -20,6 +20,14 @@ pub struct CLIArgs {
     /// This will solve those permission errors, but will also cause slowdowns.
     #[clap(long)]
     pub fix_attach: bool,
+
+    /// Make your applications think they are root when they are not.
+    #[clap(long)]
+    pub root: bool,
+
+    /// Make your applications think they can sudo when they cannot. Not compatible with --root
+    #[clap(long)]
+    pub sudo: bool,
 }
 
 #[derive(Debug, Error)]
@@ -45,10 +53,24 @@ fn main() -> Result<(), CLIError> {
     tracing_subscriber::fmt::init();
     let args = CLIArgs::parse();
 
+    if args.root && args.sudo {
+        event!(Level::ERROR, "You cannot use both --root and --sudo");
+        return Ok(());
+    }
+
     // Setup mods
-    let mut mods: Vec<ModProvider> = vec![mods::ChrootMod::new_box, mods::PermsMod::new_box];
+    let mut mods: Vec<ModProvider> = Vec::new();
+    if args.chroot.is_some() {
+        mods.push(mods::ChrootMod::new_box);
+    }
     if args.strace {
         mods.push(mods::StraceMod::new_box);
+    }
+    if args.root {
+        mods.push(mods::SimpleRootMod::new_box);
+    }
+    if args.sudo {
+        mods.push(mods::PermsMod::new_box);
     }
 
     if args.fix_attach {

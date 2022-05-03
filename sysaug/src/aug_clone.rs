@@ -59,6 +59,9 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentClo
             std::thread::spawn(move || {
                 let _span = new_tracee_handler.trace_span().entered();
                 new_tracee_handler
+                    .call_mods(mods::ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())
+                    .unwrap();
+                new_tracee_handler
                     .event_loop()
                     .map_err(common::display_err)
                     .unwrap();
