@@ -1,3 +1,4 @@
+use crate::PermType;
 use crate::aug_clone::AugmentClone;
 use crate::aug_exec::AugmentExec;
 use crate::aug_paths::AugmentPaths;
@@ -5,8 +6,8 @@ use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_take,
-    AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
-    NO_MOD_SYSCALL, PERMS_IDS_SIZE,
+    AugmentSyscall, Augments, CLIArgs, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
+    TraceeHandlerStates, NO_MOD_SYSCALL,
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::SYSCALL_INFOS;
@@ -21,27 +22,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tracing::{event, info, span, Level};
-
-#[derive(Clone, Debug, Default)]
-pub struct CLIArgs {
-    pub chroot: Option<PathBuf>,
-    pub rootfs: Option<PathBuf>,
-    pub fail_fast: bool,
-    pub fix_sigsys: bool,
-    pub gdb: bool,
-    pub gdb_at: Option<u64>,
-}
-
-#[derive(Debug)]
-pub struct TraceeHandlerStates {
-    pub args: CLIArgs,
-    pub failed: AtomicBool,
-    pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
-    pub path_prefix: RwLock<Option<PathBuf>>,
-    pub path_prefix_excludes: RwLock<Vec<PathBuf>>,
-    pub pid: Pid,
-    pub root_pid: Pid,
-}
 
 struct AugmentContainer<PtraceClient: executor::PtraceClient> {
     clone: AugmentClone<PtraceClient>,
@@ -524,9 +504,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 _ => Ok(()),
             }
             .map_err(display_err)?;
+            
+            // TODO: Move this. specific to chown.
             if let Some(info) = syscall_info {
                 if info.sets_file_perms.is_some() {
-                    self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
+                    if info.sets_file_perms == Some(PermType::Chown) {
+                        self.skip_syscall(0)?;
+                    }
                 }
             }
 
