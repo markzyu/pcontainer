@@ -2,6 +2,21 @@ use crate::common::{Augments, DelType, PermType, SyscallInfo, NO_MOD_SYSCALL};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
+/**
+TODO: a simple refactor (just move definitions to jsons so this looks more declarative):
+{
+    SYS_chmod: {
+        type: Paths,
+        config: {
+            path_positions: $path_positions,
+            dirfd_position: Some($dirfd_position),
+            getdents_bits: None,
+            sets_file_perms: Some($perm_type),
+        },
+    }
+}
+**/
+
 macro_rules! define_syscall {
     ($name:expr, $augment:expr, $ans:ident) => {
         $ans.insert(

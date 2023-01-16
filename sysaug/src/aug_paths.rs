@@ -89,6 +89,17 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             }
         }
 
+        // Handle creation & deletion of hard links AS A CORE FUNCTION (unmoddable)
+        // 
+        // There are no symlinks being created in the rootfs. 'ln a b' will create a link in guest OS called "b" that's not visible from host
+        //
+        // Creation of the "b" link will only record the metadata for "b". (Metadata file for "b" exists in host OS)
+        //
+        // Every metadata of a hard link will contain a UUID. And for each uuid, there is /.metadata/hardLinkCounter/uuid json file
+        //   {count: 2, paths: ["/a", "/b"]}
+        //
+        // Upon deletion of /a, we RENAME "a" to "b" based on the path list. If no path is left, we delete it.
+
         common::rwoption_replace(&self.handler.curr_paths, save_paths)?;
 
         if need_write_regs {
