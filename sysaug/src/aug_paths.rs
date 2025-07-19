@@ -90,7 +90,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         }
 
         // Handle creation & deletion of hard links AS A CORE FUNCTION (unmoddable)
-        // 
+        //
         // There are no symlinks being created in the rootfs. 'ln a b' will create a link in guest OS called "b" that's not visible from host
         //
         // Creation of the "b" link will only record the metadata for "b". (Metadata file for "b" exists in host OS)

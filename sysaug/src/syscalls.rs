@@ -338,12 +338,11 @@ fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
         x.flags = Some(3);
         x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
     });
-
-    define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, ans);
 }
 
 #[cfg(target_arch = "x86_64")]
 fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
+    define_dirfd_syscall!(libc::SYS_faccessat2, 2, 0, ans);
     define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
     define_paths_syscall!(libc::SYS_rename, 3, ans);
     update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
