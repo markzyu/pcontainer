@@ -1,4 +1,4 @@
-use crate::aug_common::{calc_real_path, get_mod_path, notify_mods_about_path, path_from_bytes, resolve_metadata_path};
+use crate::aug_common::{calc_real_path, get_mod_path, notify_mods_about_path, path_from_bytes};
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
@@ -226,7 +226,12 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     }
 
     fn _get_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
-        let maybe_meta_path = resolve_metadata_path(&self.handler.states.args, path)?;
+        let maybe_meta_path = self
+            .handler
+            .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
+                m.resolve_metadata_path(path)
+            })?
+            .flatten();
         event!(
             Level::TRACE,
             "Checking metadata for: {:?} = {:?}",
@@ -275,11 +280,8 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         }
 
         if path.is_dir() {
-            // Delete metadata
-            if let Some(mut meta_path) = resolve_metadata_path(&self.handler.states.args, path)? {
-                meta_path.pop();
-                let _ = std::fs::remove_dir_all(meta_path);
-            }
+            self.handler
+                .call_first_mod(mods::ModFeature::DeleteMetaDir, |m| m.delete_meta_dir(path))?;
         }
         Ok(())
     }

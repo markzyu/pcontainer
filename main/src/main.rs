@@ -126,6 +126,9 @@ fn actual_main() -> Result<(), CLIError> {
     if args.root {
         mods.push(mods::SimpleRootMod::new_box);
     }
+    if args.chroot.is_some() || args.rootfs.is_some() {
+        mods.push(mods::RootfsMod::new_box);
+    }
     if args.sudo {
         mods.push(mods::PermsMod::new_box);
     }

@@ -1,34 +1,11 @@
+use crate::handler::TraceeHandlerStates;
 use crate::mods;
-use nix::unistd::Pid;
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 use tracing::{event, Level};
-
-#[derive(Clone, Debug, Default)]
-pub struct CLIArgs {
-    pub chroot: Option<PathBuf>,
-    pub rootfs: Option<PathBuf>,
-    pub fail_fast: bool,
-    pub fix_sigsys: bool,
-    pub gdb: bool,
-    pub gdb_at: Option<u64>,
-}
-
-#[derive(Debug)]
-pub struct TraceeHandlerStates {
-    pub args: CLIArgs,
-    pub failed: AtomicBool,
-    pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
-    pub path_prefix: RwLock<Option<PathBuf>>,
-    pub path_prefix_excludes: RwLock<Vec<PathBuf>>,
-    pub pid: Pid,
-    pub root_pid: Pid,
-}
 
 #[derive(Debug, Error)]
 pub enum SysAugError {

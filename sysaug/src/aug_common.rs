@@ -1,4 +1,4 @@
-use crate::{common, CLIArgs};
+use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::TraceeHandler;
 use crate::mods;
@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf, Component};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{event, Level};
 
@@ -151,57 +151,4 @@ pub fn path_from_bytes(mut path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> 
     }
     let path_osstr: OsString = OsStringExt::from_vec(path_bytes);
     Ok(path_osstr.into())
-}
-
-pub fn resolve_metadata_path(args: &CLIArgs, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
-    let maybe_rootfs = args
-        .rootfs
-        .as_ref()
-        .or_else(|| args.chroot.as_ref());
-    if maybe_rootfs.is_none() {
-        return Ok(None);
-    }
-
-    let rootfs = maybe_rootfs.unwrap();
-    if rootfs == Path::new("/") {
-        // If setting real root as chroot/rootfs, don't create metadata
-        return Ok(None);
-    }
-    if !path.exists() {
-        return Ok(None);
-    }
-    let canonical_path = path.canonicalize();
-    if canonical_path.is_err() {
-        return Ok(None);
-    }
-    let canonical_path_unwrap = canonical_path.unwrap();
-
-    let mut metaname = rootfs.file_name().unwrap().to_os_string();
-    metaname.push(".metadata");
-    let mut metadir = rootfs.with_file_name(metaname);
-    metadir.push("rootfs");
-
-    let relative_path = canonical_path_unwrap.strip_prefix(rootfs);
-    if relative_path.is_err() {
-        return Ok(None);
-    }
-    let relative_path_unwrap = relative_path.unwrap();
-
-    metadir.push("chld");
-    for component in relative_path_unwrap.components() {
-        if component == Component::CurDir {
-            continue;
-        }
-        if component == Component::RootDir {
-            continue;
-        }
-        if let Component::Normal(part) = component {
-            metadir.push(part);
-            metadir.push("chld");
-        } else {
-            return Ok(None);
-        }
-    }
-    metadir.pop();
-    Ok(Some(metadir.join("meta")))
 }
