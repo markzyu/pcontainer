@@ -26,6 +26,14 @@ Mods are dynamic but sysaug isn't.
 - `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
 - `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
 
+## Multithreading model
+
+By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
+
+But this requires the permission for PTRACE_ATTACH. And on some systems, this permission is blocked, and tracer can only attach to their direct children from main threads.
+
+In that case, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
+
 ## For Developers
 
 How to debug problems:
