@@ -211,12 +211,12 @@ impl PtraceClient for LocalPtraceClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::new_ptrace_executor;
+    use crate::{new_main_thread_executor, PtraceClient, PtraceServer};
     use std::thread;
 
     #[test]
     fn it_works() {
-        let (client, server) = new_ptrace_executor();
+        let (client, server) = new_main_thread_executor();
         let client2 = client.clone();
         let join = thread::spawn(move || {
             let mut result = 0;

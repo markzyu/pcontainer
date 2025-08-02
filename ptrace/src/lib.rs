@@ -127,20 +127,21 @@ pub fn stack_ptr() -> usize {
 mod tests {
     use nix::sys::ptrace;
     use nix::sys::wait;
+    use nix::unistd;
     use ntest::timeout;
     use std::thread;
     use std::time::Duration;
 
-    fn _start_cmd() -> std::process::Child {
+    fn _start_cmd() -> unistd::Pid {
         let mut cmd = std::process::Command::new("ls");
-        crate::start(&mut cmd).unwrap()
+        crate::start(&mut cmd, false).unwrap()
     }
 
     #[test]
     #[timeout(100)]
     fn test_start_cmd_does_wait_and_child_is_stopped() {
-        let child = _start_cmd();
-        let status = crate::wait(&child).unwrap();
+        let pid = _start_cmd();
+        let status = crate::waitpid(pid.clone()).unwrap();
         assert!(matches!(status, wait::WaitStatus::StillAlive));
         assert!(!crate::is_trace_stop(&status));
         assert!(crate::is_still_alive(&status));
@@ -149,13 +150,12 @@ mod tests {
     #[test]
     #[timeout(100)]
     fn test_is_trace_stop_and_is_still_alive() {
-        let child = _start_cmd();
-        let pid = crate::pid(&child).unwrap();
+        let pid = _start_cmd();
         ptrace::setoptions(pid.clone(), ptrace::Options::PTRACE_O_TRACEEXIT).unwrap();
         ptrace::cont(pid.clone(), None).unwrap();
 
         thread::sleep(Duration::from_millis(20)); // Note: without sleep, wait will return StillAlive instead.
-        let status = crate::wait(&child).unwrap();
+        let status = crate::waitpid(pid.clone()).unwrap();
         assert!(matches!(status, wait::WaitStatus::PtraceEvent(_, _, _)));
         assert!(crate::is_trace_stop(&status));
         assert!(crate::is_still_alive(&status));
@@ -164,15 +164,14 @@ mod tests {
     #[test]
     #[timeout(100)]
     fn test_child_finished_and_is_not_still_alive() {
-        let child = _start_cmd();
-        let pid = crate::pid(&child).unwrap();
-        let mut status = crate::wait(&child).unwrap();
+        let pid = _start_cmd();
+        let mut status = crate::waitpid(pid.clone()).unwrap();
         assert!(matches!(status, wait::WaitStatus::StillAlive));
         assert!(!crate::is_trace_stop(&status));
         assert!(crate::is_still_alive(&status));
 
         ptrace::detach(pid.clone(), None).unwrap();
-        status = crate::wait_hang(&child).unwrap();
+        status = crate::waitpid_hang(pid.clone()).unwrap();
         assert!(!crate::is_trace_stop(&status));
         assert!(!crate::is_still_alive(&status));
     }
