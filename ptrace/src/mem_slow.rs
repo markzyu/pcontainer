@@ -12,7 +12,7 @@ use tracing::{event, Level};
 /// This function is unsafe because you need to choose `offset` carefully. If you call
 /// this function multiple times during the same system call, you might overwrite your
 /// own progress if `offset` is incorrect.
-pub unsafe fn bytes_to_stack(
+pub unsafe fn write_bytes_to_tracee(
     pid: nix::unistd::Pid,
     offset: usize,
     bytes: &[u8],
@@ -63,11 +63,15 @@ pub fn checked_write(
     }
 }
 
-/// Read multiple C syscall structures from tracee memory.
+/// Read multiple Rust "repr(C)" structures from tracee memory.
 /// Here is an explannation:
 ///
-/// Syscalls layout [ ..int.. ..char.. ..char.. (up to 512 chars) ]
-/// T struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ] + #[repr(C)]
+/// C struct layout    [ ..int.. ..char*.. (up to 512 chars)         ]
+/// Rust struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ]
+///
+/// Notes about terminology:
+///     "C struct" just means the original in-memory data.
+///     "Rust struct" just means the result of the read. It must still declare #[repr(C)]
 ///
 /// The function returns values in the layout of Rust structs, not C structs.
 ///
@@ -238,11 +242,15 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
     read_bytes_until_num_zeroes(pid, addr, 1)
 }
 
-/// Write multiple C syscall structures back to tracee memory.
+/// Write multiple "repr(C)" structs back to tracee memory.
 /// Here is an explannation:
 ///
-/// Syscalls layout [ ..int.. ..char.. ..char.. (up to 512 chars) ]
-/// T struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ] + #[repr(C)]
+/// C struct layout    [ ..int.. ..char*.. (up to 512 chars)         ]
+/// Rust struct layout [ ..int.. ..[char; 512].. (exactly 512 chars) ]
+///
+/// Notes about terminology:
+///     "C struct" just means the native in-memory data.
+///     "Rust struct" just means the source data in Rust. It must still declare #[repr(C)]
 ///
 /// The function consumes a list of T objects, and writes them out as structs in
 /// syscall layouts, by shrinking down the size of T structs, whenever there are
@@ -276,7 +284,7 @@ pub fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u
 ///       it will fail with ReadItemTooBig.
 ///
 /// Note: Any pointer conversion failure will be reported as Pointer
-pub fn structs_to_tracee_buffer<T>(
+pub fn write_structs_to_tracee<T>(
     pid: nix::unistd::Pid,
     addr: usize,
     buffer_size: usize,

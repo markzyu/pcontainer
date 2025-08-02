@@ -6,8 +6,8 @@ pub use crate::common::{
     USIZE_SIZE,
 };
 pub use crate::mem_slow::{
-    bytes_to_stack, read, read_bytes_to_structs, read_bytes_until_num_zeroes,
-    read_bytes_until_zero, structs_to_tracee_buffer, write,
+    read, read_bytes_to_structs, read_bytes_until_num_zeroes, read_bytes_until_zero, write,
+    write_bytes_to_tracee, write_structs_to_tracee,
 };
 
 use nix::sys;

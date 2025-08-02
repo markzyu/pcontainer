@@ -210,7 +210,7 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
 
         let num_dirents = dirents.len();
         let num_bytes = ptrace_client
-            .execute(move || ptrace::structs_to_tracee_buffer(pid, addr, buf_size, dirents, 2))??;
+            .execute(move || ptrace::write_structs_to_tracee(pid, addr, buf_size, dirents, 2))??;
         event!(
             Level::DEBUG,
             "Returning {} dir entries, {} bytes",

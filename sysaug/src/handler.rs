@@ -260,7 +260,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let old_offset = *offset;
         let (addr, new_offset) = self.ptrace_client.execute(move || {
             let final_bytes = bytes.as_slice();
-            unsafe { ptrace::bytes_to_stack(pid, old_offset, final_bytes) }
+            unsafe { ptrace::write_bytes_to_tracee(pid, old_offset, final_bytes) }
         })??;
         *offset = new_offset;
         Ok(addr)
