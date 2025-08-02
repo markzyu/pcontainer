@@ -229,7 +229,8 @@ lazy_static! {
         define_perms_syscall!(libc::SYS_setfsgid, true, 0, 8, ans);
         define_perms_syscall!(libc::SYS_setfsuid, true, 0, 24, ans);
 
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))] {
+        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
+        {
             define_perms_syscall!(libc::SYS_getuid32, false, 0, 17, ans);
             define_perms_syscall!(libc::SYS_geteuid32, false, 0, 18, ans);
             define_perms_syscall!(libc::SYS_getgid32, false, 0, 1, ans);
@@ -279,11 +280,13 @@ lazy_static! {
         update_syscall!(ans, libc::SYS_lgetxattr, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_llistxattr, |x| x.dont_follow_symlink = true);
 
-        #[cfg(not(all(target_os = "android", target_arch = "aarch64")))] {
+        #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
+        {
             define_paths_syscall!(libc::SYS_truncate, 1, ans);
             define_paths_syscall!(libc::SYS_statfs, 1, ans);
         }
-        #[cfg(not(target_os = "android"))] {
+        #[cfg(not(target_os = "android"))]
+        {
             define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
             update_syscall!(ans, libc::SYS_statx, |x| {
                 x.flags = Some(2);
@@ -302,7 +305,8 @@ lazy_static! {
         define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, ans);
         define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, ans);
 
-        #[cfg(target_arch = "arm")] {
+        #[cfg(target_arch = "arm")]
+        {
             define_paths_syscall!(libc::SYS_chown32, 1, ans);
             define_paths_syscall!(libc::SYS_stat64, 1, ans);
             define_paths_syscall!(libc::SYS_statfs64, 1, ans);
@@ -314,7 +318,8 @@ lazy_static! {
             update_syscall!(ans, libc::SYS_lstat64, |x| x.dont_follow_symlink = true);
         }
 
-        #[cfg(all(target_arch = "aarch64", not(target_os = "android")))] {
+        #[cfg(all(target_arch = "aarch64", not(target_os = "android")))]
+        {
             define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
             update_syscall!(ans, libc::SYS_newfstatat, |x| {
                 x.flags = Some(3);
@@ -322,7 +327,8 @@ lazy_static! {
             });
         }
 
-        #[cfg(target_arch = "x86_64")] {
+        #[cfg(target_arch = "x86_64")]
+        {
             define_dirfd_syscall!(libc::SYS_faccessat2, 2, 0, ans);
             define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
             define_paths_syscall!(libc::SYS_rename, 3, ans);
@@ -336,7 +342,8 @@ lazy_static! {
             define_getdents_syscall!(libc::SYS_getdents, 32, ans);
         }
 
-        #[cfg(any(target_arch = "x86_64", target_arch = "arm"))] {
+        #[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
+        {
             define_paths_syscall!(libc::SYS_access, 1, ans);
             define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, ans);
             define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, ans);
