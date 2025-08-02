@@ -229,34 +229,22 @@ lazy_static! {
         define_perms_syscall!(libc::SYS_setfsgid, true, 0, 8, ans);
         define_perms_syscall!(libc::SYS_setfsuid, true, 0, 24, ans);
 
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_getuid32, false, 0, 17, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_geteuid32, false, 0, 18, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_getgid32, false, 0, 1, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_getegid32, false, 0, 2, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_getgroups32, false, 0, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setuid32, true, 0, 18, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setgid32, true, 0, 2, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setgroups32, true, 0, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setregid32, true, 3, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setreuid32, true, 19, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setresgid32, true, 7, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setresuid32, true, 23, 0, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setfsgid32, true, 0, 8, ans);
-        #[cfg(any(target_arch = "arm", target_arch = "x86"))]
-        define_perms_syscall!(libc::SYS_setfsuid32, true, 0, 24, ans);
+        #[cfg(any(target_arch = "arm", target_arch = "x86"))] {
+            define_perms_syscall!(libc::SYS_getuid32, false, 0, 17, ans);
+            define_perms_syscall!(libc::SYS_geteuid32, false, 0, 18, ans);
+            define_perms_syscall!(libc::SYS_getgid32, false, 0, 1, ans);
+            define_perms_syscall!(libc::SYS_getegid32, false, 0, 2, ans);
+            define_perms_syscall!(libc::SYS_getgroups32, false, 0, 0, ans);
+            define_perms_syscall!(libc::SYS_setuid32, true, 0, 18, ans);
+            define_perms_syscall!(libc::SYS_setgid32, true, 0, 2, ans);
+            define_perms_syscall!(libc::SYS_setgroups32, true, 0, 0, ans);
+            define_perms_syscall!(libc::SYS_setregid32, true, 3, 0, ans);
+            define_perms_syscall!(libc::SYS_setreuid32, true, 19, 0, ans);
+            define_perms_syscall!(libc::SYS_setresgid32, true, 7, 0, ans);
+            define_perms_syscall!(libc::SYS_setresuid32, true, 23, 0, ans);
+            define_perms_syscall!(libc::SYS_setfsgid32, true, 0, 8, ans);
+            define_perms_syscall!(libc::SYS_setfsuid32, true, 0, 24, ans);
+        }
 
         define_paths_syscall!(libc::SYS_acct, 1, ans);
         define_paths_syscall!(libc::SYS_chdir, 1, ans);
@@ -267,7 +255,6 @@ lazy_static! {
         define_paths_syscall!(libc::SYS_setxattr, 1, ans);
         define_paths_syscall!(libc::SYS_swapoff, 1, ans);
         define_paths_syscall!(libc::SYS_swapon, 1, ans);
-        define_paths_syscall!(libc::SYS_truncate, 1, ans);
         define_paths_syscall!(libc::SYS_umount2, 1, ans);
         define_syscall!(libc::SYS_execve, Augments::Exec, ans);
 
@@ -292,12 +279,17 @@ lazy_static! {
         update_syscall!(ans, libc::SYS_lgetxattr, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_llistxattr, |x| x.dont_follow_symlink = true);
 
-        define_paths_syscall!(libc::SYS_statfs, 1, ans);
-        define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
-        update_syscall!(ans, libc::SYS_statx, |x| {
-            x.flags = Some(2);
-            x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-        });
+        #[cfg(not(all(target_os = "android", target_arch = "aarch64")))] {
+            define_paths_syscall!(libc::SYS_truncate, 1, ans);
+            define_paths_syscall!(libc::SYS_statfs, 1, ans);
+        }
+        #[cfg(not(target_os = "android"))] {
+            define_dirfd_syscall!(libc::SYS_statx, 2, 0, ans);
+            update_syscall!(ans, libc::SYS_statx, |x| {
+                x.flags = Some(2);
+                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            });
+        }
 
         define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, ans);
         update_syscall!(ans, libc::SYS_utimensat, |x| {
@@ -310,78 +302,70 @@ lazy_static! {
         define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, ans);
         define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, ans);
 
-        add_xplat_syscalls(&mut ans);
+        #[cfg(target_arch = "arm")] {
+            define_paths_syscall!(libc::SYS_chown32, 1, ans);
+            define_paths_syscall!(libc::SYS_stat64, 1, ans);
+            define_paths_syscall!(libc::SYS_statfs64, 1, ans);
+            define_paths_syscall!(libc::SYS_truncate64, 1, ans);
+
+            define_paths_syscall!(libc::SYS_lchown32, 1, ans);
+            define_paths_syscall!(libc::SYS_lstat64, 1, ans);
+            update_syscall!(ans, libc::SYS_lchown32, |x| x.dont_follow_symlink = true);
+            update_syscall!(ans, libc::SYS_lstat64, |x| x.dont_follow_symlink = true);
+        }
+
+        #[cfg(all(target_arch = "aarch64", not(target_os = "android")))] {
+            define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
+            update_syscall!(ans, libc::SYS_newfstatat, |x| {
+                x.flags = Some(3);
+                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            });
+        }
+
+        #[cfg(target_arch = "x86_64")] {
+            define_dirfd_syscall!(libc::SYS_faccessat2, 2, 0, ans);
+            define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
+            define_paths_syscall!(libc::SYS_rename, 3, ans);
+            update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
+            update_syscall!(ans, libc::SYS_newfstatat, |x| {
+                x.flags = Some(3);
+                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            });
+
+            define_paths_syscall!(libc::SYS_utime, 1, ans);
+            define_getdents_syscall!(libc::SYS_getdents, 32, ans);
+        }
+
+        #[cfg(any(target_arch = "x86_64", target_arch = "arm"))] {
+            define_paths_syscall!(libc::SYS_access, 1, ans);
+            define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, ans);
+            define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, ans);
+            define_paths_syscall!(libc::SYS_mknod, 1, ans);
+            define_paths_syscall!(libc::SYS_creat, 1, ans);
+            define_paths_syscall!(libc::SYS_stat, 1, ans);
+            define_paths_syscall!(libc::SYS_uselib, 1, ans);
+            define_paths_syscall!(libc::SYS_utimes, 1, ans);
+            define_dirfd_syscall!(libc::SYS_futimesat, 2, 0, ans);
+            define_paths_syscall!(libc::SYS_open, 1, ans);
+            define_paths_syscall!(libc::SYS_link, 3, ans);
+
+            define_paths_syscall!(libc::SYS_readlink, 1, ans);
+            define_paths_setperms_syscall!(libc::SYS_lchown, 1, PermType::Chown, ans);
+            define_paths_syscall!(libc::SYS_lstat, 1, ans);
+            define_paths_syscall!(libc::SYS_symlink, 2, ans);
+            update_syscall!(ans, libc::SYS_readlink, |x| x.dont_follow_symlink = true);
+            update_syscall!(ans, libc::SYS_lchown, |x| x.dont_follow_symlink = true);
+            update_syscall!(ans, libc::SYS_lstat, |info| info.dont_follow_symlink = true);
+            update_syscall!(ans, libc::SYS_symlink, |x| x.dont_follow_symlink = true);
+
+            define_paths_deletion_syscall!(libc::SYS_unlink, 1, DelType::File, ans);
+            update_syscall!(ans, libc::SYS_unlink, |x| x.dont_follow_symlink = true);
+            define_paths_deletion_syscall!(libc::SYS_rmdir, 1, DelType::Dir, ans);
+
+            define_paths_syscall!(libc::SYS_mkdir, 1, ans);
+        }
+
         ans.remove(&NO_MOD_SYSCALL);
         ans
     };
-}
-
-#[cfg(target_arch = "arm")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_paths_syscall!(libc::SYS_chown32, 1, ans);
-    define_paths_syscall!(libc::SYS_stat64, 1, ans);
-    define_paths_syscall!(libc::SYS_statfs64, 1, ans);
-    define_paths_syscall!(libc::SYS_truncate64, 1, ans);
-
-    define_paths_syscall!(libc::SYS_lchown32, 1, ans);
-    define_paths_syscall!(libc::SYS_lstat64, 1, ans);
-    update_syscall!(ans, libc::SYS_lchown32, |x| x.dont_follow_symlink = true);
-    update_syscall!(ans, libc::SYS_lstat64, |x| x.dont_follow_symlink = true);
-
-    add_xplat_syscalls2(ans);
-}
-
-#[cfg(target_arch = "aarch64")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
-    update_syscall!(ans, libc::SYS_newfstatat, |x| {
-        x.flags = Some(3);
-        x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-    });
-}
-
-#[cfg(target_arch = "x86_64")]
-fn add_xplat_syscalls(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_dirfd_syscall!(libc::SYS_faccessat2, 2, 0, ans);
-    define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
-    define_paths_syscall!(libc::SYS_rename, 3, ans);
-    update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
-    update_syscall!(ans, libc::SYS_newfstatat, |x| {
-        x.flags = Some(3);
-        x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-    });
-
-    define_paths_syscall!(libc::SYS_utime, 1, ans);
-    define_getdents_syscall!(libc::SYS_getdents, 32, ans);
-    add_xplat_syscalls2(ans);
-}
-
-#[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
-fn add_xplat_syscalls2(ans: &mut HashMap<usize, SyscallInfo>) {
-    define_paths_syscall!(libc::SYS_access, 1, ans);
-    define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, ans);
-    define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, ans);
-    define_paths_syscall!(libc::SYS_mknod, 1, ans);
-    define_paths_syscall!(libc::SYS_creat, 1, ans);
-    define_paths_syscall!(libc::SYS_stat, 1, ans);
-    define_paths_syscall!(libc::SYS_uselib, 1, ans);
-    define_paths_syscall!(libc::SYS_utimes, 1, ans);
-    define_dirfd_syscall!(libc::SYS_futimesat, 2, 0, ans);
-    define_paths_syscall!(libc::SYS_open, 1, ans);
-    define_paths_syscall!(libc::SYS_link, 3, ans);
-
-    define_paths_syscall!(libc::SYS_readlink, 1, ans);
-    define_paths_setperms_syscall!(libc::SYS_lchown, 1, PermType::Chown, ans);
-    define_paths_syscall!(libc::SYS_lstat, 1, ans);
-    define_paths_syscall!(libc::SYS_symlink, 2, ans);
-    update_syscall!(ans, libc::SYS_readlink, |x| x.dont_follow_symlink = true);
-    update_syscall!(ans, libc::SYS_lchown, |x| x.dont_follow_symlink = true);
-    update_syscall!(ans, libc::SYS_lstat, |info| info.dont_follow_symlink = true);
-    update_syscall!(ans, libc::SYS_symlink, |x| x.dont_follow_symlink = true);
-
-    define_paths_deletion_syscall!(libc::SYS_unlink, 1, DelType::File, ans);
-    update_syscall!(ans, libc::SYS_unlink, |x| x.dont_follow_symlink = true);
-    define_paths_deletion_syscall!(libc::SYS_rmdir, 1, DelType::Dir, ans);
-
-    define_paths_syscall!(libc::SYS_mkdir, 1, ans);
 }
