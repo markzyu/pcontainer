@@ -12,20 +12,20 @@ const NT_PRSTATUS: libc::c_int = 1;
 const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 const MAX_STRUCT_SIZE: usize = 2048;
 
-#[cfg(any(target_env = "musl"))]
-const PTRACE_GETEVENTMSG: i32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as i32;
+#[cfg(not(any(target_env = "gnu")))]
+const PTRACE_GETEVENTMSG: i32 = libc::PTRACE_GETEVENTMSG as i32;
 
 #[cfg(any(target_env = "gnu"))]
 const PTRACE_GETEVENTMSG: u32 = sys::ptrace::Request::PTRACE_GETEVENTMSG as u32;
 
-#[cfg(any(target_env = "musl"))]
-const PTRACE_GETREGSET: i32 = sys::ptrace::Request::PTRACE_GETREGSET as i32;
+#[cfg(not(any(target_env = "gnu")))]
+const PTRACE_GETREGSET: i32 = libc::PTRACE_GETREGSET as i32;
 
 #[cfg(any(target_env = "gnu"))]
 const PTRACE_GETREGSET: u32 = sys::ptrace::Request::PTRACE_GETREGSET as u32;
 
-#[cfg(any(target_env = "musl"))]
-const PTRACE_SETREGSET: i32 = sys::ptrace::Request::PTRACE_SETREGSET as i32;
+#[cfg(not(any(target_env = "gnu")))]
+const PTRACE_SETREGSET: i32 = libc::PTRACE_SETREGSET as i32;
 
 #[cfg(any(target_env = "gnu"))]
 const PTRACE_SETREGSET: u32 = sys::ptrace::Request::PTRACE_SETREGSET as u32;
