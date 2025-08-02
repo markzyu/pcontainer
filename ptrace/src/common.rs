@@ -343,12 +343,14 @@ pub fn aligned(val: usize) -> Result<usize, PtraceError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::common;
+
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_convert_bytes_to_usizes_exact() {
         let bytes: &[u8] = b"abcdefghijklmnop";
         let _expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193];
-        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(_expect)));
+        assert!(matches!(common::bytes_to_usizes(bytes), Ok(_expect)));
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -356,6 +358,6 @@ mod tests {
     fn test_convert_bytes_to_usizes_remainder() {
         let bytes: &[u8] = b"abcdefghijklmnop9";
         let _expect: Vec<usize> = vec![7523094288207667809, 8101815670912281193, 57];
-        assert!(matches!(crate::bytes_to_usizes(bytes), Ok(_expect)));
+        assert!(matches!(common::bytes_to_usizes(bytes), Ok(_expect)));
     }
 }
