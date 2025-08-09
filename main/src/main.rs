@@ -1,7 +1,7 @@
 use clap::Clap;
 use executor::PtraceServer;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use sysaug::{display_err, ModProvider};
 use thiserror::Error;
@@ -165,7 +165,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     ptrace_client: PtraceClient,
 ) -> Result<thread::JoinHandle<Option<u8>>, CLIError> {
     // Spawn first tracee
-    let pid1 = {
+    let (pid1, mmap_addr) = {
         let mut cmd = std::process::Command::new(&args.cmd);
         ptrace::start(&mut cmd, args.fix_attach)?
     };
@@ -182,6 +182,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     };
     let states = sysaug::TraceeHandlerStates {
         args: args2,
+        mmap_addr: RwLock::new(mmap_addr),
         root_pid: pid1,
         ..Default::default()
     };

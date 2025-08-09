@@ -143,6 +143,7 @@ pub trait AugmentSyscall {
 pub enum Augments {
     Clone,
     Exec,
+    Mmap,
     Paths,
     Perms,
     Waitpid,
@@ -236,6 +237,10 @@ pub struct SyscallInfo {
 
     pub num: libc::c_long,
     pub name: &'static str,
+
+    /// true -> munmap. false -> mmap
+    pub is_unmap: bool,
+    pub map_addr_position: usize,
 }
 
 impl SyscallInfo {

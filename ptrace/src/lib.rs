@@ -35,18 +35,24 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
-pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid, PtraceError> {
+pub fn start(
+    cmd: &mut process::Command,
+    no_attach: bool,
+) -> Result<(unistd::Pid, Option<usize>), PtraceError> {
+    let mut mmap_addr: Option<usize> = None;
     unsafe {
-        mman::mmap_anonymous(
+        let ptr = mman::mmap_anonymous(
             None,
             SHARED_MMAP_SIZE,
             mman::ProtFlags::PROT_WRITE | mman::ProtFlags::PROT_READ,
             mman::MapFlags::MAP_SHARED,
         )
         .map_err(PtraceError::CreateMemoryMap)?;
+        event!(Level::INFO, "Mmap location: {:?}", ptr);
+        mmap_addr = Some(ptr.as_ptr() as usize);
     }
     match unsafe { unistd::fork() } {
-        Ok(unistd::ForkResult::Parent { child, .. }) => Ok(child),
+        Ok(unistd::ForkResult::Parent { child, .. }) => Ok((child, mmap_addr)),
         Ok(unistd::ForkResult::Child) => {
             if no_attach {
                 // Use PTRACE_TRACEME, and wait for tracer's main thread

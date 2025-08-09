@@ -201,6 +201,22 @@ macro_rules! define_getdents_syscall {
     };
 }
 
+macro_rules! define_mmap_syscall {
+    ($name:expr, $is_unmap:expr, $addr_position:expr, $ans:ident) => {
+        $ans.insert(
+            $name as usize,
+            SyscallInfo {
+                augment: Augments::Mmap,
+                name: stringify!($name),
+                num: $name,
+                is_unmap: $is_unmap,
+                map_addr_position: $addr_position,
+                ..Default::default()
+            },
+        )
+    };
+}
+
 macro_rules! update_syscall {
     ($ans:ident, $name:expr, $func:expr) => {
         $ans.get_mut(&($name as usize)).map($func)
@@ -304,6 +320,9 @@ lazy_static! {
 
         define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, ans);
         define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, ans);
+
+        define_mmap_syscall!(libc::SYS_mmap, false, 0, ans);
+        define_mmap_syscall!(libc::SYS_munmap, true, 0, ans);
 
         #[cfg(target_arch = "arm")]
         {
