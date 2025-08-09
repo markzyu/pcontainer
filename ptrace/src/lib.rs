@@ -3,7 +3,7 @@ mod mem_slow;
 
 pub use crate::common::{
     getregs, setregs, CHeader, CStruct, GenericPurposeRegs, PtraceError, PTRACE_GETEVENTMSG,
-    USIZE_SIZE,
+    SHARED_MMAP_SIZE, USIZE_SIZE,
 };
 pub use crate::mem_slow::{
     read, read_bytes_to_structs, read_bytes_until_num_zeroes, read_bytes_until_zero, write,
@@ -11,6 +11,7 @@ pub use crate::mem_slow::{
 };
 
 use nix::sys;
+use nix::sys::mman;
 use nix::sys::wait;
 use nix::unistd;
 use std::convert::TryInto;
@@ -35,6 +36,15 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
 }
 
 pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid, PtraceError> {
+    unsafe {
+        mman::mmap_anonymous(
+            None,
+            SHARED_MMAP_SIZE,
+            mman::ProtFlags::PROT_WRITE | mman::ProtFlags::PROT_READ,
+            mman::MapFlags::MAP_SHARED,
+        )
+        .map_err(PtraceError::CreateMemoryMap)?;
+    }
     match unsafe { unistd::fork() } {
         Ok(unistd::ForkResult::Parent { child, .. }) => Ok(child),
         Ok(unistd::ForkResult::Child) => {

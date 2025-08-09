@@ -331,7 +331,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let getsig_ans = self
                 .ptrace_client
                 .execute(move || sys::ptrace::getsiginfo(pid))?;
-            if getsig_ans.err() == Some(nix::Error::Sys(nix::errno::Errno::EINVAL)) {
+            if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
                 return Ok(false);
             }
             if signal == &sys::signal::Signal::SIGSTOP {

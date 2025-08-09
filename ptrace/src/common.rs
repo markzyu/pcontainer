@@ -1,10 +1,13 @@
 use lazy_static::lazy_static;
 use nix::sys;
 use std::convert::TryInto;
+use std::num::NonZero;
 use thiserror::Error;
 
 pub const NT_PRSTATUS: libc::c_int = 1;
 pub const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
+pub const SHARED_MMAP_SIZE: NonZero<usize> =
+    unsafe { NonZero::<usize>::new_unchecked(2 * 1024 * 1024) };
 pub const MAX_STRUCT_SIZE: usize = 2048;
 
 #[cfg(not(any(target_env = "gnu")))]
@@ -84,6 +87,9 @@ pub enum PtraceError {
 
     #[error("Integer overflow: {0} {1} {2}")]
     IntOverflow(usize, &'static str, usize),
+
+    #[error("Cannot create linux mmap: {0}")]
+    CreateMemoryMap(nix::Error),
 }
 
 pub trait CHeader {
