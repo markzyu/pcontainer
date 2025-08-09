@@ -1,6 +1,5 @@
 use crate::aug_clone::AugmentClone;
 use crate::aug_exec::AugmentExec;
-use crate::aug_mmap::AugmentMmap;
 use crate::aug_paths::AugmentPaths;
 use crate::aug_perms::AugmentPerms;
 use crate::aug_waitpid::AugmentWaitpid;
@@ -37,7 +36,6 @@ pub struct CLIArgs {
 pub struct TraceeHandlerStates {
     pub args: CLIArgs,
     pub failed: AtomicBool,
-    pub mmap_addr: RwLock<Option<usize>>,
     pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
     pub path_prefix: RwLock<Option<PathBuf>>,
     pub path_prefix_excludes: RwLock<Vec<PathBuf>>,
@@ -48,7 +46,6 @@ pub struct TraceeHandlerStates {
 struct AugmentContainer<PtraceClient: executor::PtraceClient> {
     clone: AugmentClone<PtraceClient>,
     exec: AugmentExec<PtraceClient>,
-    mmap: AugmentMmap<PtraceClient>,
     paths: AugmentPaths<PtraceClient>,
     perms: AugmentPerms<PtraceClient>,
     waitpid: AugmentWaitpid<PtraceClient>,
@@ -115,7 +112,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let augments = AugmentContainer::<PtraceClient> {
             clone: new_augment!(AugmentClone<PtraceClient>, ans),
             exec: new_augment!(AugmentExec<PtraceClient>, ans),
-            mmap: new_augment!(AugmentMmap<PtraceClient>, ans),
             paths: new_augment!(AugmentPaths<PtraceClient>, ans),
             perms: new_augment!(AugmentPerms<PtraceClient>, ans),
             waitpid: new_augment!(AugmentWaitpid<PtraceClient>, ans),
@@ -521,7 +517,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             match which_aug {
                 Some(Augments::Clone) => augments.clone.dispatch(&last_syscall, regs),
                 Some(Augments::Exec) => augments.exec.dispatch(&last_syscall, regs),
-                Some(Augments::Mmap) => augments.mmap.dispatch(&last_syscall, regs),
                 Some(Augments::Paths) => augments.paths.dispatch(&last_syscall, regs),
                 Some(Augments::Perms) => augments.perms.dispatch(&last_syscall, regs),
                 Some(Augments::Waitpid) => augments.waitpid.dispatch(&last_syscall, regs),
@@ -608,7 +603,6 @@ impl Default for TraceeHandlerStates {
         TraceeHandlerStates {
             args: CLIArgs::default(),
             failed: AtomicBool::new(false),
-            mmap_addr: RwLock::default(),
             perms_ids: RwLock::default(),
             path_prefix: RwLock::default(),
             path_prefix_excludes: RwLock::default(),
@@ -623,7 +617,6 @@ impl TraceeHandlerStates {
         Ok(TraceeHandlerStates {
             args: self.args.clone(),
             failed: AtomicBool::new(false),
-            mmap_addr: clone_locked(&self.mmap_addr)?,
             perms_ids: clone_locked(&self.perms_ids)?,
             path_prefix: clone_locked(&self.path_prefix)?,
             path_prefix_excludes: clone_locked(&self.path_prefix_excludes)?,
