@@ -1,14 +1,28 @@
 use lazy_static::lazy_static;
 use nix::sys;
 use std::convert::TryInto;
-use std::num::NonZero;
 use thiserror::Error;
 
 pub const NT_PRSTATUS: libc::c_int = 1;
 pub const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
-pub const SHARED_MMAP_SIZE: NonZero<usize> =
-    unsafe { NonZero::<usize>::new_unchecked(2 * 1024 * 1024) };
+pub const MAX_NUM_TRACEES: usize = 8192;
 pub const MAX_STRUCT_SIZE: usize = 2048;
+
+/// Should be exactly 128MB of RAM, divided into 8192 regions of shared 'stack'
+///
+/// This RAM is shared from tracer to all tracees, readonly for tracees.
+///
+/// Each region is indexed and there will be a global hashmap + vec in tracer's
+/// private RAM, to allocate and track regions for tracees. Every alive tracee
+/// keeps their index once allocated and releases it back into the vec + hashmap
+/// when tracee exits.
+pub const SHARED_MMAP_SIZE: usize = MAX_NUM_TRACEES * STACK_SAFE_ZONE_SIZE;
+
+/// Max number of total structs in the entire shared mmap
+pub const MAX_NUM_STRUCTS: usize = SHARED_MMAP_SIZE / MAX_STRUCT_SIZE;
+
+/// Max number of total structs in the an individual region of shared mmap
+pub const MAX_NUM_STRUCTS_PER_TRACEE: usize = STACK_SAFE_ZONE_SIZE / MAX_STRUCT_SIZE;
 
 #[cfg(not(any(target_env = "gnu")))]
 pub const PTRACE_GETEVENTMSG: i32 = libc::PTRACE_GETEVENTMSG as i32;
@@ -31,6 +45,15 @@ pub const PTRACE_SETREGSET: u32 = sys::ptrace::Request::PTRACE_SETREGSET as u32;
 lazy_static! {
     pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 }
+
+/// To help us index the structs within a tracee's own mmap region
+pub type SharedStructs = [[usize; MAX_STRUCT_SIZE]; MAX_NUM_STRUCTS_PER_TRACEE];
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub type NixISize = i64;
+
+#[cfg(any(target_arch = "x86", target_arch = "arm"))]
+pub type NixISize = i32;
 
 #[derive(Debug, Error)]
 pub enum PtraceError {
@@ -88,8 +111,8 @@ pub enum PtraceError {
     #[error("Integer overflow: {0} {1} {2}")]
     IntOverflow(usize, &'static str, usize),
 
-    #[error("Cannot create linux mmap: {0}")]
-    CreateMemoryMap(nix::Error),
+    #[error("Cannot create linux memfd: {0}")]
+    CreateMemoryFile(nix::Error),
 }
 
 pub trait CHeader {
@@ -115,9 +138,9 @@ pub struct GenericPurposeRegs {
     pub arg1: usize,
     pub arg2: usize,
     pub arg3: usize,
-    unknown_x4: usize,
-    unknown_x5: usize,
-    unknown_x6: usize,
+    pub arg4: usize,
+    pub arg5: usize,
+    pub arg6: usize,
     unknown_x7: usize,
     pub syscall_num: usize,
     unknown_x9: usize,
@@ -156,9 +179,9 @@ pub struct GenericPurposeRegs {
     pub arg1: usize,
     pub arg2: usize,
     pub arg3: usize,
-    unknown_x4: usize,
-    unknown_x5: usize,
-    unknown_x6: usize,
+    pub arg4: usize,
+    pub arg5: usize,
+    pub arg6: usize,
     pub syscall_num: usize,
     unknown_x8: usize,
     unknown_x9: usize,
@@ -186,8 +209,8 @@ pub struct GenericPurposeRegs {
     unknown_x6: usize,
     unknown_x7: usize,
     pub arg3: usize,
-    arg5: usize,
-    arg4: usize,
+    pub arg5: usize,
+    pub arg4: usize,
     // "rax"
     rax: usize,
     unknown_x12: usize,

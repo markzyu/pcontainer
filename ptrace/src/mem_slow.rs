@@ -1,7 +1,7 @@
 /// Slower, but more supported method to access tracee memory (ptrace)
 use crate::common::{
     aligned, bytes_to_usizes, checked_add, checked_div, checked_mul, checked_sub, getregs, CHeader,
-    CStruct, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+    CStruct, NixISize, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
 };
 use nix::sys;
 use tracing::{event, Level};
@@ -42,15 +42,9 @@ pub unsafe fn write_bytes_to_tracee(
     Ok((start, new_offset))
 }
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub fn write(pid: nix::unistd::Pid, addr: usize, value: usize) -> Result<(), PtraceError> {
-    sys::ptrace::write(pid, addr as *mut libc::c_void, value as i64).map_err(PtraceError::Write)?;
-    Ok(())
-}
-
-#[cfg(any(target_arch = "x86", target_arch = "arm"))]
-pub fn write(pid: nix::unistd::Pid, addr: usize, value: usize) -> Result<(), PtraceError> {
-    sys::ptrace::write(pid, addr as *mut libc::c_void, value as i32).map_err(PtraceError::Write)?;
+    sys::ptrace::write(pid, addr as *mut libc::c_void, value as NixISize)
+        .map_err(PtraceError::Write)?;
     Ok(())
 }
 

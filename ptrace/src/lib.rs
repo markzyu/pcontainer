@@ -2,8 +2,8 @@ mod common;
 mod mem_slow;
 
 pub use crate::common::{
-    getregs, setregs, CHeader, CStruct, GenericPurposeRegs, PtraceError, PTRACE_GETEVENTMSG,
-    SHARED_MMAP_SIZE, USIZE_SIZE,
+    getregs, setregs, CHeader, CStruct, GenericPurposeRegs, NixISize, PtraceError,
+    PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, USIZE_SIZE,
 };
 pub use crate::mem_slow::{
     read, read_bytes_to_structs, read_bytes_until_num_zeroes, read_bytes_until_zero, write,
@@ -11,10 +11,13 @@ pub use crate::mem_slow::{
 };
 
 use nix::sys;
+use nix::sys::memfd;
 use nix::sys::mman;
 use nix::sys::wait;
 use nix::unistd;
 use std::convert::TryInto;
+use std::os::fd::AsRawFd;
+use std::os::fd::RawFd;
 use std::os::unix::process::CommandExt;
 use std::process;
 use tracing::{event, Level};
@@ -35,18 +38,36 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
-pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid, PtraceError> {
-    unsafe {
-        mman::mmap_anonymous(
+pub fn start(
+    cmd: &mut process::Command,
+    no_attach: bool,
+) -> Result<(unistd::Pid, RawFd, usize), PtraceError> {
+    let shared_fd = memfd::memfd_create("shared_from_tracer", memfd::MFdFlags::empty())
+        .map_err(PtraceError::CreateMemoryFile)?;
+    unistd::ftruncate(&shared_fd, SHARED_MMAP_SIZE as NixISize)
+        .map_err(PtraceError::CreateMemoryFile)?;
+    let mmap_addr = unsafe {
+        mman::mmap(
             None,
-            SHARED_MMAP_SIZE,
-            mman::ProtFlags::PROT_WRITE | mman::ProtFlags::PROT_READ,
+            SHARED_MMAP_SIZE.try_into().unwrap(),
+            mman::ProtFlags::PROT_READ | mman::ProtFlags::PROT_WRITE,
             mman::MapFlags::MAP_SHARED,
+            &shared_fd,
+            0,
         )
-        .map_err(PtraceError::CreateMemoryMap)?;
-    }
+        .map_err(PtraceError::CreateMemoryFile)?
+        .as_ptr() as usize
+    };
+    event!(
+        Level::INFO,
+        "Created shared mmap fd {:?} addr {:x}",
+        shared_fd,
+        mmap_addr
+    );
     match unsafe { unistd::fork() } {
-        Ok(unistd::ForkResult::Parent { child, .. }) => Ok(child),
+        Ok(unistd::ForkResult::Parent { child, .. }) => {
+            Ok((child, shared_fd.as_raw_fd(), mmap_addr))
+        }
         Ok(unistd::ForkResult::Child) => {
             if no_attach {
                 // Use PTRACE_TRACEME, and wait for tracer's main thread
@@ -56,6 +77,7 @@ pub fn start(cmd: &mut process::Command, no_attach: bool) -> Result<unistd::Pid,
                 sys::signal::raise(sys::signal::Signal::SIGSTOP).unwrap();
             }
             let e = cmd.exec();
+            println!("[ERROR] Unexpected exec failure, returned {:?}", &e);
             Err(PtraceError::InitCmdFailed(e))
         }
         Err(e) => Err(PtraceError::StartInitCmd(e)),

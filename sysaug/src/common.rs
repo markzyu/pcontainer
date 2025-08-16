@@ -90,6 +90,12 @@ pub enum SysAugError {
         message: String,
         mod_name: String,
     },
+
+    #[error("Internal error, Invalid TraceeInitStage: {0}")]
+    BadInitStage(u8),
+
+    #[error("Internal error, tracee initializing but missing original regs")]
+    InitMissingSavedRegs,
 }
 
 // ------------------- MODS -------------------
@@ -139,7 +145,7 @@ pub trait AugmentSyscall {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Augments {
     Clone,
     Exec,

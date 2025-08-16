@@ -165,7 +165,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     ptrace_client: PtraceClient,
 ) -> Result<thread::JoinHandle<Option<u8>>, CLIError> {
     // Spawn first tracee
-    let pid1 = {
+    let (pid1, shared_fd, mmap_addr) = {
         let mut cmd = std::process::Command::new(&args.cmd);
         ptrace::start(&mut cmd, args.fix_attach)?
     };
@@ -188,7 +188,14 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
 
     // Start tracee handler thread
     let ptrace_client2 = ptrace_client.clone();
-    let new_tracee_handler =
-        sysaug::TraceeHandler::new(pid1, ptrace_client, mods, Some(Arc::new(states)), None)?;
+    let new_tracee_handler = sysaug::TraceeHandler::new(
+        pid1,
+        ptrace_client,
+        mods,
+        Some(Arc::new(states)),
+        None,
+        shared_fd,
+        mmap_addr,
+    )?;
     Ok(new_tracee_handler.start(move || ptrace_client2.stop()))
 }

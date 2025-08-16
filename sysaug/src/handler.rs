@@ -13,8 +13,10 @@ use crate::syscalls::SYSCALL_INFOS;
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::GenericPurposeRegs;
+use ptrace::{GenericPurposeRegs, SHARED_MMAP_SIZE};
 use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
+use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,6 +53,35 @@ struct AugmentContainer<PtraceClient: executor::PtraceClient> {
     waitpid: AugmentWaitpid<PtraceClient>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
+pub enum TraceeInitStage {
+    /// Waiting for Exec
+    Begin = 0,
+    /// Intercepted exec
+    ExecSeen = 1,
+    /// Intercepted first call
+    FirstCallSeen = 2,
+    /// Intercepted the mmap call that replaced the first call
+    FirstCallReplacedWithMmap = 3,
+    /// Intercepted the final actual first call
+    FirstCallActuallyDone = 4,
+}
+
+impl TryFrom<u8> for TraceeInitStage {
+    type Error = SysAugError;
+    fn try_from(val: u8) -> Result<Self, Self::Error> {
+        match val {
+            0 => Ok(TraceeInitStage::Begin),
+            1 => Ok(TraceeInitStage::ExecSeen),
+            2 => Ok(TraceeInitStage::FirstCallSeen),
+            3 => Ok(TraceeInitStage::FirstCallReplacedWithMmap),
+            4 => Ok(TraceeInitStage::FirstCallActuallyDone),
+            _ => Err(SysAugError::BadInitStage(val)),
+        }
+    }
+}
+
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub mods: RwLock<ModsByFeature>,
     mod_providers: Vec<ModProvider>,
@@ -68,9 +99,15 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub skip_syscall_retval: RwLock<Option<usize>>,
     pub nosys_syscall_retval: RwLock<Option<usize>>,
     pub tracee_stack_offset: RwLock<usize>,
+    pub mmap_tracee_addr: RwLock<usize>,
+    pub tracee_init_stage: RwLock<TraceeInitStage>,
 
     augments: RwLock<Option<AugmentContainer<PtraceClient>>>,
     last_syscall: RwLock<SyscallCounter>,
+
+    /// Readonly, Copy on Move, values
+    pub shared_fd: RawFd,
+    pub mmap_tracer_addr: usize,
 }
 
 type BoolResult = Result<bool, SysAugError>;
@@ -88,6 +125,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         mods: Vec<ModProvider>,
         states: Option<Arc<TraceeHandlerStates>>,
         parent: Option<Arc<TraceeHandler<PtraceClient>>>,
+        shared_fd: RawFd,
+        mmap_addr: usize,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         let default_states = states.unwrap_or_default();
         let ans = Arc::new(TraceeHandler {
@@ -101,10 +140,14 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             orig_request_regs: RwLock::default(),
             orig_wait_status: RwLock::default(),
             ignore_sigstops: RwLock::default(),
-            signal_tracee: RwLock::default(), // new(Some(sys::signal::Signal::SIGCONT)),
+            signal_tracee: RwLock::default(),
             skip_syscall_retval: RwLock::default(),
             nosys_syscall_retval: RwLock::default(),
             tracee_stack_offset: RwLock::default(),
+            tracee_init_stage: RwLock::new(TraceeInitStage::Begin),
+            mmap_tracee_addr: RwLock::default(),
+            mmap_tracer_addr: mmap_addr,
+            shared_fd,
             states: Arc::new((*default_states).try_clone()?),
             parent,
         });
@@ -146,6 +189,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             self.mod_providers.clone(),
             Some(self.states.clone()),
             Some(Arc::clone(self)),
+            self.shared_fd,
+            self.mmap_tracer_addr,
         )
     }
 
@@ -310,6 +355,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let mut maybe_exit: Option<u8> = None;
             let _ = self.on_tracee_signaled(&status, &mut maybe_exit)?
                 && self.on_tracee_exited(&status, &mut maybe_exit)?
+                && self.on_tracee_init_syscalls(&status, &mut maybe_exit)?
                 && self.on_tracee_syscall(&status, &mut maybe_exit)?
                 && self.on_tracee_clone(&status, &mut maybe_exit)?
                 && self.on_tracee_unknown_event(&status, &mut maybe_exit)?;
@@ -468,6 +514,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             let last_syscall = rwlock_read(&self.last_syscall)?;
+            let tracee_init_stage = { *(rwlock_read(&self.tracee_init_stage)?) };
             let _span = if last_syscall.times % 2 == 1 {
                 span!(
                     Level::INFO,
@@ -492,6 +539,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
             .entered();
             let which_aug = syscall_info.map(|x| &x.augment);
+
             let _span2 = span!(
                 Level::INFO,
                 "sysaug",
@@ -532,7 +580,93 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
             drop(last_syscall); // Otherwise, deadlock.
             self.maybe_skip_syscall()?;
+
+            if tracee_init_stage != TraceeInitStage::FirstCallActuallyDone
+                && which_aug == Some(&Augments::Exec)
+            {
+                rwlock_replace(&self.tracee_init_stage, TraceeInitStage::ExecSeen)?;
+                return Ok(true);
+            }
             return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn on_tracee_init_syscalls(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
+        let pid = self.pid;
+        let mut last_stage = { *(rwlock_read(&self.tracee_init_stage)?) };
+        if last_stage == TraceeInitStage::Begin {
+            // Waiting for exec (which will be marked by on_tracee_syscall)
+            return Ok(true);
+        }
+        if last_stage == TraceeInitStage::FirstCallActuallyDone {
+            return Ok(true);
+        }
+        if ptrace::is_syscall_stop(s) {
+            let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let syscall_info = SYSCALL_INFOS.get(&regs.syscall_num);
+            if regs.syscall_num == NO_MOD_SYSCALL {
+                // If we are trying to skip a syscall, allow that to go through
+                return Ok(true);
+            }
+            if syscall_info.map(|x| &x.augment) == Some(&Augments::Exec) {
+                return Ok(true);
+            }
+
+            if last_stage == TraceeInitStage::ExecSeen {
+                // Last stage is ExecSeen and we are no longer seeing Exec syscall
+                last_stage = TraceeInitStage::FirstCallSeen;
+            }
+
+            // Make sure we bookkeep the value of tracee_init_stage for next round
+            let new_stage: TraceeInitStage = (last_stage as u8 + 1).try_into().unwrap();
+            rwlock_replace(&self.tracee_init_stage, new_stage)?;
+            event!(
+                Level::INFO,
+                "TraceeInitStage: {:?} syscall {:?}",
+                &last_stage,
+                &regs.syscall_num
+            );
+
+            // Handle a few special stages for the current round
+            match last_stage {
+                TraceeInitStage::FirstCallSeen => {
+                    rwoption_replace(&self.orig_request_regs, regs.clone())?;
+
+                    // TODO: Block Tracee from accessing the entire MMAP. Expose only its own.
+                    regs.arg0 = 0;
+                    regs.arg1 = SHARED_MMAP_SIZE;
+                    regs.arg2 = libc::PROT_READ as usize;
+                    regs.arg3 = libc::MAP_SHARED as usize;
+                    regs.arg4 = self.shared_fd as usize;
+                    regs.arg5 = 0;
+
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
+                    self.ptrace_client
+                        .execute(move || ptrace::set_syscall_num(pid, libc::SYS_mmap as usize))??;
+                    return Ok(false);
+                }
+                TraceeInitStage::FirstCallReplacedWithMmap => {
+                    let orig_regs = rwoption_take(&self.orig_request_regs)?
+                        .ok_or(SysAugError::InitMissingSavedRegs)?;
+                    let orig_syscall_num = orig_regs.syscall_num;
+                    let mut tracee_addr = rwlock_write(&self.mmap_tracee_addr)?;
+                    *tracee_addr = regs.syscall_retval();
+
+                    event!(
+                        Level::INFO,
+                        "Tracee mounted mmap address: {:x}",
+                        regs.syscall_retval()
+                    );
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, orig_regs))??;
+                    self.ptrace_client
+                        .execute(move || ptrace::set_syscall_num(pid, orig_syscall_num))??;
+                    return Ok(false);
+                }
+                _ => {}
+            }
         }
         Ok(true)
     }
