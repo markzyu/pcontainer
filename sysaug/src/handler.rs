@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use tokio::runtime::current_thread::Runtime;
 use tracing::{event, info, span, Level};
 
 #[derive(Clone, Debug, Default)]
@@ -108,6 +109,71 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     /// Readonly, Copy on Move, values
     pub shared_fd: RawFd,
     pub mmap_tracer_addr: usize,
+}
+
+struct AsyncTraceeHandler<PtraceClient: executor::PtraceClient> {
+    pub pid: Pid,
+    pub ptrace_client: PtraceClient,
+
+    // Async Futures
+    pub :ta
+}
+
+impl AsyncTraceeHandler {
+
+    async fn turn_all_ptrace_handlers(&self, s: &WaitStatus, exit: &mut Option<u8>) -> Result<(), SysAugError> {
+        tokio::select! {
+            biased;
+            _ = self.on_tracee_exited() => (),
+            _ = self.on_tracee_syscall() => (),
+            _ = self.on_tracee_unknown_event() => (),
+        }
+    }
+
+    async fn on_tracee_syscall() {
+        // lookup the correct syscall handler, call it as an async func
+        //
+        // Then, within this  async func, we can do things like 
+        //
+        // if (needs_mmap_init)
+        // await tracee_init_mmap()
+        //
+        // or even, within the mod async func
+        //
+        // await tracee_memcpy_from_mmap()
+        //
+        // So that the async logics themselves are fluid.
+
+
+        // Note: The implementation would work MUCH better if we can do tokio runtime one turn at a
+        // time (pausing at each await) instead of block_on 
+        //     And, this would also need a special PendingOrReady struct that can change between
+        //     the two states while being awaited on (without "replacing" the future?)
+        //
+        // ALTERNATIVELY, maybe implement our own future that wraps ALL ptrace actions
+        //     |
+        //     .--> THIS IS BETTER!
+        //
+        //     Need to have our own struct PtraceFuture impl Future
+        //
+        //     IF tokio doesn't support turn-by-turn execeution, then we also need to write 
+        //     our own Async runtime, which essentially just runs one
+        //     "turn"/poll each time, returning the PtraceFuture that caused the await.
+        //
+        //     And this PtraceFuture will describe to the ptrace crate what we are waiting FOR.
+        //
+        //     Why?
+        //
+        //     This will allow us to write async code in the most semantic way.
+        //
+        //     await tracee_init_mmap()
+        //     while (syscall = syscall_status_generator.next().await) {
+        //       await syscall_augtable[syscall.num]();
+        //     }
+        //
+        //     And the turn-by-turn execution make sure we restart from the last "yield"
+    }
+
 }
 
 type BoolResult = Result<bool, SysAugError>;
@@ -336,6 +402,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
+        let mut tokio_runtime = Runtime::new()?;
+        let tokio_handle = tokio_runtime.handle();
 
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
@@ -345,6 +413,11 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         loop {
             let status = ptrace::waitpid_hang(pid)?;
             event!(Level::TRACE, "child status {:?}", &status);
+
+            // TODO: Move all sync on_tracee* "state machines" to tokio current_thread async
+            // (The goal is to remove spaghetti code and store states not as StateMachineEnum but
+            // as futures, and without using RwLock)
+            tokio_handle.block_on(self.turn_all_ptrace_handlers())?;
 
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 info!("Process {:?} crashed: {:?}.", &pid, &status);

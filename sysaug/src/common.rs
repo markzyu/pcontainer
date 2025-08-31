@@ -96,6 +96,9 @@ pub enum SysAugError {
 
     #[error("Internal error, tracee initializing but missing original regs")]
     InitMissingSavedRegs,
+
+    #[error("Internal error, unable to initialize async runtime {0}")]
+    InitAsyncRuntime(tokio::io::Error),
 }
 
 // ------------------- MODS -------------------
