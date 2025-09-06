@@ -22,7 +22,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use tokio::runtime::current_thread::Runtime;
 use tracing::{event, info, span, Level};
 
 #[derive(Clone, Debug, Default)]
@@ -112,25 +111,41 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
 }
 
 struct AsyncTraceeHandler<PtraceClient: executor::PtraceClient> {
+    pub async_runtime: RefCell<PtraceAsyncRuntime>,
     pub pid: Pid,
     pub ptrace_client: PtraceClient,
-
-    // Async Futures
-    pub :ta
 }
 
 impl AsyncTraceeHandler {
 
-    async fn turn_all_ptrace_handlers(&self, s: &WaitStatus, exit: &mut Option<u8>) -> Result<(), SysAugError> {
-        tokio::select! {
-            biased;
-            _ = self.on_tracee_exited() => (),
-            _ = self.on_tracee_syscall() => (),
-            _ = self.on_tracee_unknown_event() => (),
+    /// Returns: the tracee exit code
+    async fn all_tracee_loops(&self, s: &WaitStatus) -> Result<u8, SysAugError> {
+        futures_lite::or(
+            self.loop_handle_tracee_signals(),
+            self.loop_handle_tracee_syscalls(),
+        ).await
+    }
+
+    /// Creates a future from raw PtraceFuture to wait for any signal
+    async fn wait_for_any_signal(&self) -> Result<sys::signal::Signal, SysAugError> {
+        let status = self.async_runtime.new_ptrace_future(PtraceFutureTypes::WAIT_FOR_SIGNAL).await;
+        if let WaitStatus::Stopped(_, signal) = status.wait_status {
+            return Ok(signal)
+        }
+        Err()
+    }
+
+    /// Wait for a specific signal
+    async fn wait_for_signal(&self, signal: sys::signal::Signal) -> Result<(), SysAugError> {
+        loop {
+            let status2 = self.wait_for_any_signal().await?;
+            if signal == signal2 {
+                return
+            }
         }
     }
 
-    async fn on_tracee_syscall() {
+    async fn loop_handle_tracee_syscalls() {
         // lookup the correct syscall handler, call it as an async func
         //
         // Then, within this  async func, we can do things like 
@@ -402,23 +417,44 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
-        let mut tokio_runtime = Runtime::new()?;
-        let tokio_handle = tokio_runtime.handle();
+        let mut async_runtime = PtraceAsyncRuntime::default();
 
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
-        self.ptrace_syscall()?; // Because we did waitpid in self.set_ptrace_options
 
         loop {
-            let status = ptrace::waitpid_hang(pid)?;
-            event!(Level::TRACE, "child status {:?}", &status);
+            // Drive async logic until it waits for PtraceFutureTypes
+            if let Some(exit_code) = async_runtime.run_async_step(self.all_tracee_loops())? {
+                return Ok(exit_code);
+            }
 
-            // TODO: Move all sync on_tracee* "state machines" to tokio current_thread async
-            // (The goal is to remove spaghetti code and store states not as StateMachineEnum but
-            // as futures, and without using RwLock)
-            tokio_handle.block_on(self.turn_all_ptrace_handlers())?;
+            // Initiate the appropriate action that would trigger the expected events
+            if async_runtime.has_new_future(PtraceFutureTypes::WAIT_FOR_PTRACE_SYSCALL) {
+                self.ptrace_syscall()?;
+            }
 
+            // Detect the exact variant of PtraceFutureTypes based on waitpid status
+            let wait_status = ptrace::waitpid_hang(pid)?;
+            event!(Level::TRACE, "child status {:?}", &wait_status);
+
+            let status = PtraceStatus {
+                wait_status: wait_status.clone(),
+            };
+
+            // Unblock different PtraceFutureTypes in the proper order
+            if Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
+                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_SIGNAL, status);
+            } else if let WaitStatus::PtraceEvent(..) = &wait_status {
+                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_PTRACE_EVENT, status);
+            } else if let WaitStatus::PtraceSyscall(..) = &wait_status {
+                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_PTRACE_SYSCALL, status);
+            } else {
+                event!(Level::INFO, "Unknown ptrace event: {:?}", &wait_status);
+            }
+
+            /**
+             * Old synchronous logic:
             if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
                 info!("Process {:?} crashed: {:?}.", &pid, &status);
                 self.handle_exit(pid)?;
@@ -436,8 +472,26 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             if let Some(exit_code) = maybe_exit {
                 return Ok(exit_code);
             }
-            self.ptrace_syscall()?;
+            */
         }
+    }
+
+    fn get_tracee_maybe_signal(&self, s: &WaitStatus) -> Result<Some<&sys::signal::Signal>, SysAugError> {
+        let pid = self.pid;
+        if let WaitStatus::Stopped(_, signal) = s {
+            event!(Level::DEBUG, "child stopped, status {:?}", &s);
+            if signal == &sys::signal::Signal::SIGTRAP {
+                return None;
+            }
+            let getsig_ans = self
+                .ptrace_client
+                .execute(move || sys::ptrace::getsiginfo(pid))?;
+            if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
+                return None;
+            }
+            return Some(signal);
+        }
+        None
     }
 
     fn on_tracee_signaled(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
