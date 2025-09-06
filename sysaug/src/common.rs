@@ -99,9 +99,6 @@ pub enum SysAugError {
 
     #[error("Internal error, unable to initialize async runtime {0}")]
     InitAsyncRuntime(tokio::io::Error),
-
-    #[error("Internal error, async runtime detected invalid usage of external async library")]
-    AsyncBanOfExternalCode,
 }
 
 // ------------------- MODS -------------------

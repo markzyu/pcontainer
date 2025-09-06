@@ -113,6 +113,9 @@ pub enum PtraceError {
 
     #[error("Cannot create linux memfd: {0}")]
     CreateMemoryFile(nix::Error),
+
+    #[error("Internal error, async runtime detected invalid usage of external async library")]
+    AsyncBanOfExternalCode,
 }
 
 pub trait CHeader {

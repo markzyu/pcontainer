@@ -1,4 +1,5 @@
 mod common;
+mod futures;
 mod mem_slow;
 
 pub use crate::common::{
@@ -166,7 +167,8 @@ mod tests {
 
     fn _start_cmd() -> unistd::Pid {
         let mut cmd = std::process::Command::new("ls");
-        crate::start(&mut cmd, false).unwrap()
+        let (pid, ..) = crate::start(&mut cmd, false).unwrap();
+        pid
     }
 
     #[test]
