@@ -376,3 +376,10 @@ lazy_static! {
         ans
     };
 }
+
+pub fn get_syscall(syscall_num: &usize) -> (Option<&SyscallInfo>, String) {
+    let syscall_info = SYSCALL_INFOS.get(syscall_num);
+    let syscall_num_str = syscall_num.to_string();
+    let syscall_name = syscall_info.map(|x| x.name()).unwrap_or(&syscall_num_str);
+    (syscall_info, syscall_name.to_string())
+}

@@ -1,7 +1,6 @@
-use crate::aug_common::{calc_real_path, get_mod_path, notify_mods_about_path, path_from_bytes};
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::TraceeHandler;
+use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
 use crate::rwoption_take_ok;
@@ -13,27 +12,23 @@ use tracing::{event, Level};
 
 const META_INIT: &str = "{}\n";
 
-pub struct AugmentPaths<PtraceClient: executor::PtraceClient> {
-    pub handler: Arc<TraceeHandler<PtraceClient>>,
-}
-
-impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPaths<PtraceClient> {
-    fn before_call(
+impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+    pub async fn augment_sys_paths(
         &self,
-        mut regs: GenericPurposeRegs,
+        mut orig_regs: GenericPurposeRegs,
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        let pid = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
-
+        let pid = self.pid;
+        let ptrace_client = &self.ptrace_client;
+        
         // Translate paths from host namespace to tracee namespace
-        let copy_regs = regs.clone();
-        let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
+        let copy_regs = orig_regs.clone();
+        let read_args = [orig_regs.arg0, orig_regs.arg1, orig_regs.arg2, orig_regs.arg3];
         let mut write_args = [
-            &mut regs.arg0,
-            &mut regs.arg1,
-            &mut regs.arg2,
-            &mut regs.arg3,
+            &mut orig_regs.arg0,
+            &mut orig_regs.arg1,
+            &mut orig_regs.arg2,
+            &mut orig_regs.arg3,
         ];
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 4] = Default::default();
@@ -54,19 +49,19 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             // Read orig_path from registers
             let path_bytes =
                 ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
-            let orig_path_buf = path_from_bytes(path_bytes)?;
+            let orig_path_buf = Self::path_from_bytes(path_bytes)?;
 
             // Calculate path_action, notify mods, and maybe update tracee
-            let path_action = calc_real_path(&self.handler, &orig_path_buf, syscall, &read_args)?;
-            notify_mods_about_path(&self.handler, syscall, &orig_path_buf, &path_action)?;
+            let path_action = self.calc_real_path(&orig_path_buf, syscall, &read_args).await?;
+            self.notify_mods_about_path(syscall, &orig_path_buf, &path_action).await?;
             match path_action {
                 PathAction::Override(new_path_val) => {
                     save_paths[i] = Some(dirfd_path.join(&new_path_val));
-                    **ref_arg_i = self.handler.tracee_stack_append_path(new_path_val)?;
+                    **ref_arg_i = self.tracee_stack_append_path(new_path_val)?;
                     need_write_regs = true;
                 }
                 PathAction::ELOOP => {
-                    self.handler.skip_syscall(-libc::ELOOP as usize)?;
+                    self.do_skip_syscall(-libc::ELOOP as usize).await?;
                     return Ok(());
                 }
                 _ => {
@@ -77,7 +72,7 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
 
         // Handle getdents (make the buffer seem smaller)
         if syscall.getdents_bits.is_some() {
-            regs.arg2 /= 2;
+            orig_regs.arg2 /= 2;
             need_write_regs = true;
         }
 
@@ -100,20 +95,13 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
         //
         // Upon deletion of /a, we RENAME "a" to "b" based on the path list. If no path is left, we delete it.
 
-        common::rwoption_replace(&self.handler.curr_paths, save_paths)?;
-
         if need_write_regs {
-            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+            ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
-        Ok(())
-    }
 
-    fn after_call(
-        &self,
-        regs: GenericPurposeRegs,
-        syscall: &SyscallInfo,
-    ) -> Result<(), SysAugError> {
-        let paths = rwoption_take_ok!(self.handler.curr_paths)?;
+        let regs = self.do_resume_syscall().await?;
+
+        let paths = save_paths;
         let del_type = &syscall.deletion_type;
         let retval = regs.syscall_retval() as isize;
         if del_type.is_none() || retval < 0 {
@@ -126,15 +114,13 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentPat
             return Ok(());
         }
         match syscall.getdents_bits {
-            Some(32) => self.replace_getdents_result::<Dirent>(syscall, regs)?,
-            Some(64) => self.replace_getdents_result::<Dirent64>(syscall, regs)?,
+            Some(32) => self.replace_getdents_result::<Dirent>(syscall, regs).await?,
+            Some(64) => self.replace_getdents_result::<Dirent64>(syscall, regs).await?,
             _ => (),
         };
         Ok(())
     }
-}
 
-impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
     fn get_dirfd_path(
         &self,
         regs: &GenericPurposeRegs,
@@ -155,14 +141,14 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
             let possible_args = [&regs.arg0, &regs.arg1, &regs.arg2];
             let dirfd = *possible_args[dirfd_reg as usize] as libc::c_int;
             if dirfd != libc::AT_FDCWD {
-                return Ok(procfs::getfd_path(self.handler.pid, dirfd as isize)?);
+                return Ok(procfs::getfd_path(self.pid, dirfd as isize)?);
             }
         }
         // Otherwise, use cwd of tracee
-        Ok(Some(procfs::getcwd(self.handler.pid)?))
+        Ok(Some(procfs::getcwd(self.pid)?))
     }
 
-    fn replace_getdents_result<T>(
+    async fn replace_getdents_result<T>(
         &self,
         syscall: &SyscallInfo,
         mut regs: GenericPurposeRegs,
@@ -173,8 +159,8 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         let addr = regs.arg1;
         let buf_size = regs.arg2 * 2;
         let list_size = regs.syscall_retval();
-        let pid = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
+        let pid = self.pid;
+        let ptrace_client = &self.ptrace_client;
         let mut dirents: Vec<T> = ptrace_client
             .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size))??;
         event!(Level::DEBUG, "Intercepting {} dir entries", dirents.len());
@@ -182,9 +168,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         let mut is_delete: Vec<bool> = Vec::new();
         for entry in dirents.iter_mut() {
             event!(Level::TRACE, "Intercepting {:?}", entry);
-            let orig_path_buf = path_from_bytes(entry.get_name().to_vec())?;
+            let orig_path_buf = Self::path_from_bytes(entry.get_name().to_vec())?;
             let orig_path: &Path = orig_path_buf.as_path();
-            let action = get_mod_path(&self.handler, syscall, orig_path, PathAction::None, true)?;
+            let action = self.get_mod_path(syscall, orig_path, PathAction::None, true).await?;
             // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
             let delete = match &action {
                 PathAction::Override(override_path) => {
@@ -227,7 +213,6 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
 
     fn _get_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
         let maybe_meta_path = self
-            .handler
             .call_first_mod(mods::ModFeature::ResolveMetadataPath, |m| {
                 m.resolve_metadata_path(path)
             })?
@@ -280,14 +265,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentPaths<PtraceClient> {
         }
 
         if path.is_dir() {
-            self.handler
-                .call_first_mod(mods::ModFeature::DeleteMetaDir, |m| m.delete_meta_dir(path))?;
+            self.call_first_mod(mods::ModFeature::DeleteMetaDir, |m| m.delete_meta_dir(path))?;
         }
         Ok(())
-    }
-
-    pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
-        AugmentPaths { handler }
     }
 }
 

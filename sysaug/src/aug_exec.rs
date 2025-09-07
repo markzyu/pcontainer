@@ -1,49 +1,30 @@
-use crate::aug_common::{calc_real_path, notify_mods_about_path, path_from_bytes};
-use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::TraceeHandler;
+use crate::handler::AsyncTraceeHandler;
 use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
 use std::sync::Arc;
 use tracing::{event, Level};
 
-pub struct AugmentExec<PtraceClient: executor::PtraceClient> {
-    pub handler: Arc<TraceeHandler<PtraceClient>>,
-}
-
-impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentExec<PtraceClient> {
-    fn before_call(
+impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+    pub async fn augment_sys_exec(
         &self,
         mut regs: GenericPurposeRegs,
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        let pid = self.handler.pid;
-        if !self.expand_exec_with_parser(&mut regs, syscall)? {
-            self.handler.skip_syscall(-libc::ENOENT as usize)?;
+        let pid = self.pid;
+        if !self.expand_exec_with_parser(&mut regs, syscall).await? {
+            // Note: expand_exec_with_parser might also skip syscalls... Maybe don't do it twice
+            self.do_skip_syscall(-libc::ENOENT as usize).await?;
             return Ok(());
         }
-        self.handler
-            .ptrace_client
+        self.ptrace_client
             .execute(move || ptrace::setregs(pid, regs))??;
+        self.do_resume_syscall().await?;
         Ok(())
     }
 
-    fn after_call(
-        &self,
-        _regs: GenericPurposeRegs,
-        _syscall: &SyscallInfo,
-    ) -> Result<(), SysAugError> {
-        Ok(())
-    }
-}
-
-impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
-    pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
-        AugmentExec { handler }
-    }
-
-    fn expand_exec_with_parser(
+    async fn expand_exec_with_parser(
         &self,
         regs: &mut GenericPurposeRegs,
         syscall: &SyscallInfo,
@@ -51,8 +32,8 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         // If the file doesn't exist or isn't elf, just skip that file (return false).
         // Otherwise, return true.
         // TODO: in the future, only skip if the file doesn't exist. If it's of unknown file type, don't execute it.
-        let pid = self.handler.pid;
-        let ptrace_client = &self.handler.ptrace_client;
+        let pid = self.pid;
+        let ptrace_client = &self.ptrace_client;
 
         let arg0 = regs.arg0;
         let arg1 = regs.arg1;
@@ -64,11 +45,11 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
         let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
 
         // Translate elf path to real path
-        let elf_path_buf = path_from_bytes(path_bytes)?;
+        let elf_path_buf = Self::path_from_bytes(path_bytes)?;
         let mut new_elf_path = elf_path_buf.clone();
         {
-            let path_action = calc_real_path(&self.handler, &new_elf_path, syscall, &read_args)?;
-            notify_mods_about_path(&self.handler, syscall, &new_elf_path, &path_action)?;
+            let path_action = self.calc_real_path(&new_elf_path, syscall, &read_args).await?;
+            self.notify_mods_about_path(syscall, &new_elf_path, &path_action).await?;
             if let PathAction::Override(new_path_val) = path_action {
                 new_elf_path = new_path_val;
             } else if path_action == PathAction::ELOOP {
@@ -101,9 +82,9 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
                 .map_err(SysAugError::ReadBin)?;
 
             // Calculate real path of interpreter
-            let interp_path_buf = path_from_bytes(buf)?;
-            let path_action = calc_real_path(&self.handler, &interp_path_buf, syscall, &read_args)?;
-            notify_mods_about_path(&self.handler, syscall, &interp_path_buf, &path_action)?;
+            let interp_path_buf = Self::path_from_bytes(buf)?;
+            let path_action = self.calc_real_path(&interp_path_buf, syscall, &read_args).await?;
+            self.notify_mods_about_path(syscall, &interp_path_buf, &path_action).await?;
             let mut new_interp_path = interp_path_buf;
             if let PathAction::Override(new_path_val) = path_action {
                 new_interp_path = new_path_val;
@@ -117,20 +98,20 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
 
             // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
             // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
-            let interp_addr = self.handler.tracee_stack_append_path(new_interp_path)?;
+            let interp_addr = self.tracee_stack_append_path(new_interp_path)?;
             let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
             let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
             new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
             new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
-            let new_argv_addr = self.handler.tracee_stack_append(new_argv)?;
+            let new_argv_addr = self.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
             return Ok(true);
         } else if maybe_elf_file.is_some() {
             // Likely a statically linked binary, execute directly without interpreter
-            let path_addr = self.handler.tracee_stack_append_path(new_elf_path)?;
+            let path_addr = self.tracee_stack_append_path(new_elf_path)?;
             regs.arg0 = path_addr;
             return Ok(true);
         } else if let Some(shebang) = self.parse_shebang(&mut file)? {
@@ -159,11 +140,11 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
                 elf_path_buf.to_string_lossy(),
             );
 
-            let interp_addr = self.handler.tracee_stack_append(part0.into())?;
+            let interp_addr = self.tracee_stack_append(part0.into())?;
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
 
             if let Some(part1) = maybe_part1 {
-                let part1_addr = self.handler.tracee_stack_append(part1.into())?;
+                let part1_addr = self.tracee_stack_append(part1.into())?;
                 new_argv.append(&mut part1_addr.to_ne_bytes().to_vec());
             }
 
@@ -171,10 +152,10 @@ impl<PtraceClient: executor::PtraceClient> AugmentExec<PtraceClient> {
             new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
 
-            let new_argv_addr = self.handler.tracee_stack_append(new_argv)?;
+            let new_argv_addr = self.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
             regs.arg1 = new_argv_addr;
-            return self.expand_exec_with_parser(regs, syscall);
+            return Box::pin(self.expand_exec_with_parser(regs, syscall)).await;
         }
         event!(
             Level::ERROR,

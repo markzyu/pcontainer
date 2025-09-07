@@ -1,6 +1,6 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::TraceeHandler;
+use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
 use std::cell::RefCell;
@@ -12,17 +12,17 @@ use std::sync::Arc;
 use tracing::{event, Level};
 
 // Common helper functions used by aug_*.rs
-type HandlerArc<T> = Arc<TraceeHandler<T>>;
-
 // Calculate real path of file based on its path in rootfs
-pub fn calc_real_path_simple<T: executor::PtraceClient>(
-    handler: &HandlerArc<T>,
+impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+
+pub async fn calc_real_path_simple(
+    &self,
     orig_path: &Path,
     syscall: &SyscallInfo,
 ) -> Result<PathAction, SysAugError> {
     let mut new_path = PathAction::None;
-    let prefix_maybe = common::rwlock_read(&handler.states.path_prefix)?;
-    let exclude_list = common::rwlock_read(&handler.states.path_prefix_excludes)?;
+    let prefix_maybe = common::rwlock_read(&self.states.path_prefix)?;
+    let exclude_list = common::rwlock_read(&self.states.path_prefix_excludes)?;
     if !exclude_list.iter().any(|x| orig_path.starts_with(x)) {
         if let Some(prefix) = prefix_maybe.as_ref() {
             if orig_path.is_absolute() {
@@ -32,12 +32,12 @@ pub fn calc_real_path_simple<T: executor::PtraceClient>(
         }
     }
 
-    get_mod_path(handler, syscall, orig_path, new_path, false)
+    self.get_mod_path(syscall, orig_path, new_path, false).await
 }
 
 // Calculate real path of file + following symlinks that use fake paths
-pub fn calc_real_path_recurse<T: executor::PtraceClient>(
-    handler: &HandlerArc<T>,
+pub async fn calc_real_path_recurse(
+    &self,
     orig_path: &Path,
     syscall: &SyscallInfo,
     mut visited: HashSet<PathBuf>,
@@ -45,7 +45,7 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
 ) -> Result<PathAction, SysAugError> {
     event!(Level::DEBUG, "Following symlink {:?}", orig_path);
     visited.insert(orig_path.into());
-    let action = calc_real_path_simple(handler, orig_path, syscall)?;
+    let action = self.calc_real_path_simple(orig_path, syscall).await?;
     if let PathAction::Override(real_path) = &action {
         if syscall.dont_follow_symlink {
             return Ok(action);
@@ -67,27 +67,27 @@ pub fn calc_real_path_recurse<T: executor::PtraceClient>(
             if visited.contains(&link) {
                 return Ok(PathAction::ELOOP);
             }
-            return calc_real_path_recurse(handler, link.as_path(), syscall, visited, args);
+            return Box::pin(self.calc_real_path_recurse(link.as_path(), syscall, visited, args)).await;
         }
     }
     Ok(action)
 }
 
 // Same as calc_real_path_recurse
-pub fn calc_real_path<T: executor::PtraceClient>(
-    handler: &HandlerArc<T>,
+pub async fn calc_real_path(
+    &self,
     orig_path: &Path,
     syscall: &SyscallInfo,
     args: &[usize],
 ) -> Result<PathAction, SysAugError> {
-    calc_real_path_recurse(handler, orig_path, syscall, HashSet::new(), args)
+    self.calc_real_path_recurse(orig_path, syscall, HashSet::new(), args).await
 }
 
 // Ask every mod to translate a path from rootfs point of view to real paths
 // reverse: false = generating real paths on disk, true = generating fake paths from container
 // perspective
-pub fn get_mod_path<T: executor::PtraceClient>(
-    handler: &HandlerArc<T>,
+pub async fn get_mod_path(
+    &self,
     syscall: &SyscallInfo,
     orig_path: &Path,
     initial_override: PathAction,
@@ -99,7 +99,7 @@ pub fn get_mod_path<T: executor::PtraceClient>(
     } else {
         mods::ModFeature::OverrideFileRealPath
     };
-    handler.call_mods(feature, |m| {
+    self.call_mods(feature, |m| {
         let old_override = override_path.replace(PathAction::None);
         let curr_path = match &old_override {
             PathAction::Override(path) => path.as_path(),
@@ -116,19 +116,19 @@ pub fn get_mod_path<T: executor::PtraceClient>(
             new_override
         });
         Ok(mods::ModAction::None)
-    })?;
+    }).await?;
     Ok(override_path.into_inner())
 }
 
-pub fn notify_mods_about_path<T: executor::PtraceClient>(
-    handler: &HandlerArc<T>,
+pub async fn notify_mods_about_path(
+    &self,
     syscall: &SyscallInfo,
     orig_path: &Path,
     path_action: &PathAction,
 ) -> Result<(), SysAugError> {
-    handler.call_mods(mods::ModFeature::OnFilePath, |m| {
+    self.call_mods(mods::ModFeature::OnFilePath, |m| {
         m.on_file_path(orig_path, syscall)
-    })?;
+    }).await?;
     let notify_path = match path_action {
         PathAction::Override(path) => path.as_path(),
         _ => orig_path,
@@ -139,9 +139,9 @@ pub fn notify_mods_about_path<T: executor::PtraceClient>(
         orig_path.to_string_lossy(),
         notify_path.to_string_lossy()
     );
-    handler.call_mods(mods::ModFeature::OnFileRealPath, |m| {
+    self.call_mods(mods::ModFeature::OnFileRealPath, |m| {
         m.on_file_real_path(notify_path, syscall)
-    })?;
+    }).await?;
     Ok(())
 }
 
@@ -151,4 +151,6 @@ pub fn path_from_bytes(mut path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> 
     }
     let path_osstr: OsString = OsStringExt::from_vec(path_bytes);
     Ok(path_osstr.into())
+}
+
 }

@@ -1,49 +1,36 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::TraceeHandler;
+use crate::handler::AsyncTraceeHandler;
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
 use std::sync::Arc;
 use tracing::info;
 
-pub struct AugmentWaitpid<PtraceClient: executor::PtraceClient> {
-    pub handler: Arc<TraceeHandler<PtraceClient>>,
-}
-
-impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWaitpid<PtraceClient> {
-    fn before_call(
+impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+    pub async fn augment_sys_waitpid(
         &self,
-        regs: GenericPurposeRegs,
+        orig_regs: GenericPurposeRegs,
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        let parent_pid = self.handler.pid;
-        let stat_addr = regs.arg1;
-        let stat_int = self
-            .handler
+        let parent_pid = self.pid;
+        let orig_status_addr = orig_regs.arg1;
+        let orig_wait_status = self
             .ptrace_client
-            .execute(move || ptrace::read(parent_pid, stat_addr))??;
-        common::rwlock_replace(&self.handler.orig_wait_status, stat_int)?;
-        Ok(())
-    }
+            .execute(move || ptrace::read(parent_pid, orig_status_addr))??;
 
-    fn after_call(
-        &self,
-        mut regs: GenericPurposeRegs,
-        _syscall: &SyscallInfo,
-    ) -> Result<(), SysAugError> {
-        let parent_pid = self.handler.pid;
+        let mut regs = self.do_resume_syscall().await?;
+
         let retval = regs.syscall_retval() as i32;
         if retval > 0 {
             let pid = nix::unistd::Pid::from_raw(retval);
-            let mut pids = common::rwlock_write(&self.handler.ignore_sigstops)?;
+            let mut pids = common::rwlock_write(self.ignore_sigstops.as_ref())?;
 
-            let stat_addr = regs.arg1;
-            let stat_int = self
-                .handler
+            let wait_status_addr = regs.arg1;
+            let wait_status = self
                 .ptrace_client
-                .execute(move || ptrace::read(parent_pid, stat_addr))??;
-            let stat = WaitStatus::from_raw(pid, stat_int as i32);
+                .execute(move || ptrace::read(parent_pid, wait_status_addr))??;
+            let stat = WaitStatus::from_raw(pid, wait_status as i32);
 
             if pids.contains(&pid) && matches!(stat, Ok(WaitStatus::Stopped(_, Signal::SIGSTOP))) {
                 let nohang = regs.arg2 & libc::WNOHANG as usize;
@@ -55,16 +42,12 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
 
                 // Override syscall return value
                 regs.set_syscall_retval(override_retval);
-                self.handler
-                    .ptrace_client
+                self.ptrace_client
                     .execute(move || ptrace::setregs(parent_pid, regs))??;
 
                 // Restore wait status to its value before syscall
-                let orig_ref = common::rwlock_read(&self.handler.orig_wait_status)?;
-                let orig = *orig_ref;
-                self.handler
-                    .ptrace_client
-                    .execute(move || ptrace::write(parent_pid, stat_addr, orig))??;
+                self.ptrace_client
+                    .execute(move || ptrace::write(parent_pid, wait_status_addr, orig_wait_status))??;
 
                 info!(
                     "Override {:?} -> Returning {}",
@@ -78,11 +61,5 @@ impl<PtraceClient: executor::PtraceClient> common::AugmentSyscall for AugmentWai
             info!("Returning {}", retval);
         }
         Ok(())
-    }
-}
-
-impl<PtraceClient: executor::PtraceClient> AugmentWaitpid<PtraceClient> {
-    pub fn new(handler: Arc<TraceeHandler<PtraceClient>>) -> Self {
-        AugmentWaitpid { handler }
     }
 }

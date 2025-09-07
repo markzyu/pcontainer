@@ -102,6 +102,9 @@ pub enum SysAugError {
         "Internal error, ptrace async executor unblocked without correct status: {0:?} vs {1:?}"
     )]
     AsyncMismatch(PtraceFutureTypes, PtraceStatus),
+
+    #[error("Internal error, weak reference is no longer valid")]
+    WeakReference,
 }
 
 // ------------------- MODS -------------------

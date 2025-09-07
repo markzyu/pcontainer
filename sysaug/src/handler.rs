@@ -1,15 +1,10 @@
-use crate::aug_clone::AugmentClone;
-use crate::aug_exec::AugmentExec;
-use crate::aug_paths::AugmentPaths;
-use crate::aug_perms::AugmentPerms;
-use crate::aug_waitpid::AugmentWaitpid;
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_take,
     AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
     NO_MOD_SYSCALL, PERMS_IDS_SIZE,
 };
 use crate::mods::{ModAction, ModFeature};
-use crate::syscalls::SYSCALL_INFOS;
+use crate::syscalls::{get_syscall, SYSCALL_INFOS};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
 use nix::sys::wait::WaitStatus;
@@ -22,7 +17,7 @@ use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 use std::thread;
 use sys::signal::Signal;
 use tracing::{event, info, span, Level};
@@ -48,12 +43,19 @@ pub struct TraceeHandlerStates {
     pub root_pid: Pid,
 }
 
-struct AugmentContainer<PtraceClient: executor::PtraceClient> {
-    clone: AugmentClone<PtraceClient>,
-    exec: AugmentExec<PtraceClient>,
-    paths: AugmentPaths<PtraceClient>,
-    perms: AugmentPerms<PtraceClient>,
-    waitpid: AugmentWaitpid<PtraceClient>,
+/// Call augment without having to rely on the slow dyn Boxes
+macro_rules! call_augment {
+    ($self: ident, $augment: expr, $regs: expr, $syscall: expr) => {
+        match $augment {
+            Some(Augments::Clone) => $self.augment_sys_clone($regs, $syscall).await,
+            Some(Augments::Exec) => $self.augment_sys_exec($regs, $syscall).await,
+            Some(Augments::Paths) => $self.augment_sys_paths($regs, $syscall).await,
+            Some(Augments::Perms) => $self.augment_sys_perms($regs, $syscall).await,
+            Some(Augments::Waitpid) => $self.augment_sys_waitpid($regs, $syscall).await,
+            Some(Augments::Unimplemented) => Err(SysAugError::UnimplementedAugment),
+            _ => Ok(()),
+        }.map_err(display_err)?;
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,26 +88,21 @@ impl TryFrom<u8> for TraceeInitStage {
 }
 
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
-    pub mods: RwLock<ModsByFeature>,
+    pub mods: Arc<RwLock<ModsByFeature>>,
     mod_providers: Vec<ModProvider>,
     pub pid: Pid,
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
 
-    pub curr_paths: RwLock<Option<[Option<PathBuf>; 4]>>,
     pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
     pub orig_wait_status: RwLock<usize>,
     // ignore the next sigstop for the following pids
-    pub ignore_sigstops: RwLock<HashSet<Pid>>,
+    pub ignore_sigstops: Arc<RwLock<HashSet<Pid>>>,
     pub signal_tracee: RwLock<Option<Signal>>,
-    pub skip_syscall_retval: RwLock<Option<usize>>,
-    pub nosys_syscall_retval: RwLock<Option<usize>>,
-    pub tracee_stack_offset: RwLock<usize>,
     pub mmap_tracee_addr: RwLock<usize>,
     pub tracee_init_stage: RwLock<TraceeInitStage>,
 
-    augments: RwLock<Option<AugmentContainer<PtraceClient>>>,
     last_syscall: RwLock<SyscallCounter>,
 
     /// Readonly, Copy on Move, values
@@ -120,27 +117,37 @@ struct AsyncNotifications {
     transfer_to_gdb: RefCell<bool>,
 }
 
-struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
-    async_runtime: &'a PtraceAsyncRuntime,
-    cli_args: CLIArgs,
-    pid: Pid,
-    ptrace_client: PtraceClient,
-
-    notifiers: AsyncNotifications,
+pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
+    pub async_runtime: &'a PtraceAsyncRuntime,
+    pub cli_args: CLIArgs,
+    pub pid: Pid,
+    
+    // References to other helpers
+    pub mods: Arc<RwLock<ModsByFeature>>,
+    pub states: Arc<TraceeHandlerStates>,
+    pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
+    pub sync_handler: Weak<TraceeHandler<PtraceClient>>,
+    pub ptrace_client: PtraceClient,
+    pub ignore_sigstops: Arc<RwLock<HashSet<Pid>>>,
 
     /// Yield until the next syscall poll has happened
-    yielder_syscall: PtraceAsyncYielder,
+    pub yielder_syscall: PtraceAsyncYielder,
+
+    // Actual shared states that are owned by this AsyncTraceeHandler
+    pub notifiers: AsyncNotifications,
+    pub tracee_stack_offset: RefCell<usize>,
 }
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
+        // The order here matters. It's the order of precedence.
         futures_lite::future::or(
             futures_lite::future::or(
                 self.loop_handle_tracee_signals(),
-                self.loop_handle_tracee_exit(),
+                self.loop_handle_tracee_syscalls(),
             ),
-            self.loop_handle_tracee_syscalls(),
+            self.loop_handle_tracee_other_events(),
         )
         .await
     }
@@ -170,6 +177,83 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         }
     }
 
+    async fn wait_for_syscall(&self) -> Result<PtraceStatus, SysAugError> {
+        let status = self
+            .async_runtime
+            .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+            .await;
+        if !ptrace::is_syscall_stop(&status.wait_status) {
+            return Err(SysAugError::AsyncMismatch(
+                PtraceFutureTypes::WaitForSignal,
+                (*status).clone(),
+            ))
+        }
+        Ok((*status).clone())
+    }
+
+    pub fn call_first_mod<F, T>(
+        &self,
+        feature: ModFeature,
+        func: F,
+    ) -> Result<Option<T>, SysAugError>
+    where
+        F: Fn(&ModBox) -> Result<T, SysAugError>,
+    {
+        let mod_map = rwlock_read(self.mods.as_ref())?;
+        if let Some(mods_) = mod_map.get(&feature) {
+            if let Some(m) = mods_.get(0) {
+                return Ok(Some(func(m)?));
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn call_mods<F>(&self, feature: ModFeature, func: F) -> Result<(), SysAugError>
+    where
+        F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
+    {
+        let mod_map = rwlock_read(self.mods.as_ref())?;
+        if let Some(mods_) = mod_map.get(&feature) {
+            for m in mods_.iter() {
+                match func(m)? {
+                    ModAction::SkipSyscall(retval) => {
+                        self.do_skip_syscall(retval).await?;
+                    }
+                    ModAction::None => (),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Send the content of `bytes` to tracee's stack, and return its address.
+    // This can be called multiple times and will add new content to the end of
+    // previous contents.
+    pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
+        let pid = self.pid;
+        let mut offset = self.tracee_stack_offset.borrow_mut();
+        let old_offset = *offset;
+        let (addr, new_offset) = self.ptrace_client.execute(move || {
+            let final_bytes = bytes.as_slice();
+            unsafe { ptrace::write_bytes_to_tracee(pid, old_offset, final_bytes) }
+        })??;
+        *offset = new_offset;
+        Ok(addr)
+    }
+
+    pub fn tracee_stack_append_path(&self, path: PathBuf) -> Result<usize, SysAugError> {
+        let bytes = path.into_os_string().into_vec();
+        self.tracee_stack_append(bytes)
+    }
+
+    // Change the address, to which the next tracee_stack_append will write contents.
+    // offset = how many bytes of previously written contents will stay after this
+    pub fn tracee_stack_seek(&self, offset: usize) -> Result<(), SysAugError> {
+        let mut ref_offset = self.tracee_stack_offset.borrow_mut();
+        *ref_offset = offset;
+        Ok(())
+    }
+
     async fn loop_handle_tracee_signals(&self) -> Result<u8, SysAugError> {
         let pid = self.pid;
         loop {
@@ -179,6 +263,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 .execute(move || sys::ptrace::getsiginfo(pid))?;
             if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
                 continue;
+            }
+            if signal == Signal::SIGSTOP {
+                if let Some(parent) = self.parent.as_ref() {
+                    let ignore_sigstops = rwlock_read(parent.ignore_sigstops.as_ref())?;
+                    if ignore_sigstops.contains(&pid) {
+                        continue;
+                    }
+                }
             }
             if signal == Signal::SIGSYS && self.cli_args.fix_sigsys {
                 // Android sometimes kills a process for using privileged syscalls like sysinfo()
@@ -218,14 +310,105 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             info!("Will deliver signal {:?} to {:?}", &signal, &pid);
             self.notifiers.signal_tracee.borrow_mut().replace(signal);
         }
-        Ok(0)
     }
 
-    async fn loop_handle_tracee_exit(&self) -> Result<u8, SysAugError> {
+    async fn loop_handle_tracee_other_events(&self) -> Result<u8, SysAugError> {
+        let pid = self.pid;
         loop {
-            futures_lite::future::pending::<()>().await;
+            let status = self
+                .async_runtime
+                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceEvent)
+                .await;
+
+            // Tracee is being cloned or forked
+            if matches!(
+                status.wait_status,
+                WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_CLONE)
+                    | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_FORK)
+                    | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_VFORK)
+            ) {
+                let raw_pid = self
+                    .ptrace_client
+                    .execute(move || ptrace::getevent(pid))?? as isize;
+                if raw_pid > 0 {
+                    let child_pid: Pid = Pid::from_raw(raw_pid as i32);
+
+                    self.ptrace_client
+                        .prep_attach_to(child_pid, self.ignore_sigstops.as_ref())?;
+
+                    let new_tracee_handler = self.sync_handler.upgrade().ok_or(SysAugError::WeakReference)?.fork(child_pid)?;
+                    let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
+                    let root_pid = self.states.root_pid;
+                    let fail_fast = self.states.args.fail_fast;
+                    new_tracee_handler.start(move || {
+                        if fail_fast && new_tracee_handler2.failed() {
+                            let _ =
+                                sys::signal::kill(root_pid, Some(Signal::SIGKILL)).map_err(display_err);
+                        }
+                    });
+
+                    self.call_mods(ModFeature::OnCloneComplete, |m| {
+                        m.on_clone_complete(raw_pid as isize)
+                    }).await?;
+                }
+                continue;
+            }
+
+            // Tracee exited normally
+            if let WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_EXIT) = status.wait_status {
+                let rawret = self
+                    .ptrace_client
+                    .execute(move || ptrace::getevent(pid))??;
+                let retcode = (rawret as u32) >> 8;
+                info!("Exit status = {}", retcode);
+                self.ptrace_client
+                    .execute(move || sys::ptrace::detach(pid, None))?
+                    .map_err(SysAugError::PtraceDetach)?;
+                return Ok(retcode as u8);
+            }
         }
-        Ok(0)
+    }
+
+    /// Resume the system call as is (using the current tracee register states)
+    /// But only wait for this one system call to go through, and
+    /// Return just early enough to override system call return value.
+    pub async fn do_resume_syscall(&self) -> Result<GenericPurposeRegs, SysAugError> {
+        let pid = self.pid;
+        let status = self.wait_for_syscall().await?;
+        let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
+        let which_aug = maybe_syscall_info.map(|x| &x.augment);
+        event!(
+            Level::TRACE,
+            "syscall exit event, stack@{:x}, return {:#x} args {:#x} {:#x} {:#x}",
+            ptrace::stack_ptr(),
+            regs.syscall_retval(),
+            regs.arg0,
+            regs.arg1,
+            regs.arg2
+        );
+
+        // Note: It might be wise to double check we got the expected augment
+        //       But, it might also overcomplicate the do_skip_syscall logic
+        Ok(regs)
+    }
+
+    /// Skip the system call (clobbering current tracee register states, setting sysret=0)
+    pub async fn do_skip_syscall(&self, syscall_retval: usize) -> Result<(), SysAugError> {
+        let pid = self.pid;
+        event!(Level::DEBUG, "Attempting to skip syscall");
+        self.ptrace_client.execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
+        let mut regs = self.do_resume_syscall().await?;
+
+        event!(
+            Level::DEBUG,
+            "Returning {} for skipped syscall, originally {}",
+            syscall_retval,
+            regs.syscall_retval()
+        );
+        regs.set_syscall_retval(syscall_retval);
+        self.ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+        Ok(())
     }
 
     async fn loop_handle_tracee_syscalls(&self) -> Result<u8, SysAugError> {
@@ -241,24 +424,69 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // await tracee_memcpy_from_mmap()
         //
         // So that the async logics themselves are fluid.
+        let pid = self.pid;
+        let mut total_times: u64 = 0;
         loop {
-            let status = self
-                .async_runtime
-                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
-                .await;
+            // We just finished one round of syscall. Unblock any signal handler that yielded to us
             self.yielder_syscall.unblock();
+            total_times += 1;
+
+            // Wait for System Call Entry
+            let status = self.wait_for_syscall().await?;
+            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
+            let which_aug = maybe_syscall_info.map(|x| &x.augment);
+            let _span1 = span!(
+                Level::DEBUG,
+                "syscall",
+                "{:?} syscall {} args {:#x} {:#x} {:#x}",
+                which_aug.unwrap_or(&Augments::None),
+                syscall_name,
+                regs.arg0,
+                regs.arg1,
+                regs.arg2
+            ).entered();
+            event!(
+                Level::TRACE,
+                "syscall entry event, stack@{:x}",
+                ptrace::stack_ptr()
+            );
+
+            if self.cli_args.gdb_at == Some(total_times) {
+                info!("Reached {:?}-th system call. Starting gdb", self.cli_args.gdb_at);
+                *self.notifiers.transfer_to_gdb.borrow_mut() = true;
+                return Ok(0);
+            }
+
+            // Hand over to hardcoded "augment_sys_*" logics, which must call either do_resume_syscall
+            // or do_skip_syscall
+            if let Some(syscall_info) = maybe_syscall_info {
+                call_augment!(self, which_aug, regs.clone(), &syscall_info);
+            } else {
+                self.do_resume_syscall().await?;
+            }
+
+            // TODO: refactor these. currently not done
+            //if let Some(info) = syscall_info {
+            //    if info.sets_file_perms.is_some() {
+            //        self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
+            //    }
+            //}
+
+            //self.maybe_skip_syscall()?;
+
+            //if tracee_init_stage != TraceeInitStage::FirstCallActuallyDone
+            //    && which_aug == Some(&Augments::Exec)
+            //{
+            //    rwlock_replace(&self.tracee_init_stage, TraceeInitStage::ExecSeen)?;
+            //    return Ok(true);
+            //}
+            //return Ok(false);
         }
-        Ok(0)
     }
 }
 
 type BoolResult = Result<bool, SysAugError>;
-
-macro_rules! new_augment {
-    ($type:ty, $self:ident) => {
-        <$type>::new(Arc::clone(&$self))
-    };
-}
 
 impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn new(
@@ -274,18 +502,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
-            augments: RwLock::default(),
             last_syscall: RwLock::new(SyscallCounter::new()),
-            mods: RwLock::new(HashMap::new()),
+            mods: Arc::new(RwLock::new(HashMap::new())),
             mod_providers: mods,
-            curr_paths: RwLock::default(),
             orig_request_regs: RwLock::default(),
             orig_wait_status: RwLock::default(),
-            ignore_sigstops: RwLock::default(),
+            ignore_sigstops: Arc::new(RwLock::default()),
             signal_tracee: RwLock::default(),
-            skip_syscall_retval: RwLock::default(),
-            nosys_syscall_retval: RwLock::default(),
-            tracee_stack_offset: RwLock::default(),
             tracee_init_stage: RwLock::new(TraceeInitStage::Begin),
             mmap_tracee_addr: RwLock::default(),
             mmap_tracer_addr: mmap_addr,
@@ -293,15 +516,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             states: Arc::new((*default_states).try_clone()?),
             parent,
         });
-
-        let augments = AugmentContainer::<PtraceClient> {
-            clone: new_augment!(AugmentClone<PtraceClient>, ans),
-            exec: new_augment!(AugmentExec<PtraceClient>, ans),
-            paths: new_augment!(AugmentPaths<PtraceClient>, ans),
-            perms: new_augment!(AugmentPerms<PtraceClient>, ans),
-            waitpid: new_augment!(AugmentWaitpid<PtraceClient>, ans),
-        };
-        rwoption_replace(&ans.augments, augments)?;
 
         let mut mod_map: ModsByFeature = HashMap::new();
         for provider in ans.mod_providers.iter() {
@@ -316,12 +530,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         }
 
         let ans2 = Arc::clone(&ans);
-        rwlock_replace(&ans2.mods, mod_map)?;
+        rwlock_replace(ans2.mods.as_ref(), mod_map)?;
         Ok(ans)
     }
 
     /// Create a new TraceeHandler for a child, without starting event loop
-    fn fork(
+    pub fn fork(
         self: &Arc<TraceeHandler<PtraceClient>>,
         child_pid: Pid,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
@@ -336,11 +550,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         )
     }
 
-    pub fn skip_syscall(&self, retval: usize) -> Result<(), SysAugError> {
-        rwoption_replace(&self.skip_syscall_retval, retval)?;
-        Ok(())
-    }
-
     pub fn call_first_mod<F, T>(
         &self,
         feature: ModFeature,
@@ -349,7 +558,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     where
         F: Fn(&ModBox) -> Result<T, SysAugError>,
     {
-        let mod_map = rwlock_read(&self.mods)?;
+        let mod_map = rwlock_read(self.mods.as_ref())?;
         if let Some(mods_) = mod_map.get(&feature) {
             if let Some(m) = mods_.get(0) {
                 return Ok(Some(func(m)?));
@@ -362,12 +571,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     where
         F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
     {
-        let mod_map = rwlock_read(&self.mods)?;
+        let mod_map = rwlock_read(self.mods.as_ref())?;
         if let Some(mods_) = mod_map.get(&feature) {
             for m in mods_.iter() {
                 match func(m)? {
                     ModAction::SkipSyscall(retval) => {
-                        self.skip_syscall(retval)?;
+                        //self.skip_syscall(retval)?;
                     }
                     ModAction::None => (),
                 }
@@ -396,13 +605,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             })?
             .map_err(SysAugError::PtraceSetOptions)?;
         Ok(())
-    }
-
-    pub fn handle_exit(&self, pid: Pid) -> Result<(), SysAugError> {
-        info!("Process {:?} exited.", &pid);
-        self.ptrace_client
-            .execute(move || sys::ptrace::detach(pid, None))?
-            .map_err(SysAugError::PtraceDetach)
     }
 
     pub fn trace_span(&self) -> tracing::Span {
@@ -438,34 +640,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.states.failed.load(Ordering::Relaxed)
     }
 
-    // Send the content of `bytes` to tracee's stack, and return its address.
-    // This can be called multiple times and will add new content to the end of
-    // previous contents.
-    pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
-        let pid = self.pid;
-        let mut offset = rwlock_write(&self.tracee_stack_offset)?;
-        let old_offset = *offset;
-        let (addr, new_offset) = self.ptrace_client.execute(move || {
-            let final_bytes = bytes.as_slice();
-            unsafe { ptrace::write_bytes_to_tracee(pid, old_offset, final_bytes) }
-        })??;
-        *offset = new_offset;
-        Ok(addr)
-    }
-
-    pub fn tracee_stack_append_path(&self, path: PathBuf) -> Result<usize, SysAugError> {
-        let bytes = path.into_os_string().into_vec();
-        self.tracee_stack_append(bytes)
-    }
-
-    // Change the address, to which the next tracee_stack_append will write contents.
-    // offset = how many bytes of previously written contents will stay after this
-    pub fn tracee_stack_seek(&self, offset: usize) -> Result<(), SysAugError> {
-        let mut ref_offset = rwlock_write(&self.tracee_stack_offset)?;
-        *ref_offset = offset;
-        Ok(())
-    }
-
     pub fn ptrace_syscall(&self, maybe_signal: Option<Signal>) -> Result<(), SysAugError> {
         let pid = self.pid;
         event!(Level::TRACE, "PTRACE_SYSCALL");
@@ -484,9 +658,18 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             async_runtime: &async_runtime,
             cli_args: self.states.args.clone(),
             pid: pid.clone(),
+
+            mods: self.mods.clone(),
+            states: self.states.clone(),
+            parent: self.parent.clone(),
+            sync_handler: Arc::downgrade(&self),
             ptrace_client: self.ptrace_client.clone(),
-            notifiers: AsyncNotifications::default(),
+            ignore_sigstops: self.ignore_sigstops.clone(),
+
             yielder_syscall: PtraceAsyncYielder::default(),
+
+            notifiers: AsyncNotifications::default(),
+            tracee_stack_offset: RefCell::default(),
         };
         let mut main_loop_future = async_handlers.all_tracee_loops();
 
@@ -496,19 +679,19 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
 
         loop {
-            // Drive async logic until it waits for PtraceFutureTypes
+            // Drive async logic until it is pending on a future by resuming from where we left off
             if let Some(exit_code) = async_runtime.run_async_step(&mut main_loop_future)? {
                 return Ok(exit_code?);
             }
 
-            // Handle special crashes, signals, etc
+            // Handle signals, special gdb exit, etc
             if *async_handlers.notifiers.transfer_to_gdb.borrow() {
                 return Ok(self.transfer_to_gdb()?);
             }
             let mut maybe_signal = { async_handlers.notifiers.signal_tracee.borrow_mut().take() };
 
             loop {
-                // Wait for tracee updates, until we have unblocked a future
+                // Drive ptrace syscalls, resume tracee, until we have unblocked a future
                 // Also, use maybe_signal.take() so that the signal is only sent once
                 self.ptrace_syscall(maybe_signal.take())?;
                 let wait_status = ptrace::waitpid_hang(pid)?;
@@ -518,7 +701,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     wait_status: wait_status.clone(),
                 };
 
-                // Unblock different PtraceFutureTypes in the proper order
+                // Handle unexpected crashes
+                if !ptrace::is_trace_stop(&wait_status) && !ptrace::is_still_alive(&wait_status) {
+                    info!("Process {:?} crashed: {:?}.", &pid, &wait_status);
+                    self.ptrace_client
+                        .execute(move || sys::ptrace::detach(pid, None))?
+                        .map_err(SysAugError::PtraceDetach)?;
+                    return Err(SysAugError::TraceeCrashed);
+                }
+
+                // Unblock different futures in the proper order
                 if let Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
                     async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
                     break;
@@ -534,11 +726,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             }
 
             // Old async logic:
-            // if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
-            //     info!("Process {:?} crashed: {:?}.", &pid, &status);
-            //     self.handle_exit(pid)?;
-            //     return Err(SysAugError::TraceeCrashed);
-            // }
 
             // let mut maybe_exit: Option<u8> = None;
             // let _ = self.on_tracee_signaled(&status, &mut maybe_exit)?
@@ -575,92 +762,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         Ok(None)
     }
 
-    fn on_tracee_signaled(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
-        let pid = self.pid;
-        if let WaitStatus::Stopped(_, signal) = s {
-            event!(Level::DEBUG, "child stopped, status {:?}", &s);
-            if signal == &Signal::SIGTRAP {
-                return Ok(false);
-            }
-            let getsig_ans = self
-                .ptrace_client
-                .execute(move || sys::ptrace::getsiginfo(pid))?;
-            if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
-                return Ok(false);
-            }
-            if signal == &Signal::SIGSTOP {
-                if let Some(parent) = self.parent.as_ref() {
-                    let ignore_sigstops = rwlock_read(&parent.ignore_sigstops)?;
-                    if ignore_sigstops.contains(&pid) {
-                        return Ok(false);
-                    }
-                }
-            }
-            if signal == &Signal::SIGSYS && self.states.args.fix_sigsys {
-                // Android sometimes kills a process for using privileged syscalls like sysinfo()
-                // Instead of killing tracee, return -ENOSYS and let it resume
-                let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;
-                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-                if siginfo.si_code > 0 {
-                    // Signal was sent by kernel, so it's safe to assume a syscall just happened.
-                    let mut retval = (-libc::ENOSYS) as usize;
-
-                    // TODO: This is bad for security. OTher processes can replace register by running
-                    //              kill -NOSYS <tracee pid>
-                    event!(
-                        Level::WARN,
-                        "blocking SIGSYS and returning ENOSYS instead (UNSAFE)",
-                    );
-
-                    // If we were trying to override a syscall, follow that override.
-                    if regs.syscall_num == NO_MOD_SYSCALL {
-                        let mut maybe_skip = rwlock_write(&self.nosys_syscall_retval)?;
-                        if let Some(new_retval) = maybe_skip.take() {
-                            event!(
-                                Level::DEBUG,
-                                "Replacing syscall return value {} with {}",
-                                retval,
-                                new_retval
-                            );
-                            retval = new_retval;
-                        }
-                    }
-
-                    // Otherwise, override return value to -ENOSYS
-                    regs.set_syscall_retval(retval);
-                    self.ptrace_client
-                        .execute(move || ptrace::setregs(pid, regs))??;
-
-                    return Ok(false);
-                }
-            }
-            if signal == &Signal::SIGSEGV && self.states.args.gdb {
-                info!("Tracee segfault. Starting gdb");
-                exit.replace(self.transfer_to_gdb()?);
-                return Ok(false);
-            }
-            info!("Will deliver signal {:?} to {:?}", &signal, &pid);
-            rwoption_replace(&self.signal_tracee, *signal)?;
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    fn on_tracee_exited(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
-        let pid = self.pid;
-        if let WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_EXIT) = s {
-            let rawret = self
-                .ptrace_client
-                .execute(move || ptrace::getevent(pid))??;
-            let retcode = (rawret as u32) >> 8;
-            info!("Exit status = {}", retcode);
-            self.handle_exit(pid)?;
-            exit.replace(retcode as u8);
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
     /// This should cover all cases of clone, fork, vfork, etc.
     fn on_tracee_clone(
         self: &Arc<TraceeHandler<PtraceClient>>,
@@ -681,7 +782,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 let child_pid: Pid = Pid::from_raw(raw_pid as i32);
 
                 self.ptrace_client
-                    .prep_attach_to(child_pid, &self.ignore_sigstops)?;
+                    .prep_attach_to(child_pid, self.ignore_sigstops.as_ref())?;
 
                 let new_tracee_handler = self.fork(child_pid)?;
                 let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
@@ -706,97 +807,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     /// This should cover all cases of clone, fork, vfork, etc.
     fn on_tracee_unknown_event(&self, s: &WaitStatus, _exit: &mut Option<u8>) -> BoolResult {
         event!(Level::INFO, "Unknown ptrace event: {:?}", s);
-        Ok(true)
-    }
-
-    fn on_tracee_syscall(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
-        let pid = self.pid;
-        if ptrace::is_syscall_stop(s) {
-            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-            let syscall_info = SYSCALL_INFOS.get(&regs.syscall_num);
-            let syscall_num_str = regs.syscall_num.to_string();
-            let syscall_name = syscall_info.map(|x| x.name()).unwrap_or(&syscall_num_str);
-            {
-                let mut last_syscall = rwlock_write(&self.last_syscall)?;
-                last_syscall.count(regs.syscall_num, syscall_info);
-            }
-
-            let last_syscall = rwlock_read(&self.last_syscall)?;
-            let tracee_init_stage = { *(rwlock_read(&self.tracee_init_stage)?) };
-            let _span = if last_syscall.times % 2 == 1 {
-                span!(
-                    Level::INFO,
-                    "before",
-                    "syscall {} args {:#x} {:#x} {:#x}",
-                    syscall_name,
-                    regs.arg0,
-                    regs.arg1,
-                    regs.arg2
-                )
-            } else {
-                span!(
-                    Level::INFO,
-                    "after",
-                    "syscall {} return {:#x} args {:#x} {:#x} {:#x}",
-                    syscall_name,
-                    regs.syscall_retval(),
-                    regs.arg0,
-                    regs.arg1,
-                    regs.arg2
-                )
-            }
-            .entered();
-            let which_aug = syscall_info.map(|x| &x.augment);
-
-            let _span2 = span!(
-                Level::INFO,
-                "sysaug",
-                "{:?},{},{}",
-                which_aug.unwrap_or(&Augments::None),
-                syscall_name,
-                last_syscall.total_times
-            )
-            .entered();
-            event!(
-                Level::TRACE,
-                "syscall event, stack@{:x}",
-                ptrace::stack_ptr()
-            );
-            if self.states.args.gdb_at == Some(last_syscall.total_times) {
-                exit.replace(self.transfer_to_gdb()?);
-                return Ok(false);
-            }
-
-            // For maximum performance, we hardcode the jump table.
-            let maybe_augments = rwlock_read(&self.augments)?;
-            let augments = maybe_augments.as_ref().unwrap();
-            match which_aug {
-                Some(Augments::Clone) => augments.clone.dispatch(&last_syscall, regs),
-                Some(Augments::Exec) => augments.exec.dispatch(&last_syscall, regs),
-                Some(Augments::Paths) => augments.paths.dispatch(&last_syscall, regs),
-                Some(Augments::Perms) => augments.perms.dispatch(&last_syscall, regs),
-                Some(Augments::Waitpid) => augments.waitpid.dispatch(&last_syscall, regs),
-                Some(Augments::Unimplemented) => Err(SysAugError::UnimplementedAugment),
-                _ => Ok(()),
-            }
-            .map_err(display_err)?;
-            if let Some(info) = syscall_info {
-                if info.sets_file_perms.is_some() {
-                    self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
-                }
-            }
-
-            drop(last_syscall); // Otherwise, deadlock.
-            self.maybe_skip_syscall()?;
-
-            if tracee_init_stage != TraceeInitStage::FirstCallActuallyDone
-                && which_aug == Some(&Augments::Exec)
-            {
-                rwlock_replace(&self.tracee_init_stage, TraceeInitStage::ExecSeen)?;
-                return Ok(true);
-            }
-            return Ok(false);
-        }
         Ok(true)
     }
 
@@ -888,50 +898,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         cmd.arg("-p").arg(pid.as_raw().to_string());
         let status = cmd.status().map_err(SysAugError::GDB)?;
         Ok(status.code().unwrap_or(-1) as u8)
-    }
-
-    fn maybe_skip_syscall(&self) -> Result<(), SysAugError> {
-        {
-            let mut maybe_nosys = rwlock_write(&self.nosys_syscall_retval)?;
-            let _ = maybe_nosys.take();
-        }
-
-        let pid = self.pid;
-        let mut last_syscall = rwlock_write(&self.last_syscall)?;
-        if last_syscall.syscall == Some(NO_MOD_SYSCALL) {
-            let mut maybe_skip = rwlock_write(&self.skip_syscall_retval)?;
-            event!(
-                Level::DEBUG,
-                "In NO_MOD_SYSCALL, times: {}",
-                &last_syscall.times,
-            );
-            if last_syscall.times % 2 == 1 {
-                return Ok(());
-            }
-            if let Some(retval) = maybe_skip.take() {
-                rwoption_replace(&self.nosys_syscall_retval, retval)?;
-                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-
-                event!(
-                    Level::DEBUG,
-                    "Replacing syscall return value {} with {}",
-                    regs.syscall_retval(),
-                    retval
-                );
-                regs.set_syscall_retval(retval);
-                self.ptrace_client
-                    .execute(move || ptrace::setregs(pid, regs))??;
-            }
-        } else if last_syscall.times % 2 == 1 {
-            let maybe_skip = rwlock_read(&self.skip_syscall_retval)?;
-            if maybe_skip.is_some() {
-                event!(Level::DEBUG, "Attempting to skip syscall");
-                self.ptrace_client
-                    .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
-                last_syscall.count(NO_MOD_SYSCALL, None);
-            }
-        }
-        Ok(())
     }
 }
 
