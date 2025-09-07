@@ -373,11 +373,11 @@ pub fn aligned(val: usize) -> Result<usize, PtraceError> {
     checked_mul(num_usizes, *USIZE_SIZE)
 }
 
+#[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
     use crate::common;
 
-    #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_convert_bytes_to_usizes_exact() {
         let bytes: &[u8] = b"abcdefghijklmnop";
@@ -385,7 +385,6 @@ mod tests {
         assert!(matches!(common::bytes_to_usizes(bytes), Ok(_expect)));
     }
 
-    #[cfg(target_arch = "aarch64")]
     #[test]
     fn test_convert_bytes_to_usizes_remainder() {
         let bytes: &[u8] = b"abcdefghijklmnop9";
