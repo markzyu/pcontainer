@@ -3,7 +3,6 @@ use crate::handler::AsyncTraceeHandler;
 use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
-use std::sync::Arc;
 use tracing::{event, Level};
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -48,8 +47,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let elf_path_buf = Self::path_from_bytes(path_bytes)?;
         let mut new_elf_path = elf_path_buf.clone();
         {
-            let path_action = self.calc_real_path(&new_elf_path, syscall, &read_args).await?;
-            self.notify_mods_about_path(syscall, &new_elf_path, &path_action).await?;
+            let path_action = self
+                .calc_real_path(&new_elf_path, syscall, &read_args)
+                .await?;
+            self.notify_mods_about_path(syscall, &new_elf_path, &path_action)
+                .await?;
             if let PathAction::Override(new_path_val) = path_action {
                 new_elf_path = new_path_val;
             } else if path_action == PathAction::ELOOP {
@@ -83,8 +85,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // Calculate real path of interpreter
             let interp_path_buf = Self::path_from_bytes(buf)?;
-            let path_action = self.calc_real_path(&interp_path_buf, syscall, &read_args).await?;
-            self.notify_mods_about_path(syscall, &interp_path_buf, &path_action).await?;
+            let path_action = self
+                .calc_real_path(&interp_path_buf, syscall, &read_args)
+                .await?;
+            self.notify_mods_about_path(syscall, &interp_path_buf, &path_action)
+                .await?;
             let mut new_interp_path = interp_path_buf;
             if let PathAction::Override(new_path_val) = path_action {
                 new_interp_path = new_path_val;

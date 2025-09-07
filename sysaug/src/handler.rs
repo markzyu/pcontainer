@@ -1,7 +1,6 @@
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_take,
-    AugmentSyscall, Augments, ModBox, ModProvider, ModsByFeature, SysAugError, SyscallCounter,
-    NO_MOD_SYSCALL, PERMS_IDS_SIZE,
+    Augments, ModBox, ModProvider, ModsByFeature, SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE,
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::{get_syscall, SYSCALL_INFOS};
@@ -54,7 +53,8 @@ macro_rules! call_augment {
             Some(Augments::Waitpid) => $self.augment_sys_waitpid($regs, $syscall).await,
             Some(Augments::Unimplemented) => Err(SysAugError::UnimplementedAugment),
             _ => Ok(()),
-        }.map_err(display_err)?;
+        }
+        .map_err(display_err)?;
     };
 }
 
@@ -103,8 +103,6 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub mmap_tracee_addr: RwLock<usize>,
     pub tracee_init_stage: RwLock<TraceeInitStage>,
 
-    last_syscall: RwLock<SyscallCounter>,
-
     /// Readonly, Copy on Move, values
     pub shared_fd: RawFd,
     pub mmap_tracer_addr: usize,
@@ -121,7 +119,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub async_runtime: &'a PtraceAsyncRuntime,
     pub cli_args: CLIArgs,
     pub pid: Pid,
-    
+
     // References to other helpers
     pub mods: Arc<RwLock<ModsByFeature>>,
     pub states: Arc<TraceeHandlerStates>,
@@ -134,7 +132,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub yielder_syscall: PtraceAsyncYielder,
 
     // Actual shared states that are owned by this AsyncTraceeHandler
-    pub notifiers: AsyncNotifications,
+    notifiers: AsyncNotifications,
     pub tracee_stack_offset: RefCell<usize>,
 }
 
@@ -186,7 +184,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             return Err(SysAugError::AsyncMismatch(
                 PtraceFutureTypes::WaitForSignal,
                 (*status).clone(),
-            ))
+            ));
         }
         Ok((*status).clone())
     }
@@ -279,7 +277,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
                 if siginfo.si_code > 0 {
                     // Signal was sent by kernel, so it's safe to assume a syscall just happened.
-                    let mut retval = (-libc::ENOSYS) as usize;
+                    let retval = (-libc::ENOSYS) as usize;
 
                     // TODO: This is bad for security. OTher processes can replace register by running
                     //              kill -NOSYS <tracee pid>
@@ -327,29 +325,34 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_FORK)
                     | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_VFORK)
             ) {
-                let raw_pid = self
-                    .ptrace_client
-                    .execute(move || ptrace::getevent(pid))?? as isize;
+                let raw_pid =
+                    self.ptrace_client
+                        .execute(move || ptrace::getevent(pid))?? as isize;
                 if raw_pid > 0 {
                     let child_pid: Pid = Pid::from_raw(raw_pid as i32);
 
                     self.ptrace_client
                         .prep_attach_to(child_pid, self.ignore_sigstops.as_ref())?;
 
-                    let new_tracee_handler = self.sync_handler.upgrade().ok_or(SysAugError::WeakReference)?.fork(child_pid)?;
+                    let new_tracee_handler = self
+                        .sync_handler
+                        .upgrade()
+                        .ok_or(SysAugError::WeakReference)?
+                        .fork(child_pid)?;
                     let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
                     let root_pid = self.states.root_pid;
                     let fail_fast = self.states.args.fail_fast;
                     new_tracee_handler.start(move || {
                         if fail_fast && new_tracee_handler2.failed() {
-                            let _ =
-                                sys::signal::kill(root_pid, Some(Signal::SIGKILL)).map_err(display_err);
+                            let _ = sys::signal::kill(root_pid, Some(Signal::SIGKILL))
+                                .map_err(display_err);
                         }
                     });
 
                     self.call_mods(ModFeature::OnCloneComplete, |m| {
                         m.on_clone_complete(raw_pid as isize)
-                    }).await?;
+                    })
+                    .await?;
                 }
                 continue;
             }
@@ -374,10 +377,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     /// Return just early enough to override system call return value.
     pub async fn do_resume_syscall(&self) -> Result<GenericPurposeRegs, SysAugError> {
         let pid = self.pid;
-        let status = self.wait_for_syscall().await?;
+        self.wait_for_syscall().await?;
         let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-        let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
-        let which_aug = maybe_syscall_info.map(|x| &x.augment);
         event!(
             Level::TRACE,
             "syscall exit event, stack@{:x}, return {:#x} args {:#x} {:#x} {:#x}",
@@ -397,7 +398,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     pub async fn do_skip_syscall(&self, syscall_retval: usize) -> Result<(), SysAugError> {
         let pid = self.pid;
         event!(Level::DEBUG, "Attempting to skip syscall");
-        self.ptrace_client.execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
+        self.ptrace_client
+            .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
         let mut regs = self.do_resume_syscall().await?;
 
         event!(
@@ -407,7 +409,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             regs.syscall_retval()
         );
         regs.set_syscall_retval(syscall_retval);
-        self.ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+        self.ptrace_client
+            .execute(move || ptrace::setregs(pid, regs))??;
         Ok(())
     }
 
@@ -432,7 +435,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             total_times += 1;
 
             // Wait for System Call Entry
-            let status = self.wait_for_syscall().await?;
+            self.wait_for_syscall().await?;
             let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
             let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
             let which_aug = maybe_syscall_info.map(|x| &x.augment);
@@ -445,7 +448,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 regs.arg0,
                 regs.arg1,
                 regs.arg2
-            ).entered();
+            )
+            .entered();
             event!(
                 Level::TRACE,
                 "syscall entry event, stack@{:x}",
@@ -453,7 +457,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             );
 
             if self.cli_args.gdb_at == Some(total_times) {
-                info!("Reached {:?}-th system call. Starting gdb", self.cli_args.gdb_at);
+                info!(
+                    "Reached {:?}-th system call. Starting gdb",
+                    self.cli_args.gdb_at
+                );
                 *self.notifiers.transfer_to_gdb.borrow_mut() = true;
                 return Ok(0);
             }
@@ -502,7 +509,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let ans = Arc::new(TraceeHandler {
             pid,
             ptrace_client,
-            last_syscall: RwLock::new(SyscallCounter::new()),
             mods: Arc::new(RwLock::new(HashMap::new())),
             mod_providers: mods,
             orig_request_regs: RwLock::default(),
@@ -760,54 +766,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             return Ok(Some(signal));
         }
         Ok(None)
-    }
-
-    /// This should cover all cases of clone, fork, vfork, etc.
-    fn on_tracee_clone(
-        self: &Arc<TraceeHandler<PtraceClient>>,
-        s: &WaitStatus,
-        _exit: &mut Option<u8>,
-    ) -> BoolResult {
-        let pid = self.pid;
-        if matches!(
-            s,
-            WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_CLONE)
-                | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_FORK)
-                | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_VFORK)
-        ) {
-            let raw_pid = self
-                .ptrace_client
-                .execute(move || ptrace::getevent(pid))?? as isize;
-            if raw_pid > 0 {
-                let child_pid: Pid = Pid::from_raw(raw_pid as i32);
-
-                self.ptrace_client
-                    .prep_attach_to(child_pid, self.ignore_sigstops.as_ref())?;
-
-                let new_tracee_handler = self.fork(child_pid)?;
-                let new_tracee_handler2 = Arc::clone(&new_tracee_handler);
-                let root_pid = self.states.root_pid;
-                let fail_fast = self.states.args.fail_fast;
-                new_tracee_handler.start(move || {
-                    if fail_fast && new_tracee_handler2.failed() {
-                        let _ =
-                            sys::signal::kill(root_pid, Some(Signal::SIGKILL)).map_err(display_err);
-                    }
-                });
-
-                self.call_mods(ModFeature::OnCloneComplete, |m| {
-                    m.on_clone_complete(raw_pid as isize)
-                })?;
-            }
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    /// This should cover all cases of clone, fork, vfork, etc.
-    fn on_tracee_unknown_event(&self, s: &WaitStatus, _exit: &mut Option<u8>) -> BoolResult {
-        event!(Level::INFO, "Unknown ptrace event: {:?}", s);
-        Ok(true)
     }
 
     fn on_tracee_init_syscalls(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {

@@ -3,11 +3,9 @@ use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
-use crate::rwoption_take_ok;
 use ptrace::GenericPurposeRegs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tracing::{event, Level};
 
 const META_INIT: &str = "{}\n";
@@ -20,10 +18,15 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
-        
+
         // Translate paths from host namespace to tracee namespace
         let copy_regs = orig_regs.clone();
-        let read_args = [orig_regs.arg0, orig_regs.arg1, orig_regs.arg2, orig_regs.arg3];
+        let read_args = [
+            orig_regs.arg0,
+            orig_regs.arg1,
+            orig_regs.arg2,
+            orig_regs.arg3,
+        ];
         let mut write_args = [
             &mut orig_regs.arg0,
             &mut orig_regs.arg1,
@@ -52,8 +55,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let orig_path_buf = Self::path_from_bytes(path_bytes)?;
 
             // Calculate path_action, notify mods, and maybe update tracee
-            let path_action = self.calc_real_path(&orig_path_buf, syscall, &read_args).await?;
-            self.notify_mods_about_path(syscall, &orig_path_buf, &path_action).await?;
+            let path_action = self
+                .calc_real_path(&orig_path_buf, syscall, &read_args)
+                .await?;
+            self.notify_mods_about_path(syscall, &orig_path_buf, &path_action)
+                .await?;
             match path_action {
                 PathAction::Override(new_path_val) => {
                     save_paths[i] = Some(dirfd_path.join(&new_path_val));
@@ -114,8 +120,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             return Ok(());
         }
         match syscall.getdents_bits {
-            Some(32) => self.replace_getdents_result::<Dirent>(syscall, regs).await?,
-            Some(64) => self.replace_getdents_result::<Dirent64>(syscall, regs).await?,
+            Some(32) => {
+                self.replace_getdents_result::<Dirent>(syscall, regs)
+                    .await?
+            }
+            Some(64) => {
+                self.replace_getdents_result::<Dirent64>(syscall, regs)
+                    .await?
+            }
             _ => (),
         };
         Ok(())
@@ -170,7 +182,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             event!(Level::TRACE, "Intercepting {:?}", entry);
             let orig_path_buf = Self::path_from_bytes(entry.get_name().to_vec())?;
             let orig_path: &Path = orig_path_buf.as_path();
-            let action = self.get_mod_path(syscall, orig_path, PathAction::None, true).await?;
+            let action = self
+                .get_mod_path(syscall, orig_path, PathAction::None, true)
+                .await?;
             // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
             let delete = match &action {
                 PathAction::Override(override_path) => {

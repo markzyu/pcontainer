@@ -3,7 +3,6 @@ use crate::common::{SysAugError, SyscallInfo, PERMS_IDBIT_UG};
 use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use ptrace::GenericPurposeRegs;
-use std::sync::Arc;
 use tracing::{event, Level};
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -21,7 +20,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             if res_bits == 0 {
                 self.call_mods(mods::ModFeature::OnSetid, |m| {
                     m.on_setid(syscall.resf_bit, orig_regs.arg0, syscall)
-                }).await?;
+                })
+                .await?;
             } else {
                 let ug_bit = res_bits & PERMS_IDBIT_UG;
                 let possible_args = &[orig_regs.arg0, orig_regs.arg1, orig_regs.arg2];
@@ -33,7 +33,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
                     self.call_mods(mods::ModFeature::OnSetid, |m| {
                         m.on_setid(match_bit | ug_bit, *possible_arg, syscall)
-                    }).await?;
+                    })
+                    .await?;
                 }
             }
         }

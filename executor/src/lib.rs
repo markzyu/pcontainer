@@ -7,10 +7,9 @@ pub use crate::futures::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTyp
 use nix::{sys, unistd};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SendError, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use thiserror::Error;
 use tracing::{event, Level};
 
 pub trait PtraceServer {

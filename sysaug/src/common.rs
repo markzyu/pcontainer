@@ -1,7 +1,6 @@
 use crate::handler::TraceeHandlerStates;
 use crate::mods;
 use executor::{PtraceFutureTypes, PtraceStatus};
-use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -128,32 +127,6 @@ pub fn clone_mods_by_feature(src: &ModsByFeature) -> ModsByFeature {
 
 // ------------------- AUGMENTS -------------------
 
-pub trait AugmentSyscall {
-    fn before_call(
-        &self,
-        regs: GenericPurposeRegs,
-        syscall: &SyscallInfo,
-    ) -> Result<(), SysAugError>;
-    fn after_call(
-        &self,
-        regs: GenericPurposeRegs,
-        syscall: &SyscallInfo,
-    ) -> Result<(), SysAugError>;
-
-    fn dispatch(
-        &self,
-        last_syscall: &SyscallCounter,
-        regs: GenericPurposeRegs,
-    ) -> Result<(), SysAugError> {
-        let syscall_info = last_syscall.syscall_info.unwrap();
-        if last_syscall.times % 2 == 1 {
-            self.before_call(regs, syscall_info)
-        } else {
-            self.after_call(regs, syscall_info)
-        }
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Augments {
     Clone,
@@ -172,37 +145,6 @@ impl Default for Augments {
 }
 
 // ------------------- SYSCALLS -------------------
-
-#[derive(Debug)]
-pub struct SyscallCounter {
-    pub syscall: Option<usize>,
-    pub syscall_info: Option<&'static SyscallInfo>,
-    pub times: u64,
-    pub total_times: u64,
-}
-
-impl SyscallCounter {
-    pub fn count(&mut self, syscall_name: usize, syscall_info: Option<&'static SyscallInfo>) {
-        let curr_syscall = Some(syscall_name);
-        if self.syscall != curr_syscall {
-            self.syscall = curr_syscall;
-            self.syscall_info = syscall_info;
-            self.times = 1;
-        } else {
-            self.times += 1;
-        }
-        self.total_times += 1;
-    }
-
-    pub fn new() -> SyscallCounter {
-        SyscallCounter {
-            syscall: None,
-            syscall_info: None,
-            times: 0,
-            total_times: 0,
-        }
-    }
-}
 
 // pub const PERMS_IDBIT_R: u8 = 1;
 // pub const PERMS_IDBIT_E: u8 = 2;

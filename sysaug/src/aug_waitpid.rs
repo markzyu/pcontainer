@@ -4,7 +4,6 @@ use crate::handler::AsyncTraceeHandler;
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
 use ptrace::GenericPurposeRegs;
-use std::sync::Arc;
 use tracing::info;
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -46,8 +45,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     .execute(move || ptrace::setregs(parent_pid, regs))??;
 
                 // Restore wait status to its value before syscall
-                self.ptrace_client
-                    .execute(move || ptrace::write(parent_pid, wait_status_addr, orig_wait_status))??;
+                self.ptrace_client.execute(move || {
+                    ptrace::write(parent_pid, wait_status_addr, orig_wait_status)
+                })??;
 
                 info!(
                     "Override {:?} -> Returning {}",

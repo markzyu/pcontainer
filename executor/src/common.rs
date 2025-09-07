@@ -1,11 +1,8 @@
 use nix::{sys, unistd};
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SendError, SyncSender};
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
+use std::sync::Arc;
 use thiserror::Error;
-use tracing::{event, Level};
 
 pub type SharedBool = Arc<AtomicBool>;
 pub type PtraceRequest = Box<dyn FnOnce() -> Result<(), PtraceExecutorError> + Send>;
