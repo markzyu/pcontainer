@@ -250,7 +250,7 @@ mod tests {
         assert!(matches!(runtime.run_async_step(&mut test_future), Ok(None)));
         assert!(runtime.has_new_blockage());
 
-        // Unblock the second future
+        // Unblock the first future
         let event = futures::PtraceStatus { wait_status: WaitStatus::StillAlive };
         runtime.unblock_futures(futures::PtraceFutureTypes::WaitForPtraceSyscall, event.clone());
         let output = runtime.run_async_step(&mut test_future).unwrap().unwrap();
