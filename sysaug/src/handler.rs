@@ -10,10 +10,12 @@ use crate::common::{
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::SYSCALL_INFOS;
+use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use ptrace::{GenericPurposeRegs, SHARED_MMAP_SIZE};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::os::fd::RawFd;
@@ -22,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
+use sys::signal::Signal;
 use tracing::{event, info, span, Level};
 
 #[derive(Clone, Debug, Default)]
@@ -95,7 +98,7 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub orig_wait_status: RwLock<usize>,
     // ignore the next sigstop for the following pids
     pub ignore_sigstops: RwLock<HashSet<Pid>>,
-    pub signal_tracee: RwLock<Option<sys::signal::Signal>>,
+    pub signal_tracee: RwLock<Option<Signal>>,
     pub skip_syscall_retval: RwLock<Option<usize>>,
     pub nosys_syscall_retval: RwLock<Option<usize>>,
     pub tracee_stack_offset: RwLock<usize>,
@@ -110,45 +113,125 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub mmap_tracer_addr: usize,
 }
 
-struct AsyncTraceeHandler<PtraceClient: executor::PtraceClient> {
-    pub async_runtime: RefCell<PtraceAsyncRuntime>,
-    pub pid: Pid,
-    pub ptrace_client: PtraceClient,
+/// Events reported from async loop back to the Runtime without resolving async loop
+#[derive(Default)]
+struct AsyncNotifications {
+    signal_tracee: RefCell<Option<Signal>>,
+    transfer_to_gdb: RefCell<bool>,
 }
 
-impl AsyncTraceeHandler {
+struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
+    async_runtime: &'a PtraceAsyncRuntime,
+    cli_args: CLIArgs,
+    pid: Pid,
+    ptrace_client: PtraceClient,
 
+    notifiers: AsyncNotifications,
+
+    /// Yield until the next syscall poll has happened
+    yielder_syscall: PtraceAsyncYielder,
+}
+
+impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
-    async fn all_tracee_loops(&self, s: &WaitStatus) -> Result<u8, SysAugError> {
-        futures_lite::or(
-            self.loop_handle_tracee_signals(),
+    async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
+        futures_lite::future::or(
+            futures_lite::future::or(
+                self.loop_handle_tracee_signals(),
+                self.loop_handle_tracee_exit(),
+            ),
             self.loop_handle_tracee_syscalls(),
-        ).await
+        )
+        .await
     }
 
     /// Creates a future from raw PtraceFuture to wait for any signal
-    async fn wait_for_any_signal(&self) -> Result<sys::signal::Signal, SysAugError> {
-        let status = self.async_runtime.new_ptrace_future(PtraceFutureTypes::WAIT_FOR_SIGNAL).await;
+    async fn wait_for_any_signal(&self) -> Result<Signal, SysAugError> {
+        let status = self
+            .async_runtime
+            .new_ptrace_future(PtraceFutureTypes::WaitForSignal)
+            .await;
         if let WaitStatus::Stopped(_, signal) = status.wait_status {
-            return Ok(signal)
+            return Ok(signal);
         }
-        Err()
+        Err(SysAugError::AsyncMismatch(
+            PtraceFutureTypes::WaitForSignal,
+            (*status).clone(),
+        ))
     }
 
     /// Wait for a specific signal
-    async fn wait_for_signal(&self, signal: sys::signal::Signal) -> Result<(), SysAugError> {
+    async fn wait_for_signal(&self, signal: Signal) -> Result<(), SysAugError> {
         loop {
-            let status2 = self.wait_for_any_signal().await?;
+            let signal2 = self.wait_for_any_signal().await?;
             if signal == signal2 {
-                return
+                return Ok(());
             }
         }
     }
 
-    async fn loop_handle_tracee_syscalls() {
+    async fn loop_handle_tracee_signals(&self) -> Result<u8, SysAugError> {
+        let pid = self.pid;
+        loop {
+            let signal = self.wait_for_any_signal().await?;
+            let getsig_ans = self
+                .ptrace_client
+                .execute(move || sys::ptrace::getsiginfo(pid))?;
+            if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
+                continue;
+            }
+            if signal == Signal::SIGSYS && self.cli_args.fix_sigsys {
+                // Android sometimes kills a process for using privileged syscalls like sysinfo()
+                // Instead of killing tracee, return -ENOSYS and let it resume
+                let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;
+                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                if siginfo.si_code > 0 {
+                    // Signal was sent by kernel, so it's safe to assume a syscall just happened.
+                    let mut retval = (-libc::ENOSYS) as usize;
+
+                    // TODO: This is bad for security. OTher processes can replace register by running
+                    //              kill -NOSYS <tracee pid>
+                    event!(
+                        Level::WARN,
+                        "blocking SIGSYS and returning ENOSYS instead (UNSAFE)",
+                    );
+
+                    // If we were trying to override a syscall, follow that override.
+                    if regs.syscall_num == NO_MOD_SYSCALL {
+                        self.yielder_syscall.yield_now().await;
+                        continue;
+                    }
+
+                    // Otherwise, override return value to -ENOSYS
+                    regs.set_syscall_retval(retval);
+                    self.ptrace_client
+                        .execute(move || ptrace::setregs(pid, regs))??;
+
+                    continue;
+                }
+            }
+            if signal == Signal::SIGSEGV && self.cli_args.gdb {
+                info!("Tracee segfault. Starting gdb");
+                *self.notifiers.transfer_to_gdb.borrow_mut() = true;
+                return Ok(0);
+            }
+            info!("Will deliver signal {:?} to {:?}", &signal, &pid);
+            self.notifiers.signal_tracee.borrow_mut().replace(signal);
+        }
+        Ok(0)
+    }
+
+    async fn loop_handle_tracee_exit(&self) -> Result<u8, SysAugError> {
+        loop {
+            futures_lite::future::pending::<()>().await;
+        }
+        Ok(0)
+    }
+
+    async fn loop_handle_tracee_syscalls(&self) -> Result<u8, SysAugError> {
         // lookup the correct syscall handler, call it as an async func
         //
-        // Then, within this  async func, we can do things like 
+        // Then, within this  async func, we can do things like
         //
         // if (needs_mmap_init)
         // await tracee_init_mmap()
@@ -158,37 +241,15 @@ impl AsyncTraceeHandler {
         // await tracee_memcpy_from_mmap()
         //
         // So that the async logics themselves are fluid.
-
-
-        // Note: The implementation would work MUCH better if we can do tokio runtime one turn at a
-        // time (pausing at each await) instead of block_on 
-        //     And, this would also need a special PendingOrReady struct that can change between
-        //     the two states while being awaited on (without "replacing" the future?)
-        //
-        // ALTERNATIVELY, maybe implement our own future that wraps ALL ptrace actions
-        //     |
-        //     .--> THIS IS BETTER!
-        //
-        //     Need to have our own struct PtraceFuture impl Future
-        //
-        //     IF tokio doesn't support turn-by-turn execeution, then we also need to write 
-        //     our own Async runtime, which essentially just runs one
-        //     "turn"/poll each time, returning the PtraceFuture that caused the await.
-        //
-        //     And this PtraceFuture will describe to the ptrace crate what we are waiting FOR.
-        //
-        //     Why?
-        //
-        //     This will allow us to write async code in the most semantic way.
-        //
-        //     await tracee_init_mmap()
-        //     while (syscall = syscall_status_generator.next().await) {
-        //       await syscall_augtable[syscall.num]();
-        //     }
-        //
-        //     And the turn-by-turn execution make sure we restart from the last "yield"
+        loop {
+            let status = self
+                .async_runtime
+                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                .await;
+            self.yielder_syscall.unblock();
+        }
+        Ok(0)
     }
-
 }
 
 type BoolResult = Result<bool, SysAugError>;
@@ -363,8 +424,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 let _span = self.trace_span().entered();
                 let result = self.event_loop().map_err(display_err);
                 if result.is_err() {
-                    let _ = sys::signal::kill(self2.pid, Some(sys::signal::Signal::SIGKILL))
-                        .map_err(display_err);
+                    let _ =
+                        sys::signal::kill(self2.pid, Some(Signal::SIGKILL)).map_err(display_err);
                     self2.states.failed.store(true, Ordering::Relaxed);
                 }
                 callback();
@@ -405,9 +466,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         Ok(())
     }
 
-    pub fn ptrace_syscall(&self) -> Result<(), SysAugError> {
+    pub fn ptrace_syscall(&self, maybe_signal: Option<Signal>) -> Result<(), SysAugError> {
         let pid = self.pid;
-        let maybe_signal = rwoption_take(&self.signal_tracee)?;
         event!(Level::TRACE, "PTRACE_SYSCALL");
         self.ptrace_client
             .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
@@ -417,88 +477,109 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
-        let mut async_runtime = PtraceAsyncRuntime::default();
 
+        // Initialize and store async loops and futures
+        let async_runtime = PtraceAsyncRuntime::default();
+        let async_handlers = AsyncTraceeHandler {
+            async_runtime: &async_runtime,
+            cli_args: self.states.args.clone(),
+            pid: pid.clone(),
+            ptrace_client: self.ptrace_client.clone(),
+            notifiers: AsyncNotifications::default(),
+            yielder_syscall: PtraceAsyncYielder::default(),
+        };
+        let mut main_loop_future = async_handlers.all_tracee_loops();
+
+        // Attach ptrace to tracee
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
 
         loop {
             // Drive async logic until it waits for PtraceFutureTypes
-            if let Some(exit_code) = async_runtime.run_async_step(self.all_tracee_loops())? {
-                return Ok(exit_code);
+            if let Some(exit_code) = async_runtime.run_async_step(&mut main_loop_future)? {
+                return Ok(exit_code?);
             }
 
-            // Initiate the appropriate action that would trigger the expected events
-            if async_runtime.has_new_future(PtraceFutureTypes::WAIT_FOR_PTRACE_SYSCALL) {
-                self.ptrace_syscall()?;
+            // Handle special crashes, signals, etc
+            if *async_handlers.notifiers.transfer_to_gdb.borrow() {
+                return Ok(self.transfer_to_gdb()?);
+            }
+            let mut maybe_signal = { async_handlers.notifiers.signal_tracee.borrow_mut().take() };
+
+            loop {
+                // Wait for tracee updates, until we have unblocked a future
+                // Also, use maybe_signal.take() so that the signal is only sent once
+                self.ptrace_syscall(maybe_signal.take())?;
+                let wait_status = ptrace::waitpid_hang(pid)?;
+                event!(Level::TRACE, "child status {:?}", &wait_status);
+
+                let status = PtraceStatus {
+                    wait_status: wait_status.clone(),
+                };
+
+                // Unblock different PtraceFutureTypes in the proper order
+                if let Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
+                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
+                    break;
+                } else if let WaitStatus::PtraceEvent(..) = &wait_status {
+                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status);
+                    break;
+                } else if let WaitStatus::PtraceSyscall(..) = &wait_status {
+                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status);
+                    break;
+                } else {
+                    event!(Level::INFO, "Unknown ptrace event: {:?}", &wait_status);
+                }
             }
 
-            // Detect the exact variant of PtraceFutureTypes based on waitpid status
-            let wait_status = ptrace::waitpid_hang(pid)?;
-            event!(Level::TRACE, "child status {:?}", &wait_status);
+            // Old async logic:
+            // if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
+            //     info!("Process {:?} crashed: {:?}.", &pid, &status);
+            //     self.handle_exit(pid)?;
+            //     return Err(SysAugError::TraceeCrashed);
+            // }
 
-            let status = PtraceStatus {
-                wait_status: wait_status.clone(),
-            };
+            // let mut maybe_exit: Option<u8> = None;
+            // let _ = self.on_tracee_signaled(&status, &mut maybe_exit)?
+            //     && self.on_tracee_exited(&status, &mut maybe_exit)?
+            //     && self.on_tracee_init_syscalls(&status, &mut maybe_exit)?
+            //     && self.on_tracee_syscall(&status, &mut maybe_exit)?
+            //     && self.on_tracee_clone(&status, &mut maybe_exit)?
+            //     && self.on_tracee_unknown_event(&status, &mut maybe_exit)?;
 
-            // Unblock different PtraceFutureTypes in the proper order
-            if Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
-                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_SIGNAL, status);
-            } else if let WaitStatus::PtraceEvent(..) = &wait_status {
-                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_PTRACE_EVENT, status);
-            } else if let WaitStatus::PtraceSyscall(..) = &wait_status {
-                async_runtime.unblock_futures(PtraceFutureTypes::WAIT_FOR_PTRACE_SYSCALL, status);
-            } else {
-                event!(Level::INFO, "Unknown ptrace event: {:?}", &wait_status);
-            }
-
-            /**
-             * Old synchronous logic:
-            if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
-                info!("Process {:?} crashed: {:?}.", &pid, &status);
-                self.handle_exit(pid)?;
-                return Err(SysAugError::TraceeCrashed);
-            }
-
-            let mut maybe_exit: Option<u8> = None;
-            let _ = self.on_tracee_signaled(&status, &mut maybe_exit)?
-                && self.on_tracee_exited(&status, &mut maybe_exit)?
-                && self.on_tracee_init_syscalls(&status, &mut maybe_exit)?
-                && self.on_tracee_syscall(&status, &mut maybe_exit)?
-                && self.on_tracee_clone(&status, &mut maybe_exit)?
-                && self.on_tracee_unknown_event(&status, &mut maybe_exit)?;
-
-            if let Some(exit_code) = maybe_exit {
-                return Ok(exit_code);
-            }
-            */
+            // if let Some(exit_code) = maybe_exit {
+            //     return Ok(exit_code);
+            // }
         }
     }
 
-    fn get_tracee_maybe_signal(&self, s: &WaitStatus) -> Result<Some<&sys::signal::Signal>, SysAugError> {
+    fn get_tracee_maybe_signal<'a>(
+        &self,
+        s: &'a WaitStatus,
+    ) -> Result<Option<&'a Signal>, SysAugError> {
         let pid = self.pid;
         if let WaitStatus::Stopped(_, signal) = s {
             event!(Level::DEBUG, "child stopped, status {:?}", &s);
-            if signal == &sys::signal::Signal::SIGTRAP {
-                return None;
+            if signal == &Signal::SIGTRAP {
+                return Ok(None);
             }
             let getsig_ans = self
                 .ptrace_client
                 .execute(move || sys::ptrace::getsiginfo(pid))?;
             if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
-                return None;
+                return Ok(None);
             }
-            return Some(signal);
+            return Ok(Some(signal));
         }
-        None
+        Ok(None)
     }
 
     fn on_tracee_signaled(&self, s: &WaitStatus, exit: &mut Option<u8>) -> BoolResult {
         let pid = self.pid;
         if let WaitStatus::Stopped(_, signal) = s {
             event!(Level::DEBUG, "child stopped, status {:?}", &s);
-            if signal == &sys::signal::Signal::SIGTRAP {
+            if signal == &Signal::SIGTRAP {
                 return Ok(false);
             }
             let getsig_ans = self
@@ -507,7 +588,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             if getsig_ans.err() == Some(nix::errno::Errno::EINVAL) {
                 return Ok(false);
             }
-            if signal == &sys::signal::Signal::SIGSTOP {
+            if signal == &Signal::SIGSTOP {
                 if let Some(parent) = self.parent.as_ref() {
                     let ignore_sigstops = rwlock_read(&parent.ignore_sigstops)?;
                     if ignore_sigstops.contains(&pid) {
@@ -515,7 +596,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     }
                 }
             }
-            if signal == &sys::signal::Signal::SIGSYS && self.states.args.fix_sigsys {
+            if signal == &Signal::SIGSYS && self.states.args.fix_sigsys {
                 // Android sometimes kills a process for using privileged syscalls like sysinfo()
                 // Instead of killing tracee, return -ENOSYS and let it resume
                 let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;
@@ -553,7 +634,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     return Ok(false);
                 }
             }
-            if signal == &sys::signal::Signal::SIGSEGV && self.states.args.gdb {
+            if signal == &Signal::SIGSEGV && self.states.args.gdb {
                 info!("Tracee segfault. Starting gdb");
                 exit.replace(self.transfer_to_gdb()?);
                 return Ok(false);
@@ -608,8 +689,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 let fail_fast = self.states.args.fail_fast;
                 new_tracee_handler.start(move || {
                     if fail_fast && new_tracee_handler2.failed() {
-                        let _ = sys::signal::kill(root_pid, Some(sys::signal::Signal::SIGKILL))
-                            .map_err(display_err);
+                        let _ =
+                            sys::signal::kill(root_pid, Some(Signal::SIGKILL)).map_err(display_err);
                     }
                 });
 
@@ -801,7 +882,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     fn transfer_to_gdb(&self) -> Result<u8, SysAugError> {
         let pid = self.pid;
         self.ptrace_client
-            .execute(move || sys::ptrace::detach(pid, sys::signal::Signal::SIGSTOP))?
+            .execute(move || sys::ptrace::detach(pid, Signal::SIGSTOP))?
             .map_err(SysAugError::GDBDetach)?;
         let mut cmd = std::process::Command::new("gdb");
         cmd.arg("-p").arg(pid.as_raw().to_string());

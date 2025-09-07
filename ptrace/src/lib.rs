@@ -1,5 +1,4 @@
 mod common;
-mod futures;
 mod mem_slow;
 
 pub use crate::common::{

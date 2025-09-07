@@ -1,5 +1,6 @@
 use crate::handler::TraceeHandlerStates;
 use crate::mods;
+use executor::{PtraceFutureTypes, PtraceStatus};
 use ptrace::GenericPurposeRegs;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -97,8 +98,10 @@ pub enum SysAugError {
     #[error("Internal error, tracee initializing but missing original regs")]
     InitMissingSavedRegs,
 
-    #[error("Internal error, unable to initialize async runtime {0}")]
-    InitAsyncRuntime(tokio::io::Error),
+    #[error(
+        "Internal error, ptrace async executor unblocked without correct status: {0:?} vs {1:?}"
+    )]
+    AsyncMismatch(PtraceFutureTypes, PtraceStatus),
 }
 
 // ------------------- MODS -------------------

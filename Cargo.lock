@@ -184,6 +184,7 @@ dependencies = [
 name = "executor"
 version = "0.1.0"
 dependencies = [
+ "futures-lite",
  "lazy_static",
  "libc",
  "nix",
@@ -491,7 +492,6 @@ name = "ptrace"
 version = "0.1.0"
 dependencies = [
  "backtrace",
- "futures-lite",
  "lazy_static",
  "libc",
  "nix",
