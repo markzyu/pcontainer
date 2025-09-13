@@ -472,9 +472,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 self.do_resume_syscall().await?;
             }
 
-            let new_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
-            let (new_syscall_info, _) = get_syscall(&new_regs.syscall_num);
-            let which_aug = new_syscall_info.map(|x| &x.augment);
+            // aarch64 doesn't work if we read regs right after execve()
+            // Yet, x86_64 requires it...
+            let _new_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let (_new_syscall_info, _) = get_syscall(&_new_regs.syscall_num);
+            #[cfg(not(any(target_arch = "aarch64")))]
+            let which_aug = _new_syscall_info.map(|x| &x.augment);
+
             if which_aug == Some(&Augments::Exec) {
                 self.initialize_tracee_mmaps().await?;
             }
