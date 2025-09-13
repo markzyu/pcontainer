@@ -377,9 +377,17 @@ lazy_static! {
     };
 }
 
+#[cfg(any(target_arch = "aarch64"))]
+pub const SYSCALL_INSTRUCTION_SIZE: usize = 4;
+
+#[cfg(not(any(target_arch = "aarch64")))]
+pub const SYSCALL_INSTRUCTION_SIZE: usize = 2;
+
 pub fn get_syscall(syscall_num: &usize) -> (Option<&SyscallInfo>, String) {
     let syscall_info = SYSCALL_INFOS.get(syscall_num);
     let syscall_num_str = syscall_num.to_string();
-    let syscall_name = syscall_info.map(|x| x.name()).unwrap_or(&syscall_num_str);
-    (syscall_info, syscall_name.to_string())
+    let syscall_name = syscall_info
+        .map(|x| format!("{}({})", x.name(), &syscall_num_str))
+        .unwrap_or(syscall_num_str);
+    (syscall_info, syscall_name)
 }
