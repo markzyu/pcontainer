@@ -95,12 +95,8 @@ pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
 
-    pub orig_request_regs: RwLock<Option<GenericPurposeRegs>>,
-    pub orig_wait_status: RwLock<usize>,
     // ignore the next sigstop for the following pids
     pub ignore_sigstops: Arc<RwLock<HashSet<Pid>>>,
-    pub signal_tracee: RwLock<Option<Signal>>,
-    pub tracee_init_stage: RwLock<TraceeInitStage>,
 
     /// Readonly, Copy on Move, values
     pub shared_fd: RawFd,
@@ -489,16 +485,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             //        self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
             //    }
             //}
-
-            //self.maybe_skip_syscall()?;
-
-            //if tracee_init_stage != TraceeInitStage::FirstCallActuallyDone
-            //    && which_aug == Some(&Augments::Exec)
-            //{
-            //    rwlock_replace(&self.tracee_init_stage, TraceeInitStage::ExecSeen)?;
-            //    return Ok(true);
-            //}
-            //return Ok(false);
         }
     }
 
@@ -584,11 +570,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ptrace_client,
             mods: Arc::new(RwLock::new(HashMap::new())),
             mod_providers: mods,
-            orig_request_regs: RwLock::default(),
-            orig_wait_status: RwLock::default(),
             ignore_sigstops: Arc::new(RwLock::default()),
-            signal_tracee: RwLock::default(),
-            tracee_init_stage: RwLock::new(TraceeInitStage::Begin),
             mmap_tracer_addr: mmap_addr,
             shared_fd,
             states: Arc::new((*default_states).try_clone()?),
