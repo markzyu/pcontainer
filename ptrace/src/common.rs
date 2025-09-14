@@ -42,6 +42,14 @@ pub const PTRACE_SETREGSET: i32 = libc::PTRACE_SETREGSET as i32;
 #[cfg(any(target_env = "gnu"))]
 pub const PTRACE_SETREGSET: u32 = sys::ptrace::Request::PTRACE_SETREGSET as u32;
 
+// Used by aarch64 and arm to set system call number. Does not exist in rust libc
+#[cfg(not(any(target_env = "gnu")))]
+pub const NT_ARM_SYSTEM_CALL: i32 = 0x404;
+
+// Used by aarch64 and arm to set system call number. Does not exist in rust libc
+#[cfg(any(target_env = "gnu"))]
+pub const NT_ARM_SYSTEM_CALL: u32 = 0x404;
+
 lazy_static! {
     pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 }

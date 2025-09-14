@@ -122,6 +122,7 @@ pub fn getevent(pid: nix::unistd::Pid) -> Result<libc::c_ulong, PtraceError> {
     Ok(unsafe { data.assume_init() })
 }
 
+#[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
 pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
     let mut regs = getregs(pid)?;
     event!(
@@ -143,6 +144,31 @@ pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceEr
         regs2.arg1,
         regs2.arg2,
     );
+    Ok(())
+}
+
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
+    event!(
+        Level::DEBUG,
+        "Replacing with {}",
+        val,
+    );
+    // https://stackoverflow.com/questions/63620203/ptrace-change-syscall-number-arm64
+    let mut data = val;
+    let res = unsafe {
+        let mut iov = libc::iovec {
+            iov_base: &mut data as *mut _ as *mut libc::c_void,
+            iov_len: std::mem::size_of::<usize>(),
+        };
+        libc::ptrace(
+            common::PTRACE_SETREGSET,
+            libc::pid_t::from(pid),
+            common::NT_ARM_SYSTEM_CALL as *mut libc::c_void,
+            &mut iov as *mut _ as *mut libc::c_void,
+        )
+    };
+    nix::errno::Errno::result(res).map_err(PtraceError::SetRegs)?;
     Ok(())
 }
 
