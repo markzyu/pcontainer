@@ -1,3 +1,5 @@
+**todo**: update the first example to be `do_skip_syscall` which in fact benefitted more from async than clone()
+
 ## Why use Async
 
 Ptrace as it is designed, is event-based. Some logics, like the handling of a clone() syscall
