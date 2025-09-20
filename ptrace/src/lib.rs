@@ -46,12 +46,15 @@ pub fn start(
 
     // Open many empty FDs to at least make sure we don't clobber FD3 (commonly used in bash scripts)
     let shared_fd = {
-        let empty_fds = (0..27).map(|i| {
-            memfd::memfd_create("empty", memfd::MFdFlags::empty()).map_err(PtraceError::CreateMemoryFile)
-        }).collect::<Result<Vec<OwnedFd>, _>>()?;
+        let empty_fds = (0..27)
+            .map(|i| {
+                memfd::memfd_create("empty", memfd::MFdFlags::empty())
+                    .map_err(PtraceError::CreateMemoryFile)
+            })
+            .collect::<Result<Vec<OwnedFd>, _>>()?;
 
         memfd::memfd_create("shared_from_tracer", memfd::MFdFlags::empty())
-        .map_err(PtraceError::CreateMemoryFile)?
+            .map_err(PtraceError::CreateMemoryFile)?
     };
 
     // Continue to setup the shared_fd to have the correct mmap size

@@ -495,7 +495,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         }
     }
 
-    async fn _insert_syscall(&self, syscall_name: &'static str, syscall_num: usize, args: [usize; 6]) -> Result<GenericPurposeRegs, SysAugError> {
+    async fn _insert_syscall(
+        &self,
+        syscall_name: &'static str,
+        syscall_num: usize,
+        args: [usize; 6],
+    ) -> Result<GenericPurposeRegs, SysAugError> {
         // Note: This function must call self.yielder_syscall.unblock() manually
         //       We are not trying to override any system during this time, so,
         //       We should unblock yields whenever we await
@@ -558,9 +563,20 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
     /// Take over the syscall async loop, right after execve() to establish mmap
     async fn initialize_tracee_mmaps(&self) -> Result<(), SysAugError> {
-        let mmap_regs = self._insert_syscall("SYS_mmap", libc::SYS_mmap as usize, [
-            0, SHARED_MMAP_SIZE, libc::PROT_READ as usize, libc::MAP_SHARED as usize, self.shared_fd as usize, 0
-        ]).await?;
+        let mmap_regs = self
+            ._insert_syscall(
+                "SYS_mmap",
+                libc::SYS_mmap as usize,
+                [
+                    0,
+                    SHARED_MMAP_SIZE,
+                    libc::PROT_READ as usize,
+                    libc::MAP_SHARED as usize,
+                    self.shared_fd as usize,
+                    0,
+                ],
+            )
+            .await?;
 
         let mut tracee_addr = self.mmap_tracee_addr.borrow_mut();
         *tracee_addr = mmap_regs.syscall_retval();
