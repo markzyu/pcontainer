@@ -93,25 +93,45 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // Override final path of interpreter only if use_native_loader = false
             let mut final_interp_path = interp_path_buf;
-            if !self.cli_args.use_native_loader {
+            if self.cli_args.chroot.is_some() && !self.cli_args.use_native_loader {
                 if let PathAction::Override(new_path_val) = path_action {
                     final_interp_path = new_path_val;
                 }
             }
+
+            // Convert elf path to absolute path in container. Some linkers require this.
+            let mut final_elf_path_buf = elf_path_buf.clone();
+            if final_elf_path_buf.is_relative() {
+                if let Some(chroot_path) = &self.cli_args.chroot {
+                    event!(
+                        Level::DEBUG,
+                        "Converting relative exe path in chroot: {}",
+                        final_elf_path_buf.to_string_lossy(),
+                    );
+                    let host_absolute_path = std::path::absolute(&elf_path_buf).map_err(SysAugError::ConvertAbsolutePath)?;
+                    let without_prefix = host_absolute_path.strip_prefix(chroot_path).map_err(|_| SysAugError::ConvertAbsolutePathPrefix)?;
+                    let joined_path = std::path::Path::new("/").join(&without_prefix);
+                    final_elf_path_buf = std::path::absolute(&joined_path).map_err(SysAugError::ConvertAbsolutePath)?;
+                } else {
+                    final_elf_path_buf = std::path::absolute(&elf_path_buf).map_err(SysAugError::ConvertAbsolutePath)?;
+                }
+            }
+
             event!(
                 Level::INFO,
                 "Setting ELF interpreter = {}, exe = {}",
                 final_interp_path.to_string_lossy(),
-                elf_path_buf.to_string_lossy(),
+                final_elf_path_buf.to_string_lossy(),
             );
 
             // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
             // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
             let interp_addr = self.tracee_stack_append_path(final_interp_path)?;
+            let elf_addr = self.tracee_stack_append_path(final_elf_path_buf)?;
             let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
             let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
-            new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
+            new_argv.append(&mut elf_addr.to_ne_bytes().to_vec());
             new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
             let new_argv_addr = self.tracee_stack_append(new_argv)?;

@@ -45,14 +45,13 @@ def run_elf_chroot(elf_path, timeout=7, stderr=None, **kwargs):
     cmd_expr = " ".join(cmd)
     print(f"cmd = {cmd_expr}")
 
-    os.environ.pop('LD_PRELOAD', None)
-
     return sub.run(
         cmd, 
         input=b"",
         timeout=timeout,
         stdout=sub.PIPE,
         stderr=stderr or os.sys.stderr,
+        env={},
     )
 
 

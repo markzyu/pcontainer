@@ -42,6 +42,12 @@ pub enum SysAugError {
     #[error("Not a valid absolute path: {0}")]
     AbsolutePath(std::path::PathBuf),
 
+    #[error("Cannot convert to absolute path: {0}")]
+    ConvertAbsolutePath(std::io::Error),
+
+    #[error("Cannot convert to absolute path: prefix did not match chroot path")]
+    ConvertAbsolutePathPrefix,
+
     #[error("Unable to find tracee's dirfd directory")]
     DirfdReg,
 
