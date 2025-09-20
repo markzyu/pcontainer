@@ -17,7 +17,7 @@ use nix::sys::wait;
 use nix::unistd;
 use std::convert::TryInto;
 use std::os::fd::AsRawFd;
-use std::os::fd::RawFd;
+use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process;
 use tracing::{event, Level};
@@ -42,8 +42,19 @@ pub fn start(
     cmd: &mut process::Command,
     no_attach: bool,
 ) -> Result<(unistd::Pid, RawFd, usize), PtraceError> {
-    let shared_fd = memfd::memfd_create("shared_from_tracer", memfd::MFdFlags::empty())
-        .map_err(PtraceError::CreateMemoryFile)?;
+    // Note: All FDs will auto close when dropped.
+
+    // Open many empty FDs to at least make sure we don't clobber FD3 (commonly used in bash scripts)
+    let shared_fd = {
+        let empty_fds = (0..27).map(|i| {
+            memfd::memfd_create("empty", memfd::MFdFlags::empty()).map_err(PtraceError::CreateMemoryFile)
+        }).collect::<Result<Vec<OwnedFd>, _>>()?;
+
+        memfd::memfd_create("shared_from_tracer", memfd::MFdFlags::empty())
+        .map_err(PtraceError::CreateMemoryFile)?
+    };
+
+    // Continue to setup the shared_fd to have the correct mmap size
     unistd::ftruncate(&shared_fd, SHARED_MMAP_SIZE as NixISize)
         .map_err(PtraceError::CreateMemoryFile)?;
     let mmap_addr = unsafe {
