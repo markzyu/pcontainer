@@ -495,8 +495,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         }
     }
 
-    /// Take over the syscall async loop, right after execve() to establish mmap
-    async fn initialize_tracee_mmaps(&self) -> Result<(), SysAugError> {
+    async fn _insert_syscall(&self, syscall_name: &'static str, syscall_num: usize, args: [usize; 6]) -> Result<GenericPurposeRegs, SysAugError> {
         // Note: This function must call self.yielder_syscall.unblock() manually
         //       We are not trying to override any system during this time, so,
         //       We should unblock yields whenever we await
@@ -512,7 +511,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let (_, syscall_name) = get_syscall(&regs.syscall_num);
         event!(
             Level::INFO,
-            "TraceeInit: first syscall after exec is {:?}",
+            "TraceeInit: Overriding first syscall after exec, was {:?}",
             syscall_name
         );
 
@@ -520,43 +519,57 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         //       (cannot really remap all fds because thats too many syscalls)
 
         // Override that system call to run mmap instead
-        regs.arg0 = 0;
-        regs.arg1 = SHARED_MMAP_SIZE;
-        regs.arg2 = libc::PROT_READ as usize;
-        regs.arg3 = libc::MAP_SHARED as usize;
-        regs.arg4 = self.shared_fd as usize;
-        regs.arg5 = 0;
+        regs.arg0 = args[0];
+        regs.arg1 = args[1];
+        regs.arg2 = args[2];
+        regs.arg3 = args[3];
+        regs.arg4 = args[4];
+        regs.arg5 = args[5];
 
         self.ptrace_client
             .execute(move || ptrace::setregs(pid, regs))??;
         self.ptrace_client
-            .execute(move || ptrace::set_syscall_num(pid, libc::SYS_mmap as usize))??;
+            .execute(move || ptrace::set_syscall_num(pid, syscall_num))??;
 
         // Wait for mmap to return
         event!(
-            Level::INFO,
-            "TraceeInit: replaced first syscall with SYS_mmap",
+            Level::DEBUG,
+            "TraceeInit: replaced first syscall with {}",
+            syscall_name
         );
         self.yielder_syscall.unblock();
         self.wait_for_syscall().await?;
-        let mmap_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let result_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
 
         // Reset tracee to register state before system call
         // and decrement PC pointer to immediately rerun system call
         let mut new_regs = orig_regs;
-        let mut tracee_addr = self.mmap_tracee_addr.borrow_mut();
-        *tracee_addr = mmap_regs.syscall_retval();
-
         new_regs.pc -= SYSCALL_INSTRUCTION_SIZE;
         event!(
-            Level::INFO,
-            "Tracee mounted mmap address: {:x}. Continuing syscall {} from {:x}",
-            mmap_regs.syscall_retval(),
+            Level::DEBUG,
+            "TraceeInit: Continuing syscall {} from {:x}",
             new_regs.syscall_num,
             new_regs.pc
         );
         self.ptrace_client
             .execute(move || ptrace::setregs(pid, new_regs))??;
+        Ok(result_regs)
+    }
+
+    /// Take over the syscall async loop, right after execve() to establish mmap
+    async fn initialize_tracee_mmaps(&self) -> Result<(), SysAugError> {
+        let mmap_regs = self._insert_syscall("SYS_mmap", libc::SYS_mmap as usize, [
+            0, SHARED_MMAP_SIZE, libc::PROT_READ as usize, libc::MAP_SHARED as usize, self.shared_fd as usize, 0
+        ]).await?;
+
+        let mut tracee_addr = self.mmap_tracee_addr.borrow_mut();
+        *tracee_addr = mmap_regs.syscall_retval();
+
+        event!(
+            Level::INFO,
+            "Tracee mounted mmap address: {:x}",
+            mmap_regs.syscall_retval()
+        );
         Ok(())
     }
 }
