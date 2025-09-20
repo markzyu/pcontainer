@@ -149,11 +149,7 @@ pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceEr
 
 #[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 pub fn set_syscall_num(pid: nix::unistd::Pid, val: usize) -> Result<(), PtraceError> {
-    event!(
-        Level::DEBUG,
-        "Replacing with {}",
-        val,
-    );
+    event!(Level::DEBUG, "Replacing with {}", val,);
     // https://stackoverflow.com/questions/63620203/ptrace-change-syscall-number-arm64
     let mut data = val;
     let res = unsafe {

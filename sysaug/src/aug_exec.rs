@@ -108,12 +108,17 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                         "Converting relative exe path in chroot: {}",
                         final_elf_path_buf.to_string_lossy(),
                     );
-                    let host_absolute_path = std::path::absolute(&elf_path_buf).map_err(SysAugError::ConvertAbsolutePath)?;
-                    let without_prefix = host_absolute_path.strip_prefix(chroot_path).map_err(|_| SysAugError::ConvertAbsolutePathPrefix)?;
+                    let host_absolute_path = std::path::absolute(&elf_path_buf)
+                        .map_err(SysAugError::ConvertAbsolutePath)?;
+                    let without_prefix = host_absolute_path
+                        .strip_prefix(chroot_path)
+                        .map_err(|_| SysAugError::ConvertAbsolutePathPrefix)?;
                     let joined_path = std::path::Path::new("/").join(&without_prefix);
-                    final_elf_path_buf = std::path::absolute(&joined_path).map_err(SysAugError::ConvertAbsolutePath)?;
+                    final_elf_path_buf = std::path::absolute(&joined_path)
+                        .map_err(SysAugError::ConvertAbsolutePath)?;
                 } else {
-                    final_elf_path_buf = std::path::absolute(&elf_path_buf).map_err(SysAugError::ConvertAbsolutePath)?;
+                    final_elf_path_buf = std::path::absolute(&elf_path_buf)
+                        .map_err(SysAugError::ConvertAbsolutePath)?;
                 }
             }
 
