@@ -13,6 +13,7 @@ int main() {
     char line[2048];
 
     value = 0;
+    errno = 0;
 
     result = vfork();
     if (result < 0) {

@@ -18,6 +18,7 @@ int main() {
     char line[2048];
 
     value = 0;
+    errno = 0;
 
     result = syscall(SYS_clone, CLONE_VFORK | CLONE_VM | SIGCHLD, NULL, NULL, NULL, NULL);
     if (result < 0) {
