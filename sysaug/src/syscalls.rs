@@ -269,12 +269,14 @@ lazy_static! {
 
         define_dirfd_syscall!(libc::SYS_readlinkat, 2, 0, ans);
         define_dirfd2_syscall!(libc::SYS_renameat, 10, ans);
+        define_dirfd2_syscall!(libc::SYS_renameat2, 10, ans);
         define_dirfd_syscall!(libc::SYS_symlinkat, 4, 1, ans);
         define_dirfd_deletion_syscall!(libc::SYS_unlinkat, 2, 0, DelType::File, ans);
         define_paths_syscall!(libc::SYS_lgetxattr, 1, ans);
         define_paths_syscall!(libc::SYS_llistxattr, 1, ans);
         update_syscall!(ans, libc::SYS_readlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_renameat, |x| x.dont_follow_symlink = true);
+        update_syscall!(ans, libc::SYS_renameat2, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_symlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_unlinkat, |x| x.dont_follow_symlink = true);
         update_syscall!(ans, libc::SYS_lgetxattr, |x| x.dont_follow_symlink = true);
@@ -318,28 +320,29 @@ lazy_static! {
             update_syscall!(ans, libc::SYS_lstat64, |x| x.dont_follow_symlink = true);
         }
 
-        #[cfg(all(target_arch = "aarch64", not(target_os = "android")))]
-        {
-            define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
-            update_syscall!(ans, libc::SYS_newfstatat, |x| {
-                x.flags = Some(3);
-                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-            });
-        }
-
         #[cfg(target_arch = "x86_64")]
         {
             define_dirfd_syscall!(libc::SYS_faccessat2, 2, 0, ans);
-            define_dirfd_syscall!(libc::SYS_newfstatat, 2, 0, ans);
             define_paths_syscall!(libc::SYS_rename, 3, ans);
             update_syscall!(ans, libc::SYS_rename, |x| x.dont_follow_symlink = true);
-            update_syscall!(ans, libc::SYS_newfstatat, |x| {
-                x.flags = Some(3);
-                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-            });
 
             define_paths_syscall!(libc::SYS_utime, 1, ans);
             define_getdents_syscall!(libc::SYS_getdents, 32, ans);
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        let SYS_newfstatat: i64 = libc::SYS_newfstatat;
+
+        #[cfg(target_arch = "aarch64")]
+        let SYS_newfstatat: i64 = 79;
+
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        {
+            define_dirfd_syscall!(SYS_newfstatat, 2, 0, ans);
+            update_syscall!(ans, SYS_newfstatat, |x| {
+                x.flags = Some(3);
+                x.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            });
         }
 
         #[cfg(any(target_arch = "x86_64", target_arch = "arm"))]

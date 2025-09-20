@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <stdio.h>
 #include <string.h>
@@ -79,20 +80,22 @@ int main() {
     if (retval < 0) return errno;
 
     // Double check whether links still exist
-    retval = faccessat(AT_FDCWD, "/link", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/link) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/a", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/a) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/b", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/b) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/c", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/c) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/y", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/y) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/x", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/x) = %d errno = %d\n", retval, errno);
-    retval = faccessat(AT_FDCWD, "/z", R_OK, AT_SYMLINK_NOFOLLOW);
-    printf("access(/z) = %d errno = %d\n", retval, errno);
+    // Note: Android Termux libc does not support faccessat. So we must use fstatat
+    struct stat stat_buf;
+    retval = fstatat(AT_FDCWD, "/link", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/link) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/a", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/a) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/b", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/b) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/c", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/c) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/y", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/y) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/x", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/x) = %d errno = %d\n", retval, errno);
+    retval = fstatat(AT_FDCWD, "/z", &stat_buf, AT_SYMLINK_NOFOLLOW);
+    printf("fstatat(/z) = %d errno = %d\n", retval, errno);
 
 	return 0;
 }
