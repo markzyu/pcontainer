@@ -24,6 +24,28 @@ def run_script(script, timeout=7, stderr=None, **kwargs):
         stderr=stderr or os.sys.stderr,
     )
 
+def run_elf(elf_path, timeout=7, stderr=None, **kwargs):
+    """
+    Run an ELF binary file without chroot
+    """
+    if isinstance(elf_path, bytes):
+        elf_path = elf_path.decode("utf8")
+
+    cmd = _get_cmd(**kwargs)
+    cmd.append("--cmd")
+    cmd.append(elf_path)
+    cmd_expr = " ".join(cmd)
+    print(f"cmd = {cmd_expr}")
+
+    return sub.run(
+        cmd, 
+        input=b"",
+        timeout=timeout,
+        stdout=sub.PIPE,
+        stderr=stderr or os.sys.stderr,
+        env={},
+    )
+
 
 def run_elf_chroot(elf_path, timeout=7, stderr=None, **kwargs):
     """

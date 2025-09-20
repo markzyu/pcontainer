@@ -34,14 +34,14 @@ class TestBasics(t.TestCase):
         self.assertEqual(ans.stdout.split(b"(")[0].lower(), b"bash")
 
     def test_run_shell_script_with_spaces_in_shebang(self):
-        ans = c.run_script(b"./tests/fixtures/02-script-with-spaces-in-shebang.sh")
+        ans = c.run_elf(b"./tests/fixtures/02-script-with-spaces-in-shebang.sh")
         self.assertEqual(ans.returncode, 0)
         self.assertEqual(ans.stdout, b"TEST\n")
 
     def test_run_shell_script_with_invalid_shebang(self):
-        ans = c.run_script(b"./tests/fixtures/03-script-invalid-shebang.sh", stderr=subprocess.PIPE)
+        ans = c.run_elf(b"./tests/fixtures/03-script-invalid-shebang.sh", stderr=subprocess.PIPE)
         self.assertNotEqual(ans.returncode, 0)
-        self.assertTrue(b"because of invalid shebang: \"/bin/sh -a -b -c\"" in ans.stderr)
+        self.assertIn(b"because of invalid shebang: \"/bin/sh -a -b -c\"", ans.stderr)
 
     def test_wait4_is_restarted_if_child_is_stopped(self):
         for run_method in (c.run_script, c.run_elf_chroot):
