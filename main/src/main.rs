@@ -53,6 +53,10 @@ pub struct CLIArgs {
     /// Attach GDB after X number of system calls
     #[clap(long)]
     pub gdb_at: Option<u64>,
+
+    /// Use the host ld.so instead of the one from the chroot environment
+    #[clap(long)]
+    pub use_native_loader: bool,
 }
 
 #[derive(Debug, Error)]
@@ -179,6 +183,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         fix_sigsys: args.fix_sigsys,
         gdb: args.gdb,
         gdb_at: args.gdb_at,
+        use_native_loader: args.use_native_loader,
     };
     let states = sysaug::TraceeHandlerStates {
         args: args2,

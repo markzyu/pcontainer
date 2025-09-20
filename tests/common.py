@@ -2,6 +2,7 @@ import os
 import subprocess as sub
 
 
+IS_ANDROID_TERMUX = 'TERMUX_VERSION' in os.environ
 STAGING = "tests/fixtures/staging"
 METADATA = "tests/fixtures/staging.metadata"
 
@@ -37,10 +38,15 @@ def run_elf_chroot(elf_path, timeout=7, stderr=None, **kwargs):
     os.system(setup_cmd)
 
     cmd = _get_cmd(chroot=True, **kwargs)
+    if IS_ANDROID_TERMUX:
+        cmd.append("--use-native-loader")
     cmd.append("--cmd")
     cmd.append("/executable")
     cmd_expr = " ".join(cmd)
     print(f"cmd = {cmd_expr}")
+
+    os.environ.pop('LD_PRELOAD', None)
+
     return sub.run(
         cmd, 
         input=b"",

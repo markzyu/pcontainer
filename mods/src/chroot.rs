@@ -37,9 +37,14 @@ impl Mod for ChrootMod {
     fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
         rwlock_replace(&self.states.path_prefix, self.states.args.chroot.clone())?;
         let mut excludes = rwlock_write(&self.states.path_prefix_excludes)?;
+        // Linux systems require real versions of the following files
         excludes.push("/dev".into());
         excludes.push("/proc".into());
         excludes.push("/sys".into());
+
+        // Android systems require real versions of the following files
+        excludes.push("/system/lib64".into());
+        excludes.push("/system/lib".into());
         Ok(ModAction::None)
     }
 }

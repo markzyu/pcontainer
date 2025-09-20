@@ -83,27 +83,31 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             file.read_exact(buf.as_mut_slice())
                 .map_err(SysAugError::ReadBin)?;
 
-            // Calculate real path of interpreter
+            // Calculate real path of interpreter (following all chroot rules)
             let interp_path_buf = Self::path_from_bytes(buf)?;
             let path_action = self
                 .calc_real_path(&interp_path_buf, syscall, &read_args)
                 .await?;
             self.notify_mods_about_path(syscall, &interp_path_buf, &path_action)
                 .await?;
-            let mut new_interp_path = interp_path_buf;
-            if let PathAction::Override(new_path_val) = path_action {
-                new_interp_path = new_path_val;
+
+            // Override final path of interpreter only if use_native_loader = false
+            let mut final_interp_path = interp_path_buf;
+            if !self.cli_args.use_native_loader {
+                if let PathAction::Override(new_path_val) = path_action {
+                    final_interp_path = new_path_val;
+                }
             }
             event!(
                 Level::INFO,
                 "Setting ELF interpreter = {}, exe = {}",
-                new_interp_path.to_string_lossy(),
+                final_interp_path.to_string_lossy(),
                 elf_path_buf.to_string_lossy(),
             );
 
             // Replace argv[0] = ld.so, argv[1] = elf.FAKEpath, argv[2:] = argv[1:]
             // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
-            let interp_addr = self.tracee_stack_append_path(new_interp_path)?;
+            let interp_addr = self.tracee_stack_append_path(final_interp_path)?;
             let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
             let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());

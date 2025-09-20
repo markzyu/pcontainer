@@ -29,6 +29,9 @@ pub struct CLIArgs {
     pub fix_sigsys: bool,
     pub gdb: bool,
     pub gdb_at: Option<u64>,
+
+    /// Use the host ld.so instead of the one from the chroot environment
+    pub use_native_loader: bool,
 }
 
 #[derive(Debug)]
