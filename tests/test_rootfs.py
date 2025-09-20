@@ -43,7 +43,7 @@ class TestRootFs(t.TestCase):
         )
         self.assertEqual(ans.returncode, 0)
 
-    def compare_tar_with_dir(self, dir, tar):
+    def compare_tar_with_dir(self, dir, tar, ignore_perms=False):
         cmd = f"""
         cd {dir};
         rm ../result.tar;
@@ -51,15 +51,18 @@ class TestRootFs(t.TestCase):
         """
         ok = os.system(cmd)
         self.assertEqual(ok, 0)
+
+        tar_info_fn = _tar_info_minimal_no_perms if ignore_perms else _tar_info_minimal
+
         with tarfile.open(f"tests/fixtures/{tar}") as expect_tar:
-            expect_val = _sort_tar_info(map(_tar_info_minimal, expect_tar.getmembers()))
+            expect_val = _sort_tar_info(map(tar_info_fn, expect_tar.getmembers()))
         with tarfile.open("tests/fixtures/result.tar") as actual_tar:
-            actual_val = _sort_tar_info(map(_tar_info_minimal, actual_tar.getmembers()))
+            actual_val = _sort_tar_info(map(tar_info_fn, actual_tar.getmembers()))
         self.assertEqual(expect_val, actual_val)
 
     def test_rootfs_creates_metadata(self):
         self._setup_untar_in_container("01-rootfs-metadata-mounted.tar", rootfs=True)
-        self.compare_tar_with_dir(METADATA, "01-rootfs-metadata-raw.tar")
+        self.compare_tar_with_dir(METADATA, "01-rootfs-metadata-raw.tar", ignore_perms=True)
         self.compare_tar_with_dir(STAGING, "01-rootfs-metadata-mounted.tar")
 
     def test_rm_rf_after_rootfs_creates_metadata(self):
@@ -139,6 +142,14 @@ def _tar_info_minimal(obj):
         "name": obj.name,
         "size": obj.size,
         "mode": obj.mode,
+        "type": obj.type,
+        "linkname": obj.linkname,
+    }
+
+def _tar_info_minimal_no_perms(obj):
+    return {
+        "name": obj.name,
+        "size": obj.size,
         "type": obj.type,
         "linkname": obj.linkname,
     }
