@@ -1,7 +1,7 @@
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
 use crate::mods::PathAction;
-use ptrace::{GenericPurposeRegs, USIZE_SIZE};
+use ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
 use tracing::{event, Level};
 
@@ -33,13 +33,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // TODO: in the future, only skip if the file doesn't exist. If it's of unknown file type, don't execute it.
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
+        let MemHelpers { read_bytes_until_zero, read_bytes_until_num_zeroes, .. } = self.cli_args.mem_helpers.clone();
 
         let arg0 = regs.arg0;
         let arg1 = regs.arg1;
         let path_bytes =
-            ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg0))??;
+            ptrace_client.execute(move || (read_bytes_until_zero)(pid, arg0))??;
         let argv_bytes = ptrace_client
-            .execute(move || ptrace::read_bytes_until_num_zeroes(pid, arg1, *USIZE_SIZE))??;
+            .execute(move || (read_bytes_until_num_zeroes)(pid, arg1, *USIZE_SIZE))??;
 
         let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
 

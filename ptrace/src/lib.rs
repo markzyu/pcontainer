@@ -1,14 +1,15 @@
 mod common;
+mod mem_direct;
 mod mem_slow;
 
 pub use crate::common::{
     getregs, setregs, CHeader, CStruct, GenericPurposeRegs, NixISize, PtraceError,
-    PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, USIZE_SIZE,
+    PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, USIZE_SIZE, shared_regions, SharedRegionContent, 
+    STACK_SAFE_ZONE_SIZE, MAX_NUM_TRACEES, write, write_structs_to_tracee, read_bytes_to_structs,
+    MemHelpers
 };
-pub use crate::mem_slow::{
-    read, read_bytes_to_structs, read_bytes_until_num_zeroes, read_bytes_until_zero, write,
-    write_bytes_to_tracee, write_structs_to_tracee,
-};
+pub use crate::mem_direct::direct_mem_helper;
+pub use crate::mem_slow::slow_mem_helper;
 
 use nix::sys;
 use nix::sys::memfd;
@@ -46,8 +47,8 @@ pub fn start(
 
     // Open many empty FDs to at least make sure we don't clobber FD3 (commonly used in bash scripts)
     let shared_fd = {
-        let empty_fds = (0..27)
-            .map(|i| {
+        let _empty_fds = (0..27)
+            .map(|_| {
                 memfd::memfd_create("empty", memfd::MFdFlags::empty())
                     .map_err(PtraceError::CreateMemoryFile)
             })
@@ -72,6 +73,15 @@ pub fn start(
         .map_err(PtraceError::CreateMemoryFile)?
         .as_ptr() as usize
     };
+
+    unsafe {
+        for i in 0..MAX_NUM_TRACEES {
+            let start_tracee = (mmap_addr + i * STACK_SAFE_ZONE_SIZE) as *mut SharedRegionContent;
+            let mut region_box = shared_regions[i].write().map_err(|_| PtraceError::LockGlobalMmap)?;
+            *region_box = Some(Box::from_raw(start_tracee));
+        }
+    }
+
     event!(
         Level::INFO,
         "Created shared mmap fd {:?} addr {:x}",

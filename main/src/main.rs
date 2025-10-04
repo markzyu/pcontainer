@@ -1,5 +1,6 @@
 use clap::Clap;
 use executor::PtraceServer;
+use ptrace::{direct_mem_helper, slow_mem_helper};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
@@ -25,6 +26,10 @@ pub struct CLIArgs {
     /// If your tracee crashes due to SIGSYS, use this flag.
     #[clap(long)]
     pub fix_sigsys: bool,
+
+    /// If your kernel is older than v3.17, then please use this flag to avoid mmap errors
+    #[clap(long)]
+    pub fix_mmap: bool,
 
     /// Make your applications think they are root when they are not.
     #[clap(long)]
@@ -181,6 +186,10 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
         fix_sigsys: args.fix_sigsys,
+        mem_helpers: match args.fix_mmap {
+            true => slow_mem_helper,
+            false => direct_mem_helper,
+        },
         gdb: args.gdb,
         gdb_at: args.gdb_at,
         use_native_loader: args.use_native_loader,

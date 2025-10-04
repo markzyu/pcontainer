@@ -8,7 +8,7 @@ use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, Ptrace
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::{GenericPurposeRegs, SHARED_MMAP_SIZE};
+use ptrace::{GenericPurposeRegs, MemHelpers, SHARED_MMAP_SIZE};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -27,6 +27,7 @@ pub struct CLIArgs {
     pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
     pub fix_sigsys: bool,
+    pub mem_helpers: MemHelpers,
     pub gdb: bool,
     pub gdb_at: Option<u64>,
 
@@ -229,12 +230,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     // This can be called multiple times and will add new content to the end of
     // previous contents.
     pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
+        let MemHelpers { write_bytes_to_tracee, .. } = this.cli_args.mem_helpers.clone();
         let pid = self.pid;
         let mut offset = self.tracee_stack_offset.borrow_mut();
         let old_offset = *offset;
         let (addr, new_offset) = self.ptrace_client.execute(move || {
             let final_bytes = bytes.as_slice();
-            unsafe { ptrace::write_bytes_to_tracee(pid, old_offset, final_bytes) }
+            unsafe { (write_bytes_to_tracee)(pid, old_offset, final_bytes) }
         })??;
         *offset = new_offset;
         Ok(addr)
