@@ -90,8 +90,8 @@ fn open_tracee_read_map(pid: &nix::unistd::Pid, addr: usize, size: usize) -> Res
             if pair.len() != 2 {
                 continue
             }
-            let start: usize = pair[0].parse().map_err(|_| PtraceError::ParseUsizeFromString(pair[0].to_string()))?;
-            let end: usize = pair[1].parse().map_err(|_| PtraceError::ParseUsizeFromString(pair[1].to_string()))?;
+            let start: usize = usize::from_str_radix(pair[0], 16).map_err(|_| PtraceError::ParseUsizeFromString(pair[0].to_string()))?;
+            let end: usize = usize::from_str_radix(pair[1], 16).map_err(|_| PtraceError::ParseUsizeFromString(pair[1].to_string()))?;
             let length = non_zero_usize(end - start, "open_tracee_read_map/length")?;
             if start < addr || checked_add(addr, size)? > end {
                 continue
@@ -101,6 +101,7 @@ fn open_tracee_read_map(pid: &nix::unistd::Pid, addr: usize, size: usize) -> Res
                 if let Some(info) = infos.get(&map_path) {
                     return Ok(Some(info.clone()));
                 }
+                event!(Level::DEBUG, "Reading tracee memory through file {}", map_path.to_string_lossy());
                 let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR).map_err(PtraceError::Read)?;
                 let mmap_addr = unsafe {
                     mman::mmap(

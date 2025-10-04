@@ -284,7 +284,7 @@ pub fn read_bytes_to_structs<T>(
     pid: nix::unistd::Pid,
     addr: usize,
     total_size: usize,
-    mem_helpers: &MemHelpers,
+    mem_helpers: MemHelpers,
 ) -> Result<Vec<T>, PtraceError>
 where
     T: Sized + Clone + CStruct,

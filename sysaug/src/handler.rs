@@ -230,7 +230,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     // This can be called multiple times and will add new content to the end of
     // previous contents.
     pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
-        let MemHelpers { write_bytes_to_tracee, .. } = this.cli_args.mem_helpers.clone();
+        let MemHelpers { write_bytes_to_tracee, .. } = self.cli_args.mem_helpers.clone();
         let pid = self.pid;
         let mut offset = self.tracee_stack_offset.borrow_mut();
         let old_offset = *offset;

@@ -3,7 +3,7 @@ use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
-use ptrace::GenericPurposeRegs;
+use ptrace::{GenericPurposeRegs, MemHelpers};
 use tracing::info;
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -12,11 +12,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         orig_regs: GenericPurposeRegs,
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
+        let MemHelpers { read, .. } = self.cli_args.mem_helpers.clone();
         let parent_pid = self.pid;
         let orig_status_addr = orig_regs.arg1;
         let orig_wait_status = self
             .ptrace_client
-            .execute(move || ptrace::read(parent_pid, orig_status_addr))??;
+            .execute(move || (read)(parent_pid, orig_status_addr))??;
 
         let mut regs = self.do_resume_syscall().await?;
 
@@ -28,7 +29,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let wait_status_addr = regs.arg1;
             let wait_status = self
                 .ptrace_client
-                .execute(move || ptrace::read(parent_pid, wait_status_addr))??;
+                .execute(move || (read)(parent_pid, wait_status_addr))??;
             let stat = WaitStatus::from_raw(pid, wait_status as i32);
 
             if pids.contains(&pid) && matches!(stat, Ok(WaitStatus::Stopped(_, Signal::SIGSTOP))) {

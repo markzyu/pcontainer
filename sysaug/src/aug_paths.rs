@@ -3,7 +3,7 @@ use crate::common::{SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use crate::mods::PathAction;
-use ptrace::GenericPurposeRegs;
+use ptrace::{GenericPurposeRegs, MemHelpers};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tracing::{event, Level};
@@ -18,6 +18,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
+        let MemHelpers { read_bytes_until_zero, .. } = self.cli_args.mem_helpers.clone();
 
         // Translate paths from host namespace to tracee namespace
         let copy_regs = orig_regs.clone();
@@ -51,7 +52,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // Read orig_path from registers
             let path_bytes =
-                ptrace_client.execute(move || ptrace::read_bytes_until_zero(pid, arg_i))??;
+                ptrace_client.execute(move || (read_bytes_until_zero)(pid, arg_i))??;
             let orig_path_buf = Self::path_from_bytes(path_bytes)?;
 
             // Calculate path_action, notify mods, and maybe update tracee
@@ -168,13 +169,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     where
         T: IDirent + Clone + Send + 'static,
     {
+        let mem_helpers = self.cli_args.mem_helpers.clone();
         let addr = regs.arg1;
         let buf_size = regs.arg2 * 2;
         let list_size = regs.syscall_retval();
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
         let mut dirents: Vec<T> = ptrace_client
-            .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size))??;
+            .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size, mem_helpers))??;
         event!(Level::DEBUG, "Intercepting {} dir entries", dirents.len());
 
         let mut is_delete: Vec<bool> = Vec::new();
