@@ -9,7 +9,6 @@ use nix::fcntl::OFlag;
 use nix::sys::mman;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
-use std::convert::TryInto;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr::NonNull;
@@ -162,11 +161,9 @@ fn read_bytes(
     size: usize,
     result: &mut [u8],
 ) -> Result<(), PtraceError> {
-    event!(Level::TRACE, "DIRECT_READ addr: {:x} size {}", addr, size);
+    event!(Level::DEBUG, "DIRECT_READ addr: {:x} size {}", addr, size);
     let pid_string = pid.to_string();
-    let addr2: i64 = addr
-        .try_into()
-        .map_err(|_| PtraceError::IntoInt("read_bytes/addr"))?;
+    let addr2: i64 = addr as i64;
     TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
         if let Some(orig_fd) = maybe_fd.as_mut() {
             let fd = orig_fd.as_fd();
