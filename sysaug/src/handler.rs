@@ -592,7 +592,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         *tracee_addr = mmap_regs.syscall_retval();
 
         set_tracee_write_region_addr(mmap_regs.syscall_retval())?;
-        if self.cli_args.fix_mmap {
+        if !self.cli_args.fix_mmap {
             MEM.with_borrow_mut(|cell| *cell = direct_mem_helper);
         }
 
