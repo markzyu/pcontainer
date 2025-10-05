@@ -44,7 +44,7 @@ pub fn set_tracee_write_region_addr(addr: usize) -> Result<(), PtraceError> {
 }
 
 /// Get or create a region id from the tracee thread
-fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
+pub fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
     TRACEE_WRITE_REGION_ID.with_borrow_mut(|cache| {
         if let Some(value) = *cache {
             return Ok(value);
@@ -147,7 +147,7 @@ unsafe fn write_bytes_to_tracee(
         .as_mut()
         .ok_or(PtraceError::LockGlobalMmap)?;
     event!(
-        Level::TRACE,
+        Level::DEBUG,
         "Writing {} bytes to tracee mmap, {:#x}",
         bytes.len(),
         offset

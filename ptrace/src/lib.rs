@@ -7,7 +7,7 @@ pub use crate::common::{
     CHeader, CStruct, GenericPurposeRegs, MemHelpers, NixISize, PtraceError, SharedRegionContent,
     MAX_NUM_TRACEES, PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
 };
-pub use crate::mem_direct::{direct_mem_helper, set_tracee_write_region_addr};
+pub use crate::mem_direct::{direct_mem_helper, get_own_region_id, set_tracee_write_region_addr};
 pub use crate::mem_slow::slow_mem_helper;
 
 use nix::sys;

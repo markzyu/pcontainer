@@ -10,7 +10,7 @@ use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use ptrace::{
     direct_mem_helper, set_tracee_write_region_addr, slow_mem_helper, GenericPurposeRegs,
-    MemHelpers, SHARED_MMAP_SIZE,
+    MemHelpers, SHARED_MMAP_SIZE, STACK_SAFE_ZONE_SIZE, get_own_region_id
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -153,14 +153,19 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
         // The order here matters. It's the order of polling precedence.
-        futures_lite::future::or(
+        let result = futures_lite::future::or(
             futures_lite::future::or(
                 self.loop_handle_tracee_signals(),
                 self.loop_handle_tracee_syscalls(),
             ),
             self.loop_handle_tracee_other_events(),
         )
-        .await
+        .await;
+
+        let pid = self.pid;
+        let MemHelpers { close_tracee, .. } = get_mem_helper();
+        (close_tracee)(&pid)?;
+        result
     }
 
     /// Creates a future from raw PtraceFuture to wait for any signal
@@ -579,17 +584,19 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
     /// Take over the syscall async loop, right after execve() to establish mmap
     async fn initialize_tracee_mmaps(&self) -> Result<(), SysAugError> {
+        let pid = self.pid;
+        let region_id = get_own_region_id(&pid)?;
         let mmap_regs = self
             ._insert_syscall(
                 "SYS_mmap",
                 libc::SYS_mmap as usize,
                 [
                     0,
-                    SHARED_MMAP_SIZE,
+                    STACK_SAFE_ZONE_SIZE,
                     libc::PROT_READ as usize,
                     libc::MAP_SHARED as usize,
                     self.shared_fd as usize,
-                    0,
+                    region_id * STACK_SAFE_ZONE_SIZE,
                 ],
             )
             .await?;
