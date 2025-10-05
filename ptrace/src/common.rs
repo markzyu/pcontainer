@@ -16,7 +16,7 @@ pub const MAX_STRUCT_SIZE: usize = 2048;
 /// Linux usually limits the max mmaps for each process to 65530.
 pub const MAX_READ_MAPS: usize = 65500;
 /// This should be about 7 readonly mmaps for each tracee
-pub const MAX_READ_MAPS_PER_TRACEE : usize = MAX_READ_MAPS / MAX_NUM_TRACEES;
+pub const MAX_READ_MAPS_PER_TRACEE: usize = MAX_READ_MAPS / MAX_NUM_TRACEES;
 
 /// One single writeable mmap, shared across all tracees.
 ///
@@ -199,13 +199,14 @@ pub struct MemHelpers {
     /// params (pid, addr, size, result_buffer) returns nothing
     pub read_bytes: fn(nix::unistd::Pid, usize, usize, &mut [u8]) -> Result<(), PtraceError>,
     /// params (pid, addr, num_zeroes) returns the usizes
-    pub read_bytes_until_num_zeroes: fn(nix::unistd::Pid, usize, usize) -> Result<Vec<u8>, PtraceError>,
+    pub read_bytes_until_num_zeroes:
+        fn(nix::unistd::Pid, usize, usize) -> Result<Vec<u8>, PtraceError>,
     /// params (pid, addr) returns the usizes
     pub read_bytes_until_zero: fn(nix::unistd::Pid, usize) -> Result<Vec<u8>, PtraceError>,
 
     /// params (pid, offset, bytes) returns (start, new_offset)
-    pub write_bytes_to_tracee: unsafe fn(nix::unistd::Pid, usize, &[u8]) -> Result<(usize, usize), PtraceError>,
-
+    pub write_bytes_to_tracee:
+        unsafe fn(nix::unistd::Pid, usize, &[u8]) -> Result<(usize, usize), PtraceError>,
     // Note: read_bytes_to_structs, write_structs_to_tracee are not here because they use Generics
     // Note: write_structs_to_tracee is true random write, which is always slow and implemented below
 }

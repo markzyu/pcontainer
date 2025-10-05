@@ -1,10 +1,10 @@
+use crate::common::{
+    aligned, availabe_region_ids, checked_add, checked_div, checked_mul, checked_sub,
+    region_ids_by_pid, shared_regions, CHeader, CStruct, MemHelpers, PtraceError, MAX_NUM_TRACEES,
+    MAX_READ_MAPS_PER_TRACEE, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+};
 /// Faster, but less supported method to access tracee memory (mmap)
 use core::ffi::c_void;
-use crate::common::{
-    aligned, checked_add, checked_div, checked_mul, checked_sub, CHeader,
-    CStruct, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE, MAX_READ_MAPS_PER_TRACEE,
-    availabe_region_ids, region_ids_by_pid, shared_regions, MAX_NUM_TRACEES, MemHelpers
-};
 use nix::fcntl::OFlag;
 use nix::sys::mman;
 use nix::sys::stat::Mode;
@@ -35,7 +35,10 @@ thread_local! {
 
 pub fn set_tracee_write_region_addr(addr: usize) -> Result<(), PtraceError> {
     TRACEE_WRITE_REGION_ADDR.with_borrow_mut(|maybe_addr| {
-        maybe_addr.replace(NonZeroUsize::new(addr).ok_or(PtraceError::IntIsZero("set_tracee_write_region_addr/addr"))?);
+        maybe_addr.replace(
+            NonZeroUsize::new(addr)
+                .ok_or(PtraceError::IntIsZero("set_tracee_write_region_addr/addr"))?,
+        );
         Ok(())
     })
 }
@@ -46,8 +49,12 @@ fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
         if let Some(value) = *cache {
             return Ok(value);
         }
-        let mut region_ids = availabe_region_ids.write().map_err(|_| PtraceError::LockGlobalMmap)?;
-        let mut by_pid = region_ids_by_pid.write().map_err(|_| PtraceError::LockGlobalMmap)?;
+        let mut region_ids = availabe_region_ids
+            .write()
+            .map_err(|_| PtraceError::LockGlobalMmap)?;
+        let mut by_pid = region_ids_by_pid
+            .write()
+            .map_err(|_| PtraceError::LockGlobalMmap)?;
         let result = region_ids.pop().ok_or(PtraceError::MaxTracee)?;
         *cache = Some(result.clone());
         by_pid.insert(pid.clone(), result.clone());
@@ -57,18 +64,28 @@ fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
 
 /// Get a region id from any thread, for the tracee `pid`
 fn get_region_id(pid: &nix::unistd::Pid) -> Result<Option<usize>, PtraceError> {
-    let region_ids = region_ids_by_pid.read().map_err(|_| PtraceError::LockGlobalMmap)?;
+    let region_ids = region_ids_by_pid
+        .read()
+        .map_err(|_| PtraceError::LockGlobalMmap)?;
     Ok(region_ids.get(pid).cloned())
 }
 
 /// Close the mmaps used by tracee
 fn close_tracee(pid: &nix::unistd::Pid) -> Result<(), PtraceError> {
     // Release Writeable mmap
-    let mut region_ids = availabe_region_ids.write().map_err(|_| PtraceError::LockGlobalMmap)?;
-    let mut by_pid = region_ids_by_pid.write().map_err(|_| PtraceError::LockGlobalMmap)?;
+    let mut region_ids = availabe_region_ids
+        .write()
+        .map_err(|_| PtraceError::LockGlobalMmap)?;
+    let mut by_pid = region_ids_by_pid
+        .write()
+        .map_err(|_| PtraceError::LockGlobalMmap)?;
     let region_id = by_pid.remove(pid).ok_or(PtraceError::LockGlobalMmap)?;
-    let mut maybe_region_box = shared_regions[region_id].write().map_err(|_| PtraceError::LockGlobalMmap)?;
-    let region_box = maybe_region_box.as_mut().ok_or(PtraceError::LockGlobalMmap)?;
+    let mut maybe_region_box = shared_regions[region_id]
+        .write()
+        .map_err(|_| PtraceError::LockGlobalMmap)?;
+    let region_box = maybe_region_box
+        .as_mut()
+        .ok_or(PtraceError::LockGlobalMmap)?;
     region_box.fill(0);
     region_ids.push(region_id);
     Ok(())
@@ -101,7 +118,9 @@ unsafe fn write_bytes_to_tracee(
     offset: usize,
     bytes: &[u8],
 ) -> Result<(usize, usize), PtraceError> {
-    let tracee_base: usize = TRACEE_WRITE_REGION_ADDR.with_borrow(|val| val.ok_or(PtraceError::MmapUninitialized))?.into();
+    let tracee_base: usize = TRACEE_WRITE_REGION_ADDR
+        .with_borrow(|val| val.ok_or(PtraceError::MmapUninitialized))?
+        .into();
     let tracee_start: usize = checked_add(tracee_base, offset)?;
     let new_offset = checked_add(offset, bytes.len())?;
 
@@ -109,16 +128,24 @@ unsafe fn write_bytes_to_tracee(
         return Err(PtraceError::IntTooBigEqual(offset, STACK_SAFE_ZONE_SIZE));
     }
     if new_offset > STACK_SAFE_ZONE_SIZE {
-        return Err(PtraceError::BufferOverflow(offset, bytes.len(), STACK_SAFE_ZONE_SIZE));
+        return Err(PtraceError::BufferOverflow(
+            offset,
+            bytes.len(),
+            STACK_SAFE_ZONE_SIZE,
+        ));
     }
 
     let region_id = get_own_region_id(&pid)?;
     if region_id > MAX_NUM_TRACEES {
         return Err(PtraceError::BufferOverflow(0, region_id, MAX_NUM_TRACEES));
     }
-    
-    let mut maybe_region_box = shared_regions[region_id].write().map_err(|_| PtraceError::LockGlobalMmap)?;
-    let region_box = maybe_region_box.as_mut().ok_or(PtraceError::LockGlobalMmap)?;
+
+    let mut maybe_region_box = shared_regions[region_id]
+        .write()
+        .map_err(|_| PtraceError::LockGlobalMmap)?;
+    let region_box = maybe_region_box
+        .as_mut()
+        .ok_or(PtraceError::LockGlobalMmap)?;
     event!(
         Level::TRACE,
         "Writing {} bytes to tracee mmap, {:#x}",
@@ -137,17 +164,21 @@ fn read_bytes(
 ) -> Result<(), PtraceError> {
     event!(Level::TRACE, "DIRECT_READ addr: {:x} size {}", addr, size);
     let pid_string = pid.to_string();
-    let addr2: i64 = addr.try_into().map_err(|_| PtraceError::IntoInt("read_bytes/addr"))?;
+    let addr2: i64 = addr
+        .try_into()
+        .map_err(|_| PtraceError::IntoInt("read_bytes/addr"))?;
     TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
         if let Some(orig_fd) = maybe_fd.as_mut() {
             let fd = orig_fd.as_fd();
-            nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
+            nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet)
+                .map_err(PtraceError::Read)?;
             nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
             return Ok(());
         }
 
         let map_path: std::path::PathBuf = ["/proc", &pid_string, "mem"].iter().collect();
-        let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR).map_err(PtraceError::Read)?;
+        let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR)
+            .map_err(PtraceError::Read)?;
         let fd = mmap_fd.as_fd();
         nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
         nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;

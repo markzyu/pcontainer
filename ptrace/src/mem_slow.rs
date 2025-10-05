@@ -1,7 +1,8 @@
 /// Slower, but more supported method to access tracee memory (ptrace)
 use crate::common::{
-    aligned, bytes_to_usizes, checked_add, checked_div, checked_mul, checked_sub, getregs, CHeader,
-    CStruct, NixISize, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE, MemHelpers, write
+    aligned, bytes_to_usizes, checked_add, checked_div, checked_mul, checked_sub, getregs, write,
+    CHeader, CStruct, MemHelpers, NixISize, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE,
+    USIZE_SIZE,
 };
 use nix::sys;
 use tracing::{event, Level};

@@ -1,6 +1,6 @@
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, Augments, ModBox, ModProvider, ModsByFeature,
-    SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE
+    SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE,
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
@@ -8,7 +8,10 @@ use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, Ptrace
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::{GenericPurposeRegs, MemHelpers, SHARED_MMAP_SIZE, set_tracee_write_region_addr, slow_mem_helper, direct_mem_helper};
+use ptrace::{
+    direct_mem_helper, set_tracee_write_region_addr, slow_mem_helper, GenericPurposeRegs,
+    MemHelpers, SHARED_MMAP_SIZE,
+};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -238,7 +241,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     // This can be called multiple times and will add new content to the end of
     // previous contents.
     pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
-        let MemHelpers { write_bytes_to_tracee, .. } = get_mem_helper();
+        let MemHelpers {
+            write_bytes_to_tracee,
+            ..
+        } = get_mem_helper();
         let pid = self.pid;
         let mut offset = self.tracee_stack_offset.borrow_mut();
         let old_offset = *offset;
