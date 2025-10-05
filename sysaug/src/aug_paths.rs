@@ -1,6 +1,6 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::AsyncTraceeHandler;
+use crate::handler::{AsyncTraceeHandler, get_mem_helper};
 use crate::mods;
 use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, MemHelpers};
@@ -18,7 +18,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
-        let MemHelpers { read_bytes_until_zero, .. } = self.cli_args.mem_helpers.clone();
+        let MemHelpers { read_bytes_until_zero, .. } = get_mem_helper();
 
         // Translate paths from host namespace to tracee namespace
         let copy_regs = orig_regs.clone();
@@ -169,7 +169,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     where
         T: IDirent + Clone + Send + 'static,
     {
-        let mem_helpers = self.cli_args.mem_helpers.clone();
+        let mem_helpers = get_mem_helper();
         let addr = regs.arg1;
         let buf_size = regs.arg2 * 2;
         let list_size = regs.syscall_retval();

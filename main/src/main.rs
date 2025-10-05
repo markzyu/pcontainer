@@ -186,10 +186,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
         fix_sigsys: args.fix_sigsys,
-        mem_helpers: match args.fix_mmap {
-            true => slow_mem_helper,
-            false => direct_mem_helper,
-        },
+        fix_mmap: args.fix_mmap,
         gdb: args.gdb,
         gdb_at: args.gdb_at,
         use_native_loader: args.use_native_loader,

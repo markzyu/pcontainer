@@ -8,7 +8,7 @@ pub use crate::common::{
     STACK_SAFE_ZONE_SIZE, MAX_NUM_TRACEES, write, write_structs_to_tracee, read_bytes_to_structs,
     MemHelpers
 };
-pub use crate::mem_direct::direct_mem_helper;
+pub use crate::mem_direct::{direct_mem_helper, set_tracee_write_region_addr};
 pub use crate::mem_slow::slow_mem_helper;
 
 use nix::sys;

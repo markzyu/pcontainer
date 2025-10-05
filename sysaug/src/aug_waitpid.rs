@@ -1,6 +1,6 @@
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::AsyncTraceeHandler;
+use crate::handler::{AsyncTraceeHandler, get_mem_helper};
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
 use ptrace::{GenericPurposeRegs, MemHelpers};
@@ -12,7 +12,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         orig_regs: GenericPurposeRegs,
         _syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        let MemHelpers { read, .. } = self.cli_args.mem_helpers.clone();
+        let MemHelpers { read, .. } = get_mem_helper();
         let parent_pid = self.pid;
         let orig_status_addr = orig_regs.arg1;
         let orig_wait_status = self

@@ -157,6 +157,9 @@ pub enum PtraceError {
     #[error("Integer too big: {0} >= {1}")]
     IntTooBigEqual(usize, usize),
 
+    #[error("Failed to convert integert types for {0}")]
+    IntoInt(&'static str),
+
     #[error("Cannot create linux memfd: {0}")]
     CreateMemoryFile(nix::Error),
 
@@ -188,8 +191,6 @@ pub trait CStruct {
 /// To faciliate the swapping of memory implementation (slow ptrace calls vs direct mmap)
 #[derive(Clone, Debug)]
 pub struct MemHelpers {
-    /// Returns the smallest offset for use with write* functions
-    pub get_first_writeable_addr: fn() -> Result<usize, PtraceError>,
     /// Closes any shared resources created for a tracee
     pub close_tracee: for<'a> fn(&'a nix::unistd::Pid) -> Result<(), PtraceError>,
 

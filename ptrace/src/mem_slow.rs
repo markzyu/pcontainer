@@ -127,12 +127,7 @@ fn close_tracee(_: &nix::unistd::Pid) -> Result<(), PtraceError> {
     Ok(())
 }
 
-fn get_first_writeable_addr() -> Result<usize, PtraceError> {
-    Ok(0)
-}
-
 pub const slow_mem_helper: MemHelpers = MemHelpers {
-    get_first_writeable_addr,
     close_tracee,
     read,
     read_bytes,

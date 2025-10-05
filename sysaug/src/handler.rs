@@ -1,6 +1,6 @@
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, Augments, ModBox, ModProvider, ModsByFeature,
-    SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE,
+    SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE
 };
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
@@ -8,7 +8,7 @@ use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, Ptrace
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::{GenericPurposeRegs, MemHelpers, SHARED_MMAP_SIZE};
+use ptrace::{GenericPurposeRegs, MemHelpers, SHARED_MMAP_SIZE, set_tracee_write_region_addr, slow_mem_helper, direct_mem_helper};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -21,13 +21,21 @@ use std::thread;
 use sys::signal::Signal;
 use tracing::{event, info, span, Level};
 
+thread_local! {
+    static MEM: RefCell<MemHelpers> = RefCell::new(slow_mem_helper.clone());
+}
+
+pub fn get_mem_helper() -> MemHelpers {
+    MEM.with_borrow(|cell| cell.clone())
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CLIArgs {
     pub chroot: Option<PathBuf>,
     pub rootfs: Option<PathBuf>,
     pub fail_fast: bool,
     pub fix_sigsys: bool,
-    pub mem_helpers: MemHelpers,
+    pub fix_mmap: bool,
     pub gdb: bool,
     pub gdb_at: Option<u64>,
 
@@ -230,7 +238,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     // This can be called multiple times and will add new content to the end of
     // previous contents.
     pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
-        let MemHelpers { write_bytes_to_tracee, .. } = self.cli_args.mem_helpers.clone();
+        let MemHelpers { write_bytes_to_tracee, .. } = get_mem_helper();
         let pid = self.pid;
         let mut offset = self.tracee_stack_offset.borrow_mut();
         let old_offset = *offset;
@@ -582,6 +590,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let mut tracee_addr = self.mmap_tracee_addr.borrow_mut();
         *tracee_addr = mmap_regs.syscall_retval();
+
+        set_tracee_write_region_addr(mmap_regs.syscall_retval())?;
+        if self.cli_args.fix_mmap {
+            MEM.with_borrow_mut(|cell| *cell = direct_mem_helper);
+        }
 
         event!(
             Level::INFO,

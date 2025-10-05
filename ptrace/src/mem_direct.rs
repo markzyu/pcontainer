@@ -9,7 +9,9 @@ use nix::fcntl::OFlag;
 use nix::sys::mman;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
+use std::convert::TryInto;
 use std::num::NonZeroUsize;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr::NonNull;
 use tracing::{event, Level};
 
@@ -22,13 +24,20 @@ struct MmapInfo {
 
 thread_local! {
     /// A lookup table of trace memory region files (as actual file names) to tracer mmap address
-    static TRACEE_READ_MMAPS: RefCell<lru::LruCache<std::path::PathBuf, MmapInfo>> = RefCell::new(lru::LruCache::new(NonZeroUsize::new(MAX_READ_MAPS_PER_TRACEE).unwrap()));
+    static TRACEE_READ_FD: RefCell<Option<OwnedFd>> = RefCell::new(None);
 
     /// The tracee side pointer of its own writeable `shared_region`
     static TRACEE_WRITE_REGION_ADDR: RefCell<Option<NonZeroUsize>> = RefCell::new(None);
 
     /// The index into `shared_regions`, which reveals a writeable mmap
     static TRACEE_WRITE_REGION_ID: RefCell<Option<usize>> = RefCell::new(None);
+}
+
+pub fn set_tracee_write_region_addr(addr: usize) -> Result<(), PtraceError> {
+    TRACEE_WRITE_REGION_ADDR.with_borrow_mut(|maybe_addr| {
+        maybe_addr.replace(NonZeroUsize::new(addr).ok_or(PtraceError::IntIsZero("set_tracee_write_region_addr/addr"))?);
+        Ok(())
+    })
 }
 
 /// Get or create a region id from the tracee thread
@@ -54,88 +63,19 @@ fn get_region_id(pid: &nix::unistd::Pid) -> Result<Option<usize>, PtraceError> {
 
 /// Close the mmaps used by tracee
 fn close_tracee(pid: &nix::unistd::Pid) -> Result<(), PtraceError> {
-    {
-        // Writeable mmap
-        let mut region_ids = availabe_region_ids.write().map_err(|_| PtraceError::LockGlobalMmap)?;
-        let mut by_pid = region_ids_by_pid.write().map_err(|_| PtraceError::LockGlobalMmap)?;
-        let region_id = by_pid.remove(pid).ok_or(PtraceError::LockGlobalMmap)?;
-        let mut maybe_region_box = shared_regions[region_id].write().map_err(|_| PtraceError::LockGlobalMmap)?;
-        let region_box = maybe_region_box.as_mut().ok_or(PtraceError::LockGlobalMmap)?;
-        region_box.fill(0);
-        region_ids.push(region_id);
-    }
-
-    TRACEE_READ_MMAPS.with_borrow(|mmaps| {
-        // Readable mmaps
-        for (_, mmap_info) in mmaps.iter() {
-            unsafe {
-                mman::munmap(mmap_info.tracer_addr, mmap_info.length.into()).map_err(PtraceError::Unmap)?;
-            }
-        }
-        Ok(())
-    })
+    // Release Writeable mmap
+    let mut region_ids = availabe_region_ids.write().map_err(|_| PtraceError::LockGlobalMmap)?;
+    let mut by_pid = region_ids_by_pid.write().map_err(|_| PtraceError::LockGlobalMmap)?;
+    let region_id = by_pid.remove(pid).ok_or(PtraceError::LockGlobalMmap)?;
+    let mut maybe_region_box = shared_regions[region_id].write().map_err(|_| PtraceError::LockGlobalMmap)?;
+    let region_box = maybe_region_box.as_mut().ok_or(PtraceError::LockGlobalMmap)?;
+    region_box.fill(0);
+    region_ids.push(region_id);
+    Ok(())
 }
 
 fn non_zero_usize(val: usize, err: &'static str) -> Result<NonZeroUsize, PtraceError> {
     NonZeroUsize::new(val).ok_or(PtraceError::IntIsZero(err))
-}
-
-fn open_tracee_read_map(pid: &nix::unistd::Pid, addr: usize, size: usize) -> Result<Option<MmapInfo>, PtraceError> {
-    let pid_string = pid.to_string();
-    let maps_path: std::path::PathBuf = ["/proc", &pid_string, "maps"].iter().collect();
-    let maps_str = std::fs::read_to_string(maps_path).map_err(PtraceError::ReadStdIoError)?;
-    for line in maps_str.lines() {
-        if let Some(addr_pair) = line.split(' ').next() {
-            let pair: Vec<_> = addr_pair.split('-').collect();
-            if pair.len() != 2 {
-                continue
-            }
-            let start: usize = usize::from_str_radix(pair[0], 16).map_err(|_| PtraceError::ParseUsizeFromString(pair[0].to_string()))?;
-            let end: usize = usize::from_str_radix(pair[1], 16).map_err(|_| PtraceError::ParseUsizeFromString(pair[1].to_string()))?;
-            let length = non_zero_usize(end - start, "open_tracee_read_map/length")?;
-            if start < addr || checked_add(addr, size)? > end {
-                continue
-            }
-            return TRACEE_READ_MMAPS.with_borrow_mut(|infos| {
-                let map_path: std::path::PathBuf = ["/proc", &pid_string, "map_files", addr_pair].iter().collect();
-                if let Some(info) = infos.get(&map_path) {
-                    return Ok(Some(info.clone()));
-                }
-                event!(Level::DEBUG, "Reading tracee memory through file {}", map_path.to_string_lossy());
-                let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR).map_err(PtraceError::Read)?;
-                let mmap_addr = unsafe {
-                    mman::mmap(
-                        None,
-                        length,
-                        mman::ProtFlags::PROT_READ,
-                        mman::MapFlags::MAP_SHARED,
-                        &mmap_fd,
-                        0,
-                    )
-                    .map_err(PtraceError::Read)?
-                };
-
-                let new_info = MmapInfo {
-                    base_addr: non_zero_usize(start, "open_tracee_read_map/start")?,
-                    tracer_addr: mmap_addr.clone(),
-                    length: length
-                };
-                if let Some(old_info) = infos.put(map_path, new_info.clone()) {
-                    unsafe {
-                        mman::munmap(old_info.tracer_addr, old_info.length.into()).map_err(PtraceError::Unmap)?;
-                    }
-                }
-                Ok(Some(new_info))
-            });
-        }
-    }
-
-    Ok(None)
-}
-
-fn get_first_writeable_addr() -> Result<usize, PtraceError> {
-    let result: usize = TRACEE_WRITE_REGION_ADDR.with_borrow(|val| val.ok_or(PtraceError::MmapUninitialized))?.into();
-    Ok(result)
 }
 
 /// This always writes to the same location of tracee stack.
@@ -161,18 +101,15 @@ unsafe fn write_bytes_to_tracee(
     offset: usize,
     bytes: &[u8],
 ) -> Result<(usize, usize), PtraceError> {
-    let tracee_start: usize = get_first_writeable_addr()?;
-    let tracee_end = checked_add(tracee_start, STACK_SAFE_ZONE_SIZE)?;
+    let tracee_base: usize = TRACEE_WRITE_REGION_ADDR.with_borrow(|val| val.ok_or(PtraceError::MmapUninitialized))?.into();
+    let tracee_start: usize = checked_add(tracee_base, offset)?;
     let new_offset = checked_add(offset, bytes.len())?;
 
-    if offset < tracee_start {
-        return Err(PtraceError::BufferUnderflow(offset, tracee_start));
+    if offset >= STACK_SAFE_ZONE_SIZE {
+        return Err(PtraceError::IntTooBigEqual(offset, STACK_SAFE_ZONE_SIZE));
     }
-    if offset >= tracee_end {
-        return Err(PtraceError::IntTooBigEqual(offset, tracee_end));
-    }
-    if new_offset > tracee_end {
-        return Err(PtraceError::BufferOverflow(offset, bytes.len(), tracee_end));
+    if new_offset > STACK_SAFE_ZONE_SIZE {
+        return Err(PtraceError::BufferOverflow(offset, bytes.len(), STACK_SAFE_ZONE_SIZE));
     }
 
     let region_id = get_own_region_id(&pid)?;
@@ -180,8 +117,6 @@ unsafe fn write_bytes_to_tracee(
         return Err(PtraceError::BufferOverflow(0, region_id, MAX_NUM_TRACEES));
     }
     
-    let relative_start = checked_sub(offset, tracee_start)?;
-    let relative_end = checked_add(relative_start, bytes.len())?;
     let mut maybe_region_box = shared_regions[region_id].write().map_err(|_| PtraceError::LockGlobalMmap)?;
     let region_box = maybe_region_box.as_mut().ok_or(PtraceError::LockGlobalMmap)?;
     event!(
@@ -190,8 +125,8 @@ unsafe fn write_bytes_to_tracee(
         bytes.len(),
         offset
     );
-    region_box[relative_start..relative_end].copy_from_slice(bytes);
-    Ok((offset, new_offset))
+    region_box[offset..new_offset].copy_from_slice(bytes);
+    Ok((tracee_start, new_offset))
 }
 
 fn read_bytes(
@@ -201,13 +136,24 @@ fn read_bytes(
     result: &mut [u8],
 ) -> Result<(), PtraceError> {
     event!(Level::TRACE, "DIRECT_READ addr: {:x} size {}", addr, size);
-    let info = open_tracee_read_map(&pid, addr, size)?.ok_or(PtraceError::ReadMmapNotFound)?;
-    unsafe {
-        let offset = checked_sub(addr, info.base_addr.into())?;
-        let ptr = (info.tracer_addr.as_ptr() as *const u8).add(offset);
-        result.copy_from_slice(std::slice::from_raw_parts(ptr, size));
-    }
-    Ok(())
+    let pid_string = pid.to_string();
+    let addr2: i64 = addr.try_into().map_err(|_| PtraceError::IntoInt("read_bytes/addr"))?;
+    TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
+        if let Some(orig_fd) = maybe_fd.as_mut() {
+            let fd = orig_fd.as_fd();
+            nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
+            nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
+            return Ok(());
+        }
+
+        let map_path: std::path::PathBuf = ["/proc", &pid_string, "mem"].iter().collect();
+        let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR).map_err(PtraceError::Read)?;
+        let fd = mmap_fd.as_fd();
+        nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
+        nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
+        maybe_fd.replace(mmap_fd);
+        Ok(())
+    })
 }
 
 fn read_bytes_until_num_zeroes(
@@ -240,17 +186,16 @@ fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, 
 }
 
 fn read(pid: nix::unistd::Pid, addr: usize) -> Result<usize, PtraceError> {
-    event!(Level::TRACE, "DIRECT_READ addr: {:x}", addr);
-    let info = open_tracee_read_map(&pid, addr, *USIZE_SIZE)?.ok_or(PtraceError::ReadMmapNotFound)?;
+    let mut result: usize = 0;
     unsafe {
-        let offset = checked_sub(addr, info.base_addr.into())?;
-        let ptr = (info.tracer_addr.as_ptr() as *const u8).add(offset) as *const usize;
-        Ok(*ptr)
+        let ptr = (&mut result as *mut usize as *mut u8);
+        let slice = std::slice::from_raw_parts_mut(ptr, *USIZE_SIZE);
+        read_bytes(pid, addr, *USIZE_SIZE, slice)?;
     }
+    Ok(result)
 }
 
 pub const direct_mem_helper: MemHelpers = MemHelpers {
-    get_first_writeable_addr,
     close_tracee,
     read,
     read_bytes,
