@@ -178,11 +178,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 elf_path_buf.to_string_lossy(),
             );
 
-            let interp_addr = self.tracee_stack_append(part0.into())?;
+            let interp_addr = self.tracee_stack_append_str(part0)?;
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
 
             if let Some(part1) = maybe_part1 {
-                let part1_addr = self.tracee_stack_append(part1.into())?;
+                let part1_addr = self.tracee_stack_append_str(part1)?;
                 new_argv.append(&mut part1_addr.to_ne_bytes().to_vec());
             }
 

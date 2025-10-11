@@ -261,13 +261,22 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(addr)
     }
 
+    pub fn tracee_stack_append_str(&self, val: String) -> Result<usize, SysAugError> {
+        let mut bytes: Vec<u8> = val.into();
+        bytes.push(0);
+        self.tracee_stack_append(bytes)
+    }
+
     pub fn tracee_stack_append_path(&self, path: PathBuf) -> Result<usize, SysAugError> {
-        let bytes = path.into_os_string().into_vec();
+        let mut bytes = path.into_os_string().into_vec();
+        bytes.push(0);
         self.tracee_stack_append(bytes)
     }
 
     // Change the address, to which the next tracee_stack_append will write contents.
     // offset = how many bytes of previously written contents will stay after this
+    //
+    // Note: By default, this is called upon every syscall entry
     pub fn tracee_stack_seek(&self, offset: usize) -> Result<(), SysAugError> {
         let mut ref_offset = self.tracee_stack_offset.borrow_mut();
         *ref_offset = offset;
@@ -464,13 +473,16 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let _span1 = span!(
                 Level::DEBUG,
                 "syscall",
-                "{:?} syscall {} id {} args {:#x} {:#x} {:#x}",
+                "{:?} syscall {} id {} args {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
                 which_aug.unwrap_or(&Augments::None),
                 syscall_name,
                 total_times,
                 regs.arg0,
                 regs.arg1,
-                regs.arg2
+                regs.arg2,
+                regs.arg3,
+                regs.arg4,
+                regs.arg5
             )
             .entered();
             event!(
@@ -478,6 +490,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 "syscall entry event, stack@{:x}",
                 ptrace::stack_ptr()
             );
+
+            self.tracee_stack_seek(0)?;
 
             if self.cli_args.gdb_at == Some(total_times) {
                 info!(

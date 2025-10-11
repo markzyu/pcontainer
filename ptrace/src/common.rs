@@ -648,6 +648,17 @@ pub fn getregs(pid: nix::unistd::Pid) -> Result<GenericPurposeRegs, PtraceError>
 /// Use this as reference: https://android.googlesource.com/platform/system/core/+/59d16c9e9171f4367ad3a0516e7000c0d95e89cf/debuggerd/arm64/machine.cpp
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
+    event!(
+        Level::TRACE,
+        "setregs, syscall {:#x} args {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+        data.syscall_num,
+        data.arg0,
+        data.arg1,
+        data.arg2,
+        data.arg3,
+        data.arg4,
+        data.arg5
+    );
     let res = unsafe {
         let mut iov = libc::iovec {
             iov_base: &mut data as *mut _ as *mut libc::c_void,
@@ -667,6 +678,17 @@ pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<()
 /// Use this as reference: https://android.googlesource.com/platform/prebuilts/ndk/+/refs/heads/lollipop-dev/9/platforms/android-5/arch-arm/usr/include/asm/ptrace.h
 #[cfg(target_arch = "arm")]
 pub fn setregs(pid: nix::unistd::Pid, mut data: GenericPurposeRegs) -> Result<(), PtraceError> {
+    event!(
+        Level::TRACE,
+        "setregs, syscall {:#x} args {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+        data.syscall_num,
+        data.arg0,
+        data.arg1,
+        data.arg2,
+        data.arg3,
+        data.arg4,
+        data.arg5
+    );
     let res = unsafe {
         libc::ptrace(
             13,

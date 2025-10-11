@@ -89,6 +89,8 @@ fn close_tracee(pid: &nix::unistd::Pid) -> Result<(), PtraceError> {
         .ok_or(PtraceError::LockGlobalMmap)?;
     region_box.fill(0);
     region_ids.push(region_id);
+
+    event!(Level::INFO, "Closed tracee mmap resource");
     Ok(())
 }
 
