@@ -20,6 +20,7 @@ pub struct CLIArgs {
 
     /// Only use this flag if you see "PTRACE_ATTACH error: EPERM: Permission denied".
     /// This will solve those permission errors, but will also cause slowdowns.
+    /// (implies --fix-mmap)
     #[clap(long)]
     pub fix_attach: bool,
 
@@ -186,7 +187,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         rootfs: canonicalize_clone(&args.rootfs)?,
         fail_fast: args.fail_fast,
         fix_sigsys: args.fix_sigsys,
-        fix_mmap: args.fix_mmap,
+        fix_mmap: args.fix_mmap || args.fix_attach,
         gdb: args.gdb,
         gdb_at: args.gdb_at,
         use_native_loader: args.use_native_loader,
