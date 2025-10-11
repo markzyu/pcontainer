@@ -103,7 +103,6 @@ impl TryFrom<u8> for TraceeInitStage {
 }
 
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
-    pub mods: Arc<RwLock<ModsByFeature>>,
     mod_providers: Vec<ModProvider>,
     pub pid: Pid,
     pub ptrace_client: PtraceClient,
@@ -133,7 +132,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub shared_fd: RawFd,
 
     // References to other helpers
-    pub mods: Arc<RwLock<ModsByFeature>>,
+    pub mods: ModsByFeature,
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
     pub sync_handler: Weak<TraceeHandler<PtraceClient>>,
@@ -152,6 +151,9 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
+        self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())
+            .await?;
+
         // The order here matters. It's the order of polling precedence.
         let result = futures_lite::future::or(
             futures_lite::future::or(
@@ -215,7 +217,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     where
         F: Fn(&ModBox) -> Result<T, SysAugError>,
     {
-        let mod_map = rwlock_read(self.mods.as_ref())?;
+        let mod_map = &self.mods;
         if let Some(mods_) = mod_map.get(&feature) {
             if let Some(m) = mods_.get(0) {
                 return Ok(Some(func(m)?));
@@ -228,7 +230,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     where
         F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
     {
-        let mod_map = rwlock_read(self.mods.as_ref())?;
+        let mod_map = &self.mods;
         if let Some(mods_) = mod_map.get(&feature) {
             for m in mods_.iter() {
                 match func(m)? {
@@ -643,33 +645,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         mmap_addr: usize,
     ) -> Result<Arc<TraceeHandler<PtraceClient>>, SysAugError> {
         let default_states = states.unwrap_or_default();
-        let ans = Arc::new(TraceeHandler {
+        Ok(Arc::new(TraceeHandler {
             pid,
             ptrace_client,
-            mods: Arc::new(RwLock::new(HashMap::new())),
             mod_providers: mods,
             ignore_sigstops: Arc::new(RwLock::default()),
             mmap_tracer_addr: mmap_addr,
             shared_fd,
             states: Arc::new((*default_states).try_clone()?),
             parent,
-        });
-
-        let mut mod_map: ModsByFeature = HashMap::new();
-        for provider in ans.mod_providers.iter() {
-            let m = provider(Arc::clone(&ans.states));
-            for feature in m.get_features().iter() {
-                if !mod_map.contains_key(feature) {
-                    mod_map.insert(feature.clone(), Vec::new());
-                }
-                let vec = mod_map.get_mut(feature).unwrap();
-                vec.push(m.clone_box());
-            }
-        }
-
-        let ans2 = Arc::clone(&ans);
-        rwlock_replace(ans2.mods.as_ref(), mod_map)?;
-        Ok(ans)
+        }))
     }
 
     /// Create a new TraceeHandler for a child, without starting event loop
@@ -686,42 +671,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             self.shared_fd,
             self.mmap_tracer_addr,
         )
-    }
-
-    pub fn call_first_mod<F, T>(
-        &self,
-        feature: ModFeature,
-        func: F,
-    ) -> Result<Option<T>, SysAugError>
-    where
-        F: Fn(&ModBox) -> Result<T, SysAugError>,
-    {
-        let mod_map = rwlock_read(self.mods.as_ref())?;
-        if let Some(mods_) = mod_map.get(&feature) {
-            if let Some(m) = mods_.get(0) {
-                return Ok(Some(func(m)?));
-            }
-        }
-        Ok(None)
-    }
-
-    pub fn call_mods<F>(&self, feature: ModFeature, func: F) -> Result<(), SysAugError>
-    where
-        F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
-    {
-        let mod_map = rwlock_read(self.mods.as_ref())?;
-        if let Some(mods_) = mod_map.get(&feature) {
-            for m in mods_.iter() {
-                match func(m)? {
-                    ModAction::SkipSyscall(retval) => {
-                        //TODO: fix this
-                        //self.skip_syscall(retval)?;
-                    }
-                    ModAction::None => (),
-                }
-            }
-        }
-        Ok(())
     }
 
     fn set_ptrace_options(&self) -> Result<(), SysAugError> {
@@ -791,6 +740,19 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
 
+        // Initialize Mods
+        let mut mod_map: ModsByFeature = HashMap::new();
+        for provider in self.mod_providers.iter() {
+            let m = provider(Arc::clone(&self.states));
+            for feature in m.get_features().iter() {
+                if !mod_map.contains_key(feature) {
+                    mod_map.insert(feature.clone(), Vec::new());
+                }
+                let vec = mod_map.get_mut(feature).unwrap();
+                vec.push(m.clone_box());
+            }
+        }
+
         // Initialize and store async loops and futures
         let async_runtime = PtraceAsyncRuntime::default();
         let async_handlers = AsyncTraceeHandler {
@@ -799,7 +761,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             pid: pid.clone(),
             shared_fd: self.shared_fd.clone(),
 
-            mods: self.mods.clone(),
+            mods: mod_map,
             states: self.states.clone(),
             parent: self.parent.clone(),
             sync_handler: Arc::downgrade(&self),
@@ -817,7 +779,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         // Attach ptrace to tracee
         self.ptrace_client.attach_to(pid)?;
         self.set_ptrace_options()?;
-        self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())?;
 
         loop {
             // Drive async logic until it is pending on a future by resuming from where we left off
