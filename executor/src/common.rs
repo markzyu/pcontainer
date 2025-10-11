@@ -1,4 +1,4 @@
-use nix::{sys, unistd};
+use nix::sys;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
 use std::sync::Arc;

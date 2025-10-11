@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use crate::common::{Augments, DelType, PermType, SyscallInfo, NO_MOD_SYSCALL};
 use lazy_static::lazy_static;
 use std::collections::HashMap;

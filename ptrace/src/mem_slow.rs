@@ -1,8 +1,7 @@
-/// Slower, but more supported method to access tracee memory (ptrace)
+// Slower, but more supported method to access tracee memory (ptrace)
 use crate::common::{
-    aligned, bytes_to_usizes, checked_add, checked_div, checked_mul, checked_sub, getregs, write,
-    CHeader, CStruct, MemHelpers, NixISize, PtraceError, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE,
-    USIZE_SIZE,
+    bytes_to_usizes, checked_add, checked_mul, checked_sub, getregs, write, MemHelpers,
+    PtraceError, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
 };
 use nix::sys;
 use tracing::{event, Level};
@@ -128,7 +127,7 @@ fn close_tracee(_: &nix::unistd::Pid) -> Result<(), PtraceError> {
     Ok(())
 }
 
-pub const slow_mem_helper: MemHelpers = MemHelpers {
+pub const SLOW_MEM_HELPERS: MemHelpers = MemHelpers {
     close_tracee,
     read,
     read_bytes,

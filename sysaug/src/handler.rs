@@ -9,8 +9,8 @@ use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use ptrace::{
-    direct_mem_helper, set_tracee_write_region_addr, slow_mem_helper, GenericPurposeRegs,
-    MemHelpers, SHARED_MMAP_SIZE, STACK_SAFE_ZONE_SIZE, get_own_region_id
+    get_own_region_id, set_tracee_write_region_addr, GenericPurposeRegs, MemHelpers,
+    DIRECT_MEM_HELPERS, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -25,7 +25,7 @@ use sys::signal::Signal;
 use tracing::{event, info, span, Level};
 
 thread_local! {
-    static MEM: RefCell<MemHelpers> = RefCell::new(slow_mem_helper.clone());
+    static MEM: RefCell<MemHelpers> = RefCell::new(SLOW_MEM_HELPERS.clone());
 }
 
 pub fn get_mem_helper() -> MemHelpers {
@@ -548,11 +548,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let orig_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
         let mut regs = orig_regs.clone();
-        let (_, syscall_name) = get_syscall(&regs.syscall_num);
+        let (_, orig_syscall_name) = get_syscall(&regs.syscall_num);
         event!(
             Level::INFO,
             "TraceeInit: Overriding first syscall after exec, was {:?}",
-            syscall_name
+            orig_syscall_name
         );
 
         // TODO: rename the fd to something much larger than 3. fd3 is often used in bash scripts
@@ -620,7 +620,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         set_tracee_write_region_addr(mmap_regs.syscall_retval())?;
         if !self.cli_args.fix_mmap {
-            MEM.with_borrow_mut(|cell| *cell = direct_mem_helper);
+            MEM.with_borrow_mut(|cell| *cell = DIRECT_MEM_HELPERS);
         }
 
         event!(
@@ -714,6 +714,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             for m in mods_.iter() {
                 match func(m)? {
                     ModAction::SkipSyscall(retval) => {
+                        //TODO: fix this
                         //self.skip_syscall(retval)?;
                     }
                     ModAction::None => (),

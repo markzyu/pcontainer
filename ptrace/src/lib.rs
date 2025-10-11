@@ -3,12 +3,12 @@ mod mem_direct;
 mod mem_slow;
 
 pub use crate::common::{
-    getregs, read_bytes_to_structs, setregs, shared_regions, write, write_structs_to_tracee,
-    CHeader, CStruct, GenericPurposeRegs, MemHelpers, NixISize, PtraceError, SharedRegionContent,
-    MAX_NUM_TRACEES, PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+    getregs, read_bytes_to_structs, setregs, write, write_structs_to_tracee, CHeader, CStruct,
+    GenericPurposeRegs, MemHelpers, NixISize, PtraceError, SharedRegionContent, MAX_NUM_TRACEES,
+    PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, SHARED_REGIONS, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
 };
-pub use crate::mem_direct::{direct_mem_helper, get_own_region_id, set_tracee_write_region_addr};
-pub use crate::mem_slow::slow_mem_helper;
+pub use crate::mem_direct::{get_own_region_id, set_tracee_write_region_addr, DIRECT_MEM_HELPERS};
+pub use crate::mem_slow::SLOW_MEM_HELPERS;
 
 use nix::sys;
 use nix::sys::memfd;
@@ -76,7 +76,7 @@ pub fn start(
     unsafe {
         for i in 0..MAX_NUM_TRACEES {
             let start_tracee = (mmap_addr + i * STACK_SAFE_ZONE_SIZE) as *mut SharedRegionContent;
-            let mut region_box = shared_regions[i]
+            let mut region_box = SHARED_REGIONS[i]
                 .write()
                 .map_err(|_| PtraceError::LockGlobalMmap)?;
             *region_box = Some(Box::from_raw(start_tracee));

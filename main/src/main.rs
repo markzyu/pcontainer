@@ -1,6 +1,5 @@
 use clap::Clap;
 use executor::PtraceServer;
-use ptrace::{direct_mem_helper, slow_mem_helper};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;

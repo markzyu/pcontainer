@@ -1,25 +1,14 @@
+// Faster, but less supported method to access tracee memory (mmap)
 use crate::common::{
-    aligned, availabe_region_ids, checked_add, checked_div, checked_mul, checked_sub,
-    region_ids_by_pid, shared_regions, CHeader, CStruct, MemHelpers, PtraceError, MAX_NUM_TRACEES,
-    MAX_READ_MAPS_PER_TRACEE, MAX_STRUCT_SIZE, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+    checked_add, MemHelpers, PtraceError, AVAILABLE_REGION_IDS, MAX_NUM_TRACEES, REGION_IDS_BY_PID,
+    SHARED_REGIONS, STACK_SAFE_ZONE_SIZE,
 };
-/// Faster, but less supported method to access tracee memory (mmap)
-use core::ffi::c_void;
 use nix::fcntl::OFlag;
-use nix::sys::mman;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::ptr::NonNull;
+use std::os::fd::{AsFd, OwnedFd};
 use tracing::{event, Level};
-
-#[derive(Clone)]
-struct MmapInfo {
-    tracer_addr: NonNull<c_void>,
-    base_addr: NonZeroUsize,
-    length: NonZeroUsize,
-}
 
 const READ_BUFFER_SIZE: usize = 1024;
 
@@ -30,7 +19,7 @@ thread_local! {
     /// The tracee side pointer of its own writeable `shared_region`
     static TRACEE_WRITE_REGION_ADDR: RefCell<Option<NonZeroUsize>> = RefCell::new(None);
 
-    /// The index into `shared_regions`, which reveals a writeable mmap
+    /// The index into `SHARED_REGIONS`, which reveals a writeable mmap
     static TRACEE_WRITE_REGION_ID: RefCell<Option<usize>> = RefCell::new(None);
 }
 
@@ -50,10 +39,10 @@ pub fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
         if let Some(value) = *cache {
             return Ok(value);
         }
-        let mut region_ids = availabe_region_ids
+        let mut region_ids = AVAILABLE_REGION_IDS
             .write()
             .map_err(|_| PtraceError::LockGlobalMmap)?;
-        let mut by_pid = region_ids_by_pid
+        let mut by_pid = REGION_IDS_BY_PID
             .write()
             .map_err(|_| PtraceError::LockGlobalMmap)?;
         let result = region_ids.pop().ok_or(PtraceError::MaxTracee)?;
@@ -65,7 +54,7 @@ pub fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
 
 /// Get a region id from any thread, for the tracee `pid`
 fn get_region_id(pid: &nix::unistd::Pid) -> Result<Option<usize>, PtraceError> {
-    let region_ids = region_ids_by_pid
+    let region_ids = REGION_IDS_BY_PID
         .read()
         .map_err(|_| PtraceError::LockGlobalMmap)?;
     Ok(region_ids.get(pid).cloned())
@@ -74,14 +63,14 @@ fn get_region_id(pid: &nix::unistd::Pid) -> Result<Option<usize>, PtraceError> {
 /// Close the mmaps used by tracee
 fn close_tracee(pid: &nix::unistd::Pid) -> Result<(), PtraceError> {
     // Release Writeable mmap
-    let mut region_ids = availabe_region_ids
+    let mut region_ids = AVAILABLE_REGION_IDS
         .write()
         .map_err(|_| PtraceError::LockGlobalMmap)?;
-    let mut by_pid = region_ids_by_pid
+    let mut by_pid = REGION_IDS_BY_PID
         .write()
         .map_err(|_| PtraceError::LockGlobalMmap)?;
     let region_id = by_pid.remove(pid).ok_or(PtraceError::LockGlobalMmap)?;
-    let mut maybe_region_box = shared_regions[region_id]
+    let mut maybe_region_box = SHARED_REGIONS[region_id]
         .write()
         .map_err(|_| PtraceError::LockGlobalMmap)?;
     let region_box = maybe_region_box
@@ -92,10 +81,6 @@ fn close_tracee(pid: &nix::unistd::Pid) -> Result<(), PtraceError> {
 
     event!(Level::INFO, "Closed tracee mmap resource");
     Ok(())
-}
-
-fn non_zero_usize(val: usize, err: &'static str) -> Result<NonZeroUsize, PtraceError> {
-    NonZeroUsize::new(val).ok_or(PtraceError::IntIsZero(err))
 }
 
 /// This always writes to the same location of tracee stack.
@@ -143,7 +128,7 @@ unsafe fn write_bytes_to_tracee(
         return Err(PtraceError::BufferOverflow(0, region_id, MAX_NUM_TRACEES));
     }
 
-    let mut maybe_region_box = shared_regions[region_id]
+    let mut maybe_region_box = SHARED_REGIONS[region_id]
         .write()
         .map_err(|_| PtraceError::LockGlobalMmap)?;
     let region_box = maybe_region_box
@@ -220,11 +205,12 @@ fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, 
 
 fn read(pid: nix::unistd::Pid, addr: usize) -> Result<usize, PtraceError> {
     event!(Level::TRACE, "PTRACE_READ addr: {:x}", addr);
-    let raw_data = nix::sys::ptrace::read(pid, addr as *mut libc::c_void).map_err(PtraceError::Read)?;
+    let raw_data =
+        nix::sys::ptrace::read(pid, addr as *mut libc::c_void).map_err(PtraceError::Read)?;
     Ok(raw_data as usize)
 }
 
-pub const direct_mem_helper: MemHelpers = MemHelpers {
+pub const DIRECT_MEM_HELPERS: MemHelpers = MemHelpers {
     close_tracee,
     read,
     read_bytes,

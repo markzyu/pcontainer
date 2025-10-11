@@ -13,11 +13,6 @@ pub const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 pub const MAX_NUM_TRACEES: usize = 8192;
 pub const MAX_STRUCT_SIZE: usize = 2048;
 
-/// Linux usually limits the max mmaps for each process to 65530.
-pub const MAX_READ_MAPS: usize = 65500;
-/// This should be about 7 readonly mmaps for each tracee
-pub const MAX_READ_MAPS_PER_TRACEE: usize = MAX_READ_MAPS / MAX_NUM_TRACEES;
-
 /// One single writeable mmap, shared across all tracees.
 ///
 /// Should be exactly 128MB of RAM, divided into 8192 regions of shared 'stack'
@@ -31,10 +26,10 @@ pub const MAX_READ_MAPS_PER_TRACEE: usize = MAX_READ_MAPS / MAX_NUM_TRACEES;
 pub const SHARED_MMAP_SIZE: usize = MAX_NUM_TRACEES * STACK_SAFE_ZONE_SIZE;
 
 /// Max number of total structs in the entire shared mmap
-pub const MAX_NUM_STRUCTS: usize = SHARED_MMAP_SIZE / MAX_STRUCT_SIZE;
+// pub const MAX_NUM_STRUCTS: usize = SHARED_MMAP_SIZE / MAX_STRUCT_SIZE;
 
 /// Max number of total structs in the an individual region of shared mmap
-pub const MAX_NUM_STRUCTS_PER_TRACEE: usize = STACK_SAFE_ZONE_SIZE / MAX_STRUCT_SIZE;
+// pub const MAX_NUM_STRUCTS_PER_TRACEE: usize = STACK_SAFE_ZONE_SIZE / MAX_STRUCT_SIZE;
 
 #[cfg(not(any(target_env = "gnu")))]
 pub const PTRACE_GETEVENTMSG: i32 = libc::PTRACE_GETEVENTMSG as i32;
@@ -55,11 +50,11 @@ pub const PTRACE_SETREGSET: i32 = libc::PTRACE_SETREGSET as i32;
 pub const PTRACE_SETREGSET: u32 = sys::ptrace::Request::PTRACE_SETREGSET as u32;
 
 // Used by aarch64 and arm to set system call number. Does not exist in rust libc
-#[cfg(not(any(target_env = "gnu")))]
+#[cfg(all(not(target_env = "gnu"), target_arch = "aarch64"))]
 pub const NT_ARM_SYSTEM_CALL: i32 = 0x404;
 
 // Used by aarch64 and arm to set system call number. Does not exist in rust libc
-#[cfg(any(target_env = "gnu"))]
+#[cfg(all(target_env = "gnu", target_arch = "aarch64"))]
 pub const NT_ARM_SYSTEM_CALL: u32 = 0x404;
 
 /// To help us index the structs within a tracee's own mmap region
@@ -70,11 +65,11 @@ lazy_static! {
     pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
 
     // The actual shared regions will be initialized in start() in lib.rs
-    pub static ref shared_regions: SharedRegions = core::array::from_fn(|_| RwLock::new(None));
+    pub static ref SHARED_REGIONS: SharedRegions = core::array::from_fn(|_| RwLock::new(None));
 
-    pub static ref availabe_region_ids: RwLock<Vec<usize>> = RwLock::new((0..MAX_NUM_TRACEES).collect());
+    pub static ref AVAILABLE_REGION_IDS: RwLock<Vec<usize>> = RwLock::new((0..MAX_NUM_TRACEES).collect());
 
-    pub static ref region_ids_by_pid: RwLock<HashMap<Pid, usize>> = RwLock::new(HashMap::new());
+    pub static ref REGION_IDS_BY_PID: RwLock<HashMap<Pid, usize>> = RwLock::new(HashMap::new());
 }
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -213,7 +208,7 @@ pub struct MemHelpers {
 
 impl Default for MemHelpers {
     fn default() -> Self {
-        mem_slow::slow_mem_helper
+        mem_slow::SLOW_MEM_HELPERS
     }
 }
 
