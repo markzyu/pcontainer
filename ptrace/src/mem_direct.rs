@@ -21,6 +21,8 @@ struct MmapInfo {
     length: NonZeroUsize,
 }
 
+const READ_BUFFER_SIZE: usize = 1024;
+
 thread_local! {
     /// A lookup table of trace memory region files (as actual file names) to tracer mmap address
     static TRACEE_READ_FD: RefCell<Option<OwnedFd>> = RefCell::new(None);
@@ -189,13 +191,14 @@ fn read_bytes_until_num_zeroes(
     addr: usize,
     n0: usize,
 ) -> Result<Vec<u8>, PtraceError> {
+    let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
     let mut result: Vec<u8> = Vec::new();
     let mut curr_addr = addr;
     let mut total_zeroes = 0;
     loop {
-        let machine_word = read(pid, curr_addr)?;
-        for byte in machine_word.to_ne_bytes().iter() {
-            if *byte == b'\0' {
+        read_bytes(pid, curr_addr, READ_BUFFER_SIZE, &mut buffer)?;
+        for byte in buffer {
+            if byte == b'\0' {
                 total_zeroes += 1;
                 if total_zeroes >= n0 {
                     return Ok(result);
@@ -203,9 +206,9 @@ fn read_bytes_until_num_zeroes(
             } else {
                 total_zeroes = 0;
             }
-            result.push(*byte);
+            result.push(byte);
         }
-        curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+        curr_addr = checked_add(curr_addr, READ_BUFFER_SIZE)?;
     }
 }
 
@@ -214,13 +217,9 @@ fn read_bytes_until_zero(pid: nix::unistd::Pid, addr: usize) -> Result<Vec<u8>, 
 }
 
 fn read(pid: nix::unistd::Pid, addr: usize) -> Result<usize, PtraceError> {
-    let mut result: usize = 0;
-    unsafe {
-        let ptr = (&mut result as *mut usize as *mut u8);
-        let slice = std::slice::from_raw_parts_mut(ptr, *USIZE_SIZE);
-        read_bytes(pid, addr, *USIZE_SIZE, slice)?;
-    }
-    Ok(result)
+    event!(Level::TRACE, "PTRACE_READ addr: {:x}", addr);
+    let raw_data = nix::sys::ptrace::read(pid, addr as *mut libc::c_void).map_err(PtraceError::Read)?;
+    Ok(raw_data as usize)
 }
 
 pub const direct_mem_helper: MemHelpers = MemHelpers {
