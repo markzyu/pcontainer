@@ -6,6 +6,7 @@ use crate::common::{
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
+use std::convert::TryInto;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, OwnedFd};
 use tracing::{event, Level};
@@ -156,7 +157,7 @@ fn read_bytes(
     TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
         if let Some(orig_fd) = maybe_fd.as_mut() {
             let fd = orig_fd.as_fd();
-            nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet)
+            nix::unistd::lseek(fd, addr2.try_into().map_err(|_| PtraceError::CastIsizeToIsize)?, nix::unistd::Whence::SeekSet)
                 .map_err(PtraceError::Read)?;
             nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
             return Ok(());
