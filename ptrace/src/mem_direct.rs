@@ -153,11 +153,10 @@ fn read_bytes(
 ) -> Result<(), PtraceError> {
     event!(Level::DEBUG, "DIRECT_READ addr: {:x} size {}", addr, size);
     let pid_string = pid.to_string();
-    let addr2: isize = addr as isize;
     TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
         if let Some(orig_fd) = maybe_fd.as_mut() {
             let fd = orig_fd.as_fd();
-            nix::unistd::lseek(fd, addr2.try_into().map_err(|_| PtraceError::CastIsizeToIsize)?, nix::unistd::Whence::SeekSet)
+            nix::unistd::lseek(fd, addr.try_into().map_err(|_| PtraceError::CastUsizeToIsize)?, nix::unistd::Whence::SeekSet)
                 .map_err(PtraceError::Read)?;
             nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
             return Ok(());
@@ -167,7 +166,7 @@ fn read_bytes(
         let mmap_fd = nix::fcntl::open(&map_path, OFlag::O_RDONLY, Mode::S_IRUSR)
             .map_err(PtraceError::Read)?;
         let fd = mmap_fd.as_fd();
-        nix::unistd::lseek(fd, addr2, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
+        nix::unistd::lseek(fd, addr.try_into().map_err(|_| PtraceError::CastUsizeToIsize)?, nix::unistd::Whence::SeekSet).map_err(PtraceError::Read)?;
         nix::unistd::read(fd, &mut result[..size]).map_err(PtraceError::Read)?;
         maybe_fd.replace(mmap_fd);
         Ok(())
