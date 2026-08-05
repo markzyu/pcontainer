@@ -30,8 +30,6 @@ To actually achieve "turning on/off features at runtime", we should just create 
 ## Project structure
 
 
-![project structure](ProjectStructure.png)
-
 Both sysaug and mods crates are supposed to modify the behavior of system calls. But here are the differences:
 
 Sysaug is a backend while mods are the frontend.
@@ -42,7 +40,7 @@ Mods are dynamic but sysaug isn't.
 - `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
 - `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
 
-## Multithreading model
+## Multithreading model and Fallback model
 
 By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
 
@@ -50,7 +48,9 @@ But this requires the permission for PTRACE_ATTACH. And on some systems, this pe
 
 In that case, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
 
-## For Developers
+![Fallback threading model](FallbackThreadingModel.png)
+
+## For Developers (Note: this might be outdated)
 
 How to debug problems:
 
