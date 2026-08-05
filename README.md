@@ -27,6 +27,16 @@ Regarding "mods" crate, the idea was to implement optional features and logics h
 
 To actually achieve "turning on/off features at runtime", we should just create a better config schema so that we can customize "sysaug" crate behavior with a descriptive json config that's passed in during pcontainer initialization
 
+## Multithreading model and Fallback model
+
+By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
+
+But this requires the permission for PTRACE_ATTACH. And on some systems, this permission is blocked, and tracer can only attach to their direct children from main threads.
+
+In that case, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
+
+![Fallback threading model](FallbackThreadingModel.png)
+
 ## Project structure (Outdated)
 
 
@@ -40,15 +50,23 @@ Mods are dynamic but sysaug isn't.
 - `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
 - `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
 
-## Multithreading model and Fallback model
+Within `sysaug` crate, there are two major parts:
 
-By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
+* `aug_*.rs` defines Augments which have separate concerns based on the type of syscalls they augment
+* `handler.rs` defines the core "state machine" that translates TraceeHandlerStates and various trackers of tracee's stack and hacky mmap injection addresses, into how exactly to rewrite every syscalls + followup on them in multi-step algorithms.
 
-But this requires the permission for PTRACE_ATTACH. And on some systems, this permission is blocked, and tracer can only attach to their direct children from main threads.
+Additionally, 
 
-In that case, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
+* `ptrace` crate is responsible for abstracting away the low level pointer safety of translating tracee pointers to/from ptrace calls
+* `executor` crate is responsible for abstracting away the low level thread safety of running ptrace calls across threads
+* And, `executor` crate also implements a basic Thread-Per-Core "async" runtime that fits my realtime tracer needs better: `PtraceAsyncRuntime`
 
-![Fallback threading model](FallbackThreadingModel.png)
+
+This `PtraceAsyncRuntime` is mostly an enabler of an anti-pattern: I chose to write the state machine of a tracer using async syntax sugar, instead of manually writing out the state machine as literal switch case listing and migrating between all checkpoint states. Another added benefit of `PtraceAsyncRuntime` is that all logics within it are forced to run on the same thread, so I can avoid `Arc<Mutex<>>` and use `RefCell` instead.
+
+**Caveat**: this refactor from "synchronous spaghetti" to "async as a hacky state machine syntax" is still ongoing. You will see two hacky logics live next to each other. The synchronous logics use a ton of `Arc<Mutex<>>` types. And the async logics are always Pinned, not truly "async", and are more of a hacky use of the underlying state machine than a use of true async events
+
+Right now the repo lives in a very bad state and has a lot more runtime overhead than needed. I intend to move fully into async in hope that removing Arc will fix some of the overhead. But I'm starting to think I misunderstood how Rust handles async, and how heavy it truly is.
 
 ## For Developers (Note: this might be outdated)
 
