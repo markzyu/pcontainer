@@ -27,7 +27,7 @@ Regarding "mods" crate, the idea was to implement optional features and logics h
 
 To actually achieve "turning on/off features at runtime", we should just create a better config schema so that we can customize "sysaug" crate behavior with a descriptive json config that's passed in during pcontainer initialization
 
-## Project structure
+## Project structure (Outdated)
 
 
 Both sysaug and mods crates are supposed to modify the behavior of system calls. But here are the differences:
