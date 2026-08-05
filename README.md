@@ -5,7 +5,7 @@ The fundamental idea is not that different from proot. In fact, it's inspiried b
 However, there are a few differences:
 
 1. This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
-2. PRoot uses GPL Licenses. This project uses MIT & Apache dual Licensing to maximize software freedom.
+2. PRoot uses GPL Licenses. This project uses MIT icensing to maximize software freedom.
 3. PRoot has a longer history of proven success. But this project is still in its early stage. This is both good and bad.
     - The Good: There are no rules for contributors. If you have a patch that helps, I'm willing to throw away existing code and use yours instead.
     - The Bad: This project barely works. Basic shell commands work but `apt-get` is broken.
