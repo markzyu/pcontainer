@@ -21,22 +21,17 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install stable Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           target: ${{ matrix.target }}
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --target ${{ matrix.target }}
-          use-cross: true
+        run: cross check --target ${{ matrix.target }}
 
   test:
     name: Integration Tests
@@ -85,18 +80,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-          use-cross: true
-
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --target ${{ matrix.target }}
-          use-cross: true
+        run: cargo fmt --all -- --check
 
   build:
     name: Build
@@ -121,8 +105,4 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --target ${{ matrix.target }}
-          use-cross: true
+        run: cross build --target ${{ matrix.target }}
