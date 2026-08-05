@@ -5,6 +5,8 @@ The fundamental idea is not that different from proot. In fact, it's inspiried b
 However, there are a few differences:
 
 1. This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
+    - Multithreading mattered to me, more than the ptrace overhead. Because proot has a hardtime supporting heavy I/O from a multithreaded JVM running game servers, for example, to host Minecraft.
+    - This project was an exploration of whether multithreading helps with heavy I/O. But I've been sidetracked by other issues like supporting `apt-get`.
 2. PRoot uses GPL Licenses. This project uses MIT icensing to maximize software freedom.
 3. PRoot has a longer history of proven success. But this project is still in its early stage. This is both good and bad.
     - The Good: There are no rules for contributors. If you have a patch that helps, I'm willing to throw away existing code and use yours instead.
@@ -12,7 +14,21 @@ However, there are a few differences:
 
 Eventually, my goal is to be able to run any Docker container on any mobile device, without needing root. But there is a long way to go.
 
+## Warning: Outdated code (Don't use in prod)
+
+The Rust compiler version and many crates are outdated. (I used very old versions of libc and nix. And there are a lot of dirty workarounds in my code to fix missing syscall constants)
+
+The following designs are outdated:
+
+* The "mods" crate is outdated. 
+* The "procfs" crate is an empty placeholder for procfs simulation. It is not being used at all.
+
+Regarding "mods" crate, the idea was to implement optional features and logics here. In reality, this proved unfit. Dynamically loading mods slows down Rust because it involves dyn pointers.
+
+To actually achieve "turning on/off features at runtime", we should just create a better config schema so that we can customize "sysaug" crate behavior with a descriptive json config that's passed in during pcontainer initialization
+
 ## Project structure
+
 
 ![project structure](ProjectStructure.png)
 
