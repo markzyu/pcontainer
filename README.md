@@ -16,7 +16,7 @@ Eventually, my goal is to be able to run any Docker container on any mobile devi
 
 ## Warning: Outdated code (Don't use in prod)
 
-The Rust compiler version and many crates are outdated. (I used very old versions of libc and nix. And there are a lot of dirty workarounds in my code to fix missing syscall constants)
+In Cargo.toml, the Rust compiler edition and many dependencies are outdated. (I used very old versions of libc and nix. And there are a lot of dirty workarounds in my code to fix missing syscall constants)
 
 The following designs are outdated:
 
