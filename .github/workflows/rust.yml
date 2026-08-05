@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
  
       - name: Install stable Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -68,7 +68,7 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install stable Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -94,15 +94,14 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install stable Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           target: ${{ matrix.target }}
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Run cargo build
         run: cross build --target ${{ matrix.target }}
