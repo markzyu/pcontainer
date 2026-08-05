@@ -152,7 +152,7 @@ fn read_bytes(
 ) -> Result<(), PtraceError> {
     event!(Level::DEBUG, "DIRECT_READ addr: {:x} size {}", addr, size);
     let pid_string = pid.to_string();
-    let addr2: i64 = addr as i64;
+    let addr2: isize = addr as isize;
     TRACEE_READ_FD.with_borrow_mut(|maybe_fd| {
         if let Some(orig_fd) = maybe_fd.as_mut() {
             let fd = orig_fd.as_fd();

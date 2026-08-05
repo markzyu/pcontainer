@@ -57,6 +57,14 @@ pub const NT_ARM_SYSTEM_CALL: i32 = 0x404;
 #[cfg(all(target_env = "gnu", target_arch = "aarch64"))]
 pub const NT_ARM_SYSTEM_CALL: u32 = 0x404;
 
+// Used by aarch64 and arm to set system call number. Does not exist in rust libc
+#[cfg(all(not(target_env = "gnu"), target_arch = "arm"))]
+pub const NT_ARM_SYSTEM_CALL: i32 = 0x404;
+
+// Used by aarch64 and arm to set system call number. Does not exist in rust libc
+#[cfg(all(target_env = "gnu", target_arch = "arm"))]
+pub const NT_ARM_SYSTEM_CALL: u32 = 0x404;
+
 /// To help us index the structs within a tracee's own mmap region
 pub type SharedRegionContent = [u8; STACK_SAFE_ZONE_SIZE];
 pub type SharedRegions = [RwLock<Option<Box<SharedRegionContent>>>; MAX_NUM_TRACEES];
