@@ -37,7 +37,7 @@ In that case, pcontainer will try to cumulate ptrace() syscalls on main thread f
 
 ![Fallback threading model](FallbackThreadingModel.png)
 
-## Project structure (Outdated)
+## Project structure
 
 
 Both sysaug and mods crates are supposed to modify the behavior of system calls. But here are the differences:
