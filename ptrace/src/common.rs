@@ -9,6 +9,8 @@ use thiserror::Error;
 use tracing::{event, Level};
 
 pub const NT_PRSTATUS: libc::c_int = 1;
+
+/// Due to arm limitations, this must be a multiple of 4096
 pub const STACK_SAFE_ZONE_SIZE: usize = 16 * 1024;
 pub const MAX_NUM_TRACEES: usize = 8192;
 pub const MAX_STRUCT_SIZE: usize = 2048;

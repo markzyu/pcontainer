@@ -24,6 +24,16 @@ use std::thread;
 use sys::signal::Signal;
 use tracing::{event, info, span, Level};
 
+#[cfg(not(target_arch = "arm"))]
+const SYS_mmap: usize = libc::SYS_mmap as usize;
+#[cfg(target_arch = "arm")]
+const SYS_mmap: usize = libc::SYS_mmap2 as usize;
+
+#[cfg(not(target_arch = "arm"))]
+const SYS_mmap_pgoffset_block: usize = 1;
+#[cfg(target_arch = "arm")]
+const SYS_mmap_pgoffset_block: usize = 4096;
+
 thread_local! {
     static MEM: RefCell<MemHelpers> = RefCell::new(SLOW_MEM_HELPERS.clone());
 }
@@ -605,14 +615,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let mmap_regs = self
             ._insert_syscall(
                 "SYS_mmap",
-                libc::SYS_mmap as usize,
+                SYS_mmap,
                 [
                     0,
                     STACK_SAFE_ZONE_SIZE,
                     libc::PROT_READ as usize,
                     libc::MAP_SHARED as usize,
                     self.shared_fd as usize,
-                    region_id * STACK_SAFE_ZONE_SIZE,
+                    region_id * STACK_SAFE_ZONE_SIZE / SYS_mmap_pgoffset_block,
                 ],
             )
             .await?;
