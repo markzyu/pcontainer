@@ -161,14 +161,6 @@ impl Default for Augments {
 
 // ------------------- SYSCALLS -------------------
 
-// pub const PERMS_IDBIT_R: u8 = 1;
-// pub const PERMS_IDBIT_E: u8 = 2;
-// pub const PERMS_IDBIT_S: u8 = 4;
-// pub const PERMS_IDBIT_F: u8 = 8;
-/// True = uid, False = gid.
-pub const PERMS_IDBIT_UG: u8 = 16;
-pub const PERMS_IDS_SIZE: usize = 32;
-
 #[derive(Debug, PartialEq)]
 pub enum DelType {
     File,
@@ -179,6 +171,14 @@ pub enum DelType {
 pub enum PermType {
     Chmod,
     Chown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum PermsMode {
+    #[default]
+    Passthrough,
+    RootOnly,
+    SudoOnly,
 }
 
 #[derive(Debug, Default)]
@@ -200,11 +200,10 @@ pub struct SyscallInfo {
 
     /// true -> setuid/setgid, false -> getuid/getgid
     pub is_setter: bool,
-    /// 0 -> see resf_bit, 3 -> reuid/regid, 7 -> resuid/resgid
-    ///     + check PERMS_IDBIT_UG for uid/gid
+    /// a bitmask of Real/Effective/SavedSet/FileSystem/IsUid flags (from 0 to 31). One call can set multiple flags at once.
     pub res_bits: u8,
-    /// 2 -> gid, 24 -> fsuid
-    pub resf_bit: u8,
+    /// the direct index of the perms_ids slot (from 0 to 8: rgid, egid, ssgid, fsgid, ruid, euid, ssuid, fsuid)
+    pub resf_bit: Option<u8>,
 
     pub num: libc::c_long,
     pub name: &'static str,

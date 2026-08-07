@@ -11,7 +11,8 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common;
-use crate::common::{SysAugError, SyscallInfo, PERMS_IDBIT_UG};
+use crate::common::{PermsMode, SysAugError, SyscallInfo};
+use crate::config::walk_resf_syscall;
 use crate::handler::AsyncTraceeHandler;
 use crate::mods;
 use ptrace::GenericPurposeRegs;
@@ -23,52 +24,88 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         orig_regs: GenericPurposeRegs,
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
-        if syscall.is_setter {
-            if syscall.num == libc::SYS_setgroups {
+        let possible_args = &[orig_regs.arg0, orig_regs.arg1, orig_regs.arg2];
+        if syscall.is_setter && self.cli_args.perms_mode != PermsMode::Passthrough {
+            let is_handled = walk_resf_syscall(syscall, true, &self.states.perms_ids, |i, val| {
+                let proposed_id = if let Some(i) = i {
+                    possible_args[i]
+                } else {
+                    orig_regs.syscall_retval()
+                };
+                let final_id = self.handle_setid(syscall, proposed_id)?;
+                *val = Some(final_id);
+                Ok(())
+            })?;
+
+            if !is_handled {
                 return self.do_skip_syscall(0).await;
-            }
-
-            let res_bits = syscall.res_bits;
-            if res_bits == 0 {
-                self.call_mods(mods::ModFeature::OnSetid, |m| {
-                    m.on_setid(syscall.resf_bit, orig_regs.arg0, syscall)
-                })
-                .await?;
-            } else {
-                let ug_bit = res_bits & PERMS_IDBIT_UG;
-                let possible_args = &[orig_regs.arg0, orig_regs.arg1, orig_regs.arg2];
-                for (i, possible_arg) in possible_args.iter().enumerate() {
-                    let match_bit = res_bits & (1 << i);
-                    if match_bit == 0 {
-                        continue;
-                    }
-
-                    self.call_mods(mods::ModFeature::OnSetid, |m| {
-                        m.on_setid(match_bit | ug_bit, *possible_arg, syscall)
-                    })
-                    .await?;
-                }
             }
         }
 
         let regs = self.do_resume_syscall().await?;
 
-        if !syscall.is_setter {
-            if syscall.num == libc::SYS_getgroups {
+        if !syscall.is_setter && self.cli_args.perms_mode != PermsMode::Passthrough {
+            let is_known_getter = walk_resf_syscall(
+                syscall,
+                regs.syscall_retval() == 0,
+                &self.states.perms_ids,
+                |i, val| {
+                    if let Some(i) = i {
+                        let pid = self.pid;
+                        let ptr_addr = possible_args[i];
+                        if let Some(val) = val.as_ref() {
+                            let val = *val;
+                            event!(
+                                Level::INFO,
+                                "Writing id {} to tracee pointer {:x}",
+                                val,
+                                ptr_addr
+                            );
+                            self.ptrace_client
+                                .execute(move || ptrace::write(pid, ptr_addr, val))??;
+                        }
+                    } else if let Some(val) = val.as_ref() {
+                        event!(
+                            Level::INFO,
+                            "Writing id {} to return value of {}",
+                            *val,
+                            syscall.name()
+                        );
+                        self.write_retval(regs.clone(), *val);
+                    }
+                    Ok(())
+                },
+            )?;
+            if !is_known_getter && regs.syscall_retval() < 0 {
+                // The default behavior is to let the unknown getter syscall succeed.
                 return self.write_retval(regs, 0);
-            }
-
-            let res_bits = syscall.res_bits;
-            if res_bits == 0 {
-                let maybe_override = common::rwlock_read(&self.states.perms_ids)?;
-                if let Some(val) = maybe_override[syscall.resf_bit as usize].as_ref() {
-                    self.write_retval(regs, *val)?;
-                }
-            } else {
-                return Err(SysAugError::UnimplementedAugment);
             }
         }
         Ok(())
+    }
+
+    fn handle_setid(
+        &self,
+        syscall: &SyscallInfo,
+        proposed_id: usize,
+    ) -> Result<usize, SysAugError> {
+        if self.cli_args.perms_mode == PermsMode::RootOnly {
+            if proposed_id >= usize::MAX / 2 {
+                event!(
+                    Level::INFO,
+                    "Ignoring {} where id is negative",
+                    syscall.name()
+                );
+                return Ok(0);
+            }
+        }
+        event!(
+            Level::INFO,
+            "Setting id ({}) to {}",
+            syscall.name(),
+            proposed_id
+        );
+        Ok(proposed_id)
     }
 
     fn write_retval(&self, mut regs: GenericPurposeRegs, val: usize) -> Result<(), SysAugError> {

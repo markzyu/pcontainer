@@ -15,7 +15,7 @@ use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{display_err, ModProvider};
+use sysaug::{display_err, ModProvider, PermsMode};
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -144,9 +144,6 @@ fn actual_main() -> Result<(), CLIError> {
     if args.strace {
         mods.push(mods::StraceMod::new_box);
     }
-    if args.root {
-        mods.push(mods::SimpleRootMod::new_box);
-    }
     if args.chroot.is_some() || args.rootfs.is_some() {
         mods.push(mods::RootfsMod::new_box);
     }
@@ -196,6 +193,13 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     let args2 = sysaug::CLIArgs {
         chroot: canonicalize_clone(&args.chroot)?,
         rootfs: canonicalize_clone(&args.rootfs)?,
+        perms_mode: if args.root {
+            PermsMode::RootOnly
+        } else if args.sudo {
+            PermsMode::SudoOnly
+        } else {
+            PermsMode::Passthrough
+        },
         fail_fast: args.fail_fast,
         fix_sigsys: args.fix_sigsys,
         fix_mmap: args.fix_mmap || args.fix_attach,

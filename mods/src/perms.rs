@@ -32,12 +32,12 @@ macro_rules! exec_setid {
     ($perms_ids:expr, $which:expr, $path:expr, $id: expr) => {
         event!(
             Level::INFO,
-            "Execve real path: {:?} set {} to {:?}",
+            "Execve real path: {:?} set {:?} to {:?}",
             $path,
             $which,
             $id,
         );
-        rwoptions_replace!(&$perms_ids, $which as usize, $id as usize);
+        rwoptions_replace!(&$perms_ids, $which, $id as usize);
     };
 }
 
@@ -72,29 +72,13 @@ impl Mod for PermsMod {
                 let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
                 let setgid = stat.st_mode & nix::sys::stat::Mode::S_ISGID.bits();
                 if setuid != 0 {
-                    exec_setid!(self.states.perms_ids, 18, path, stat.st_uid);
+                    exec_setid!(self.states.perms_ids, 5, path, stat.st_uid);
                 }
                 if setgid != 0 {
-                    exec_setid!(self.states.perms_ids, 2, path, stat.st_gid);
+                    exec_setid!(self.states.perms_ids, 1, path, stat.st_gid);
                 }
             }
         }
         Ok(ModAction::None)
-    }
-
-    fn on_setid(
-        &self,
-        which: u8,
-        uid: usize,
-        _syscall: &SyscallInfo,
-    ) -> Result<ModAction, SysAugError> {
-        event!(
-            Level::INFO,
-            "Setting {:b} id to {}",
-            which,
-            uid as libc::uid_t
-        );
-        rwoptions_replace!(&self.states.perms_ids, which as usize, uid);
-        Ok(ModAction::SkipSyscall(0))
     }
 }

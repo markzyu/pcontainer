@@ -12,8 +12,9 @@
 
 use crate::common::{
     display_err, rwlock_read, rwlock_replace, Augments, ModBox, ModProvider, ModsByFeature,
-    SysAugError, NO_MOD_SYSCALL, PERMS_IDS_SIZE,
+    PermsMode, SysAugError, NO_MOD_SYSCALL,
 };
+use crate::config::{init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE};
 use crate::mods::{ModAction, ModFeature};
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
@@ -58,6 +59,7 @@ pub fn get_mem_helper() -> MemHelpers {
 pub struct CLIArgs {
     pub chroot: Option<PathBuf>,
     pub rootfs: Option<PathBuf>,
+    pub perms_mode: PermsMode,
     pub fail_fast: bool,
     pub fix_sigsys: bool,
     pub fix_mmap: bool,
@@ -71,6 +73,7 @@ pub struct CLIArgs {
 #[derive(Debug)]
 pub struct TraceeHandlerStates {
     pub args: CLIArgs,
+    pub config: SysAugConfig,
     pub failed: AtomicBool,
     pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
     pub path_prefix: RwLock<Option<PathBuf>>,
@@ -144,6 +147,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
+        init_perms_ids_from_config(&self.states.perms_ids, &self.states.config.perms)?;
         self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())
             .await?;
 
@@ -852,6 +856,7 @@ impl Default for TraceeHandlerStates {
     fn default() -> TraceeHandlerStates {
         TraceeHandlerStates {
             args: CLIArgs::default(),
+            config: SysAugConfig::default(),
             failed: AtomicBool::new(false),
             perms_ids: RwLock::default(),
             path_prefix: RwLock::default(),
@@ -866,6 +871,7 @@ impl TraceeHandlerStates {
     pub fn try_clone(&self) -> Result<TraceeHandlerStates, SysAugError> {
         Ok(TraceeHandlerStates {
             args: self.args.clone(),
+            config: self.config.clone(),
             failed: AtomicBool::new(false),
             perms_ids: clone_locked(&self.perms_ids)?,
             path_prefix: clone_locked(&self.path_prefix)?,

@@ -12,6 +12,7 @@
 
 /// See "../mods/src/lib.rs" for more details
 use crate::common::{SysAugError, SyscallInfo};
+use crate::config::ResfUgType;
 use lazy_static::lazy_static;
 use std::any::type_name;
 use std::collections::HashSet;
@@ -128,15 +129,6 @@ pub trait Mod {
         _syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         Ok(PathAction::None)
-    }
-
-    fn on_setid(
-        &self,
-        _which: u8,
-        _val: usize,
-        _syscall: &SyscallInfo,
-    ) -> Result<ModAction, SysAugError> {
-        Ok(ModAction::None)
     }
 
     fn on_sets_perms(&self, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {

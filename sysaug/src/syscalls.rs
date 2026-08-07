@@ -227,37 +227,37 @@ lazy_static! {
         let mut ans = HashMap::new();
         define_syscall!(libc::SYS_clone, Augments::Clone, ans);
         define_syscall!(libc::SYS_wait4, Augments::Waitpid, ans);
-        define_perms_syscall!(libc::SYS_getuid, false, 0, 17, ans);
-        define_perms_syscall!(libc::SYS_geteuid, false, 0, 18, ans);
-        define_perms_syscall!(libc::SYS_getgid, false, 0, 1, ans);
-        define_perms_syscall!(libc::SYS_getegid, false, 0, 2, ans);
-        define_perms_syscall!(libc::SYS_getgroups, false, 0, 0, ans);
-        define_perms_syscall!(libc::SYS_setuid, true, 0, 18, ans);
-        define_perms_syscall!(libc::SYS_setgid, true, 0, 2, ans);
-        define_perms_syscall!(libc::SYS_setgroups, true, 0, 0, ans);
-        define_perms_syscall!(libc::SYS_setregid, true, 3, 0, ans);
-        define_perms_syscall!(libc::SYS_setreuid, true, 19, 0, ans);
-        define_perms_syscall!(libc::SYS_setresgid, true, 7, 0, ans);
-        define_perms_syscall!(libc::SYS_setresuid, true, 23, 0, ans);
-        define_perms_syscall!(libc::SYS_setfsgid, true, 0, 8, ans);
-        define_perms_syscall!(libc::SYS_setfsuid, true, 0, 24, ans);
+        define_perms_syscall!(libc::SYS_getuid, false, 0, Some(4), ans);
+        define_perms_syscall!(libc::SYS_geteuid, false, 0, Some(5), ans);
+        define_perms_syscall!(libc::SYS_getgid, false, 0, Some(0), ans);
+        define_perms_syscall!(libc::SYS_getegid, false, 0, Some(1), ans);
+        define_perms_syscall!(libc::SYS_getgroups, false, 0, None, ans);
+        define_perms_syscall!(libc::SYS_setuid, true, 0, Some(4), ans);
+        define_perms_syscall!(libc::SYS_setgid, true, 0, Some(0), ans);
+        define_perms_syscall!(libc::SYS_setgroups, true, 0, None, ans);
+        define_perms_syscall!(libc::SYS_setregid, true, 3, None, ans);
+        define_perms_syscall!(libc::SYS_setreuid, true, 19, None, ans);
+        define_perms_syscall!(libc::SYS_setresgid, true, 7, None, ans);
+        define_perms_syscall!(libc::SYS_setresuid, true, 23, None, ans);
+        define_perms_syscall!(libc::SYS_setfsgid, true, 0, Some(3), ans);
+        define_perms_syscall!(libc::SYS_setfsuid, true, 0, Some(7), ans);
 
         #[cfg(any(target_arch = "arm", target_arch = "x86"))]
         {
-            define_perms_syscall!(libc::SYS_getuid32, false, 0, 17, ans);
-            define_perms_syscall!(libc::SYS_geteuid32, false, 0, 18, ans);
-            define_perms_syscall!(libc::SYS_getgid32, false, 0, 1, ans);
-            define_perms_syscall!(libc::SYS_getegid32, false, 0, 2, ans);
-            define_perms_syscall!(libc::SYS_getgroups32, false, 0, 0, ans);
-            define_perms_syscall!(libc::SYS_setuid32, true, 0, 18, ans);
-            define_perms_syscall!(libc::SYS_setgid32, true, 0, 2, ans);
-            define_perms_syscall!(libc::SYS_setgroups32, true, 0, 0, ans);
-            define_perms_syscall!(libc::SYS_setregid32, true, 3, 0, ans);
-            define_perms_syscall!(libc::SYS_setreuid32, true, 19, 0, ans);
-            define_perms_syscall!(libc::SYS_setresgid32, true, 7, 0, ans);
-            define_perms_syscall!(libc::SYS_setresuid32, true, 23, 0, ans);
-            define_perms_syscall!(libc::SYS_setfsgid32, true, 0, 8, ans);
-            define_perms_syscall!(libc::SYS_setfsuid32, true, 0, 24, ans);
+            define_perms_syscall!(libc::SYS_getuid32, false, 0, Some(4), ans);
+            define_perms_syscall!(libc::SYS_geteuid32, false, 0, Some(5), ans);
+            define_perms_syscall!(libc::SYS_getgid32, false, 0, Some(0), ans);
+            define_perms_syscall!(libc::SYS_getegid32, false, 0, Some(1), ans);
+            define_perms_syscall!(libc::SYS_getgroups32, false, 0, None, ans);
+            define_perms_syscall!(libc::SYS_setuid32, true, 0, Some(4), ans);
+            define_perms_syscall!(libc::SYS_setgid32, true, 0, Some(0), ans);
+            define_perms_syscall!(libc::SYS_setgroups32, true, 0, None, ans);
+            define_perms_syscall!(libc::SYS_setregid32, true, 3, None, ans);
+            define_perms_syscall!(libc::SYS_setreuid32, true, 19, None, ans);
+            define_perms_syscall!(libc::SYS_setresgid32, true, 7, None, ans);
+            define_perms_syscall!(libc::SYS_setresuid32, true, 23, None, ans);
+            define_perms_syscall!(libc::SYS_setfsgid32, true, 0, Some(3), ans);
+            define_perms_syscall!(libc::SYS_setfsuid32, true, 0, Some(7), ans);
         }
 
         define_paths_syscall!(libc::SYS_acct, 1, ans);
