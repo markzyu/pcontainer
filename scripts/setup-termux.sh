@@ -10,5 +10,5 @@ pkg install -y jq termux-api git rust python
 rm -rf "$REPO_DIR"
 git clone https://github.com/markzyu/pcontainer.git "$REPO_DIR"
 if ! [ -e "$HOME/.bashrc" ] && ! [ -L "$HOME/.bashrc" ]; then
-  ln -s "$REPO_DIR/.bashrc" ~/.bashrc
+  ln -s "$REPO_DIR/scripts/.bashrc" ~/.bashrc
 fi
