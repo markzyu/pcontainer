@@ -1,4 +1,5 @@
 use crate::common::{rwlock_write, SysAugError, SyscallInfo};
+use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::collections::HashMap;
@@ -6,9 +7,34 @@ use std::str::FromStr;
 use std::sync::RwLock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ChrootConfig {
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RenameConfig {
+    #[serde(with = "serde_regex")]
+    pub(crate) regex: Regex,
+
+    /// If None, pcontainer will hide the file at this path.
+    pub(crate) replacement: Option<String>,
+
+    /// If false, replace only the earliest match.
+    #[serde(default = "default_should_replace_all")]
+    pub(crate) should_replace_all: bool,
+}
+
+fn default_should_replace_all() -> bool {
+    false
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct RootfsConfig {
     #[serde(default = "default_passthroughs")]
     pub(crate) passthroughs: Vec<String>,
+
+    /// The key (original path) is a regex string with named captures. The value (new path) is a template string.
+    #[serde(default = "default_rename_configs")]
+    pub(crate) rename_guest_paths: Vec<RenameConfig>,
+
+    #[serde(default = "default_rename_configs")]
+    pub(crate) rename_host_paths: Vec<RenameConfig>,
 }
 
 fn default_passthroughs() -> Vec<String> {
@@ -23,10 +49,16 @@ fn default_passthroughs() -> Vec<String> {
     ]
 }
 
-impl Default for ChrootConfig {
+fn default_rename_configs() -> Vec<RenameConfig> {
+    vec![]
+}
+
+impl Default for RootfsConfig {
     fn default() -> Self {
         Self {
             passthroughs: default_passthroughs(),
+            rename_guest_paths: default_rename_configs(),
+            rename_host_paths: default_rename_configs(),
         }
     }
 }
@@ -149,7 +181,7 @@ impl Default for PermsConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct SysAugConfig {
     #[serde(default)]
-    pub(crate) chroot: ChrootConfig,
+    pub(crate) rootfs: RootfsConfig,
     #[serde(default)]
     pub(crate) perms: PermsConfig,
 }
@@ -157,7 +189,7 @@ pub(crate) struct SysAugConfig {
 impl Default for SysAugConfig {
     fn default() -> Self {
         Self {
-            chroot: ChrootConfig::default(),
+            rootfs: RootfsConfig::default(),
             perms: PermsConfig::default(),
         }
     }

@@ -20,10 +20,8 @@
 // configuraitons through procfs.
 mod chroot;
 mod perms;
-mod rootfs;
 mod strace;
 
 pub use crate::chroot::ChrootMod;
 pub use crate::perms::PermsMod;
-pub use crate::rootfs::RootfsMod;
 pub use crate::strace::StraceMod;

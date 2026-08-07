@@ -506,13 +506,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             if which_aug == Some(&Augments::Exec) {
                 self.initialize_tracee_mmaps().await?;
             }
-
-            // TODO: refactor these. currently not done
-            //if let Some(info) = syscall_info {
-            //    if info.sets_file_perms.is_some() {
-            //        self.call_mods(ModFeature::OnSetsPerms, |m| m.on_sets_perms(info))?;
-            //    }
-            //}
         }
     }
 

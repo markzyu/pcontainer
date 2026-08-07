@@ -110,32 +110,28 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         initial_override: PathAction,
         reverse: bool,
     ) -> Result<PathAction, SysAugError> {
-        let override_path: RefCell<PathAction> = RefCell::new(initial_override);
-        let feature = if reverse {
-            mods::ModFeature::OverrideFileFakePath
+        let rename_map = if reverse {
+            &self.states.config.rootfs.rename_guest_paths
         } else {
-            mods::ModFeature::OverrideFileRealPath
+            &self.states.config.rootfs.rename_host_paths
         };
-        self.call_mods(feature, |m| {
-            let old_override = override_path.replace(PathAction::None);
-            let curr_path = match &old_override {
-                PathAction::Override(path) => path.as_path(),
-                _ => orig_path,
-            };
-            let new_override = if reverse {
-                m.override_file_fake_path(curr_path, syscall)?
-            } else {
-                m.override_file_real_path(curr_path, syscall)?
-            };
-            override_path.replace(if new_override == PathAction::None {
-                old_override
-            } else {
-                new_override
-            });
-            Ok(mods::ModAction::None)
-        })
-        .await?;
-        Ok(override_path.into_inner())
+        for config in rename_map {
+            let bytes_str = orig_path.as_os_str().as_encoded_bytes();
+            if config.regex.is_match(bytes_str) {
+                let Some(ref replacement) = config.replacement else {
+                    return Ok(PathAction::HidePath);
+                };
+                let replacement_bytes = replacement.as_bytes();
+                let replacement = if config.should_replace_all {
+                    config.regex.replace_all(bytes_str, replacement_bytes)
+                } else {
+                    config.regex.replace(bytes_str, replacement_bytes)
+                };
+                let os_str = OsString::from_vec(replacement.into());
+                return Ok(PathAction::Override(os_str.into()));
+            }
+        }
+        Ok(PathAction::None)
     }
 
     pub async fn notify_mods_about_path(

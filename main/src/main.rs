@@ -144,9 +144,6 @@ fn actual_main() -> Result<(), CLIError> {
     if args.strace {
         mods.push(mods::StraceMod::new_box);
     }
-    if args.chroot.is_some() || args.rootfs.is_some() {
-        mods.push(mods::RootfsMod::new_box);
-    }
     if args.sudo {
         mods.push(mods::PermsMod::new_box);
     }
@@ -189,10 +186,12 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     };
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
 
+    let chroot_copy = canonicalize_clone(&args.chroot)?;
+
     // Setup tracee handler states
     let args2 = sysaug::CLIArgs {
         chroot: canonicalize_clone(&args.chroot)?,
-        rootfs: canonicalize_clone(&args.rootfs)?,
+        rootfs: canonicalize_clone(&args.rootfs)?.or_else(|| chroot_copy),
         perms_mode: if args.root {
             PermsMode::RootOnly
         } else if args.sudo {

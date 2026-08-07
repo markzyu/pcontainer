@@ -131,10 +131,6 @@ pub trait Mod {
         Ok(PathAction::None)
     }
 
-    fn on_sets_perms(&self, _syscall: &SyscallInfo) -> Result<ModAction, SysAugError> {
-        Ok(ModAction::None)
-    }
-
     fn on_tracee_startup(&self) -> Result<ModAction, SysAugError> {
         Ok(ModAction::None)
     }
