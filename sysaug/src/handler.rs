@@ -83,35 +83,6 @@ macro_rules! call_augment {
     };
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(u8)]
-pub enum TraceeInitStage {
-    /// Waiting for Exec
-    Begin = 0,
-    /// Intercepted exec
-    ExecSeen = 1,
-    /// Intercepted first call
-    FirstCallSeen = 2,
-    /// Intercepted the mmap call that replaced the first call
-    FirstCallReplacedWithMmap = 3,
-    /// Intercepted the final actual first call
-    FirstCallActuallyDone = 4,
-}
-
-impl TryFrom<u8> for TraceeInitStage {
-    type Error = SysAugError;
-    fn try_from(val: u8) -> Result<Self, Self::Error> {
-        match val {
-            0 => Ok(TraceeInitStage::Begin),
-            1 => Ok(TraceeInitStage::ExecSeen),
-            2 => Ok(TraceeInitStage::FirstCallSeen),
-            3 => Ok(TraceeInitStage::FirstCallReplacedWithMmap),
-            4 => Ok(TraceeInitStage::FirstCallActuallyDone),
-            _ => Err(SysAugError::BadInitStage(val)),
-        }
-    }
-}
-
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
     mod_providers: Vec<ModProvider>,
     pub pid: Pid,
@@ -458,18 +429,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     async fn loop_handle_tracee_syscalls(&self) -> Result<u8, SysAugError> {
-        // lookup the correct syscall handler, call it as an async func
-        //
-        // Then, within this  async func, we can do things like
-        //
-        // if (needs_mmap_init)
-        // await tracee_init_mmap()
-        //
-        // or even, within the mod async func
-        //
-        // await tracee_memcpy_from_mmap()
-        //
-        // So that the async logics themselves are fluid.
         let pid = self.pid;
         let mut total_times: u64 = 0;
         loop {
@@ -514,8 +473,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 return Ok(0);
             }
 
-            // Hand over to hardcoded "augment_sys_*" logics, which must call either do_resume_syscall
-            // or do_skip_syscall
+            // Check how we should augment the syscall
             if let Some(syscall_info) = maybe_syscall_info {
                 call_augment!(self, which_aug, regs.clone(), &syscall_info);
             } else {
@@ -804,7 +762,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let mut maybe_signal = { async_handlers.notifiers.signal_tracee.borrow_mut().take() };
 
             loop {
-                // Drive ptrace syscalls, resume tracee, until we have unblocked a future
+                // Send ptrace calls, resume tracee, until we have unblocked a future
                 // Also, use maybe_signal.take() so that the signal is only sent once
                 self.ptrace_syscall(maybe_signal.take())?;
                 let wait_status = ptrace::waitpid_hang(pid)?;

@@ -97,9 +97,6 @@ pub enum SysAugError {
         mod_name: String,
     },
 
-    #[error("Internal error, Invalid TraceeInitStage: {0}")]
-    BadInitStage(u8),
-
     #[error("Internal error, tracee initializing but missing original regs")]
     InitMissingSavedRegs,
 
