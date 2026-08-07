@@ -158,7 +158,8 @@ fn read_bytes(
             let fd = orig_fd.as_fd();
             nix::unistd::lseek(
                 fd,
-                addr.try_into().map_err(|_| PtraceError::CastUsizeToIsize)?,
+                // The address itself doesn't actually have a sign.
+                (addr as isize).try_into().map_err(|_| PtraceError::CastIsizeToIsize)?,
                 nix::unistd::Whence::SeekSet,
             )
             .map_err(PtraceError::Read)?;
@@ -172,7 +173,8 @@ fn read_bytes(
         let fd = mmap_fd.as_fd();
         nix::unistd::lseek(
             fd,
-            addr.try_into().map_err(|_| PtraceError::CastUsizeToIsize)?,
+            // The address itself doesn't actually have a sign.
+            (addr as isize).try_into().map_err(|_| PtraceError::CastIsizeToIsize)?,
             nix::unistd::Whence::SeekSet,
         )
         .map_err(PtraceError::Read)?;

@@ -165,8 +165,8 @@ pub enum PtraceError {
     #[error("Failed to convert integert types for {0}")]
     IntoInt(&'static str),
 
-    #[error("Failed to convert integert types from usize to isize")]
-    CastUsizeToIsize,
+    #[error("Failed to convert integert types from isize to isize")]
+    CastIsizeToIsize,
 
     #[error("Cannot create linux memfd: {0}")]
     CreateMemoryFile(nix::Error),
