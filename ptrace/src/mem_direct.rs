@@ -145,6 +145,11 @@ unsafe fn write_bytes_to_tracee(
     Ok((tracee_start, new_offset))
 }
 
+#[cfg(target_pointer_width = "64")]
+type LseekSize = i64;
+#[cfg(target_pointer_width = "32")]
+type LseekSize = i32;
+
 fn read_bytes(
     pid: nix::unistd::Pid,
     addr: usize,
@@ -159,7 +164,7 @@ fn read_bytes(
             nix::unistd::lseek(
                 fd,
                 // The address itself doesn't actually have a sign.
-                (addr as isize).try_into().map_err(|_| PtraceError::CastIsizeToIsize)?,
+                addr as LseekSize,
                 nix::unistd::Whence::SeekSet,
             )
             .map_err(PtraceError::Read)?;
@@ -174,7 +179,7 @@ fn read_bytes(
         nix::unistd::lseek(
             fd,
             // The address itself doesn't actually have a sign.
-            (addr as isize).try_into().map_err(|_| PtraceError::CastIsizeToIsize)?,
+            addr as LseekSize,
             nix::unistd::Whence::SeekSet,
         )
         .map_err(PtraceError::Read)?;
