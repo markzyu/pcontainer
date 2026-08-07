@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "dockify"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "executor",
@@ -194,7 +194,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "executor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-lite",
  "lazy_static",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "mods"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "executor",
  "lazy_static",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "procfs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "nix",
@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "ptrace"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "backtrace",
  "lazy_static",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "sysaug"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "elf",
  "executor",
