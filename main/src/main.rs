@@ -138,9 +138,6 @@ fn actual_main() -> Result<(), CLIError> {
 
     // Setup mods
     let mut mods: Vec<ModProvider> = Vec::new();
-    if args.chroot.is_some() {
-        mods.push(mods::ChrootMod::new_box);
-    }
     if args.strace {
         mods.push(mods::StraceMod::new_box);
     }

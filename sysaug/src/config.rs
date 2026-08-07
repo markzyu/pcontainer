@@ -3,6 +3,7 @@ use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::RwLock;
 
@@ -47,6 +48,13 @@ fn default_passthroughs() -> Vec<String> {
         "/system/lib64".to_string(),
         "/system/lib".to_string(),
     ]
+}
+
+pub(crate) fn init_passthroughs_from_config(passthroughs: &mut Vec<PathBuf>, config: &RootfsConfig) {
+    passthroughs.clear();
+    for passthrough in &config.passthroughs {
+        passthroughs.push(PathBuf::from(passthrough.clone()));
+    }
 }
 
 fn default_rename_configs() -> Vec<RenameConfig> {

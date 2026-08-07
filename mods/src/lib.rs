@@ -18,10 +18,8 @@
 //
 // Later, we could even allow dynamically loading mods, and exposing mod
 // configuraitons through procfs.
-mod chroot;
 mod perms;
 mod strace;
 
-pub use crate::chroot::ChrootMod;
 pub use crate::perms::PermsMod;
 pub use crate::strace::StraceMod;

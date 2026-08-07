@@ -14,8 +14,9 @@ use crate::common::{
     display_err, rwlock_read, rwlock_replace, Augments, ModBox, ModProvider, ModsByFeature,
     PermsMode, SysAugError, NO_MOD_SYSCALL,
 };
-use crate::config::{init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE};
+use crate::config::{init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE};
 use crate::mods::{ModAction, ModFeature};
+use crate::rwlock_write;
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
@@ -147,11 +148,15 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
+        // Initialize
         init_perms_ids_from_config(&self.states.perms_ids, &self.states.config.perms)?;
-        self.call_mods(ModFeature::OnTraceeStartup, |m| m.on_tracee_startup())
-            .await?;
+        if self.states.args.chroot.is_some() {
+            let mut path_prefix_excludes = rwlock_write(&self.states.path_prefix_excludes)?;
+            init_passthroughs_from_config(&mut *path_prefix_excludes, &self.states.config.rootfs);
+        }
 
-        // The order here matters. It's the order of polling precedence.
+        // Event loops
+        // (The order here matters. It's the order of polling precedence.)
         let result = futures_lite::future::or(
             futures_lite::future::or(
                 self.loop_handle_tracee_signals(),
@@ -161,6 +166,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         )
         .await;
 
+        // Cleanup
         let pid = self.pid;
         let MemHelpers { close_tracee, .. } = get_mem_helper();
         (close_tracee)(&pid)?;
