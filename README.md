@@ -2,15 +2,16 @@
 
 The fundamental idea is not that different from proot. In fact, it's inspiried by proot -- both can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. 
 
-However, there are a few differences:
-
-1. This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
+The main difference: This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
     - Multithreading mattered to me, more than the ptrace overhead. Because proot has a hardtime supporting heavy I/O from a multithreaded JVM running game servers, for example, to host Minecraft.
     - This project was an exploration of whether multithreading helps with heavy I/O. But I've been sidetracked by other issues like supporting `apt-get`.
-2. PRoot uses GPL Licenses. This project uses MIT icensing to maximize software freedom.
-3. PRoot has a longer history of proven success. But this project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
 
-Eventually, my goal is to be able to run any Docker container on any mobile device, without needing root. But there is a long way to go.
+
+Most likely, you should just use PRoot instead. It has a history of proven stability and success.
+
+My project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
+
+Eventually, my goal is to be able to run Docker container on any mobile device, without needing root, by creating a configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
 
 ## Warning: Outdated code (Don't use in prod)
 
