@@ -108,13 +108,17 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         initial_override: PathAction,
         reverse: bool,
     ) -> Result<PathAction, SysAugError> {
+        let curr_path = match &initial_override {
+            PathAction::Override(path) => path.as_path(),
+            _ => orig_path,
+        };
+        let bytes_str = curr_path.as_os_str().as_encoded_bytes();
         let rename_map = if reverse {
             &self.states.config.rootfs.rename_guest_paths
         } else {
             &self.states.config.rootfs.rename_host_paths
         };
         for config in rename_map {
-            let bytes_str = orig_path.as_os_str().as_encoded_bytes();
             if config.regex.is_match(bytes_str) {
                 let Some(ref replacement) = config.replacement else {
                     return Ok(PathAction::HidePath);
@@ -129,7 +133,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 return Ok(PathAction::Override(os_str.into()));
             }
         }
-        Ok(PathAction::None)
+        Ok(initial_override)
     }
 
     pub fn path_from_bytes(mut path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> {

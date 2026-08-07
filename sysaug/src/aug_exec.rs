@@ -25,7 +25,10 @@ macro_rules! exec_setid {
             $which,
             $id,
         );
-        (&$perms_ids).write().or(Err(SysAugError::LockTraceeHandler))?[$which].replace($id as usize);
+        (&$perms_ids)
+            .write()
+            .or(Err(SysAugError::LockTraceeHandler))?[$which]
+            .replace($id as usize);
     }};
 }
 

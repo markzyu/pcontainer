@@ -50,7 +50,10 @@ fn default_passthroughs() -> Vec<String> {
     ]
 }
 
-pub(crate) fn init_passthroughs_from_config(passthroughs: &mut Vec<PathBuf>, config: &RootfsConfig) {
+pub(crate) fn init_passthroughs_from_config(
+    passthroughs: &mut Vec<PathBuf>,
+    config: &RootfsConfig,
+) {
     passthroughs.clear();
     for passthrough in &config.passthroughs {
         passthroughs.push(PathBuf::from(passthrough.clone()));

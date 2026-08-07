@@ -11,10 +11,11 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common::{
-    display_err, rwlock_read, rwlock_replace, Augments,
-    PermsMode, SysAugError, NO_MOD_SYSCALL,
+    display_err, rwlock_read, rwlock_replace, Augments, PermsMode, SysAugError, NO_MOD_SYSCALL,
 };
-use crate::config::{init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE};
+use crate::config::{
+    init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE,
+};
 use crate::rwlock_write;
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
@@ -148,8 +149,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Initialize
         init_perms_ids_from_config(&self.states.perms_ids, &self.states.config.perms)?;
         if self.states.args.chroot.is_some() {
+            let mut path_prefix = rwlock_write(&self.states.path_prefix)?;
             let mut path_prefix_excludes = rwlock_write(&self.states.path_prefix_excludes)?;
             init_passthroughs_from_config(&mut *path_prefix_excludes, &self.states.config.rootfs);
+            *path_prefix = self.states.args.chroot.clone();
         }
 
         // Event loops
