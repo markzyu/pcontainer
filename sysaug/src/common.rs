@@ -11,10 +11,10 @@
 // GNU Lesser General Public License for more details.
 
 use crate::handler::TraceeHandlerStates;
-use crate::mods;
 use executor::{PtraceFutureTypes, PtraceStatus};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 use tracing::{event, Level};
@@ -121,25 +121,6 @@ pub enum SysAugError {
     WeakReference,
 }
 
-// ------------------- MODS -------------------
-
-pub type ModProvider = fn(Arc<TraceeHandlerStates>) -> Box<dyn mods::Mod>;
-pub type ModBox = Box<dyn mods::Mod + Send + Sync>;
-pub type ModsByFeature = HashMap<mods::ModFeature, Vec<ModBox>>;
-
-#[allow(dead_code)]
-pub fn clone_mods_by_feature(src: &ModsByFeature) -> ModsByFeature {
-    let mut ans: ModsByFeature = HashMap::new();
-    for (feature, arr) in src.iter() {
-        let mut arr2 = Vec::new();
-        for m in arr.iter() {
-            arr2.push(m.clone_box());
-        }
-        ans.insert(feature.clone(), arr2);
-    }
-    ans
-}
-
 // ------------------- AUGMENTS -------------------
 
 #[derive(Debug, PartialEq)]
@@ -157,6 +138,21 @@ impl Default for Augments {
     fn default() -> Augments {
         Augments::None
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PathAction {
+    // Encountered a symlink loop
+    ELOOP,
+
+    // No action
+    None,
+
+    // Hide this path from getdents
+    HidePath,
+
+    // Override the name of this path
+    Override(PathBuf),
 }
 
 // ------------------- SYSCALLS -------------------
@@ -255,29 +251,4 @@ pub fn rwoption_setdefault<T>(lock: &RwLock<Option<T>>, val: T) -> Result<(), Sy
 pub fn rwoption_take<T>(lock: &RwLock<Option<T>>) -> Result<Option<T>, SysAugError> {
     let mut guard = rwlock_write(lock)?;
     Ok(guard.take())
-}
-
-#[macro_export]
-macro_rules! rwoptions_replace {
-    ($name:expr, $idx:expr, $val:expr) => {{
-        $name.write().or(Err(SysAugError::LockTraceeHandler))?[$idx].replace($val)
-    }};
-}
-
-#[macro_export]
-macro_rules! rwoptions_setdefault {
-    ($name:expr, $idx:expr, $val:expr) => {{
-        let mut guard = $name.write().or(Err(SysAugError::LockTraceeHandler))?;
-        if guard[$idx].is_none() {
-            guard[$idx].replace($val);
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! rwoption_take_ok {
-    ($name:expr) => {
-        crate::common::rwoption_take(&$name)?
-            .ok_or(SysAugError::NullValue(stringify!($name).to_string()))
-    };
 }

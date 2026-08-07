@@ -15,7 +15,7 @@ use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{display_err, ModProvider, PermsMode};
+use sysaug::{display_err, PermsMode};
 use thiserror::Error;
 use tracing::{event, Level};
 
@@ -136,22 +136,13 @@ fn actual_main() -> Result<(), CLIError> {
         return Ok(());
     }
 
-    // Setup mods
-    let mut mods: Vec<ModProvider> = Vec::new();
-    if args.strace {
-        mods.push(mods::StraceMod::new_box);
-    }
-    if args.sudo {
-        mods.push(mods::PermsMod::new_box);
-    }
-
     let retcode = if args.fix_attach {
         let (ptrace_client, ptrace_loop) = executor::new_main_thread_executor();
-        let join = launch_ptrace(&args, mods, ptrace_client)?;
+        let join = launch_ptrace(&args, ptrace_client)?;
         ptrace_loop.serve()?;
         join.join().map_err(|_| CLIError::UnableToComplete)?
     } else {
-        launch_ptrace(&args, mods, executor::new_local_executor())?
+        launch_ptrace(&args, executor::new_local_executor())?
             .join()
             .map_err(|_| CLIError::UnableToComplete)?
     };
@@ -173,7 +164,6 @@ fn canonicalize_clone(maybe_path: &Option<PathBuf>) -> Result<Option<PathBuf>, C
 
 fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     args: &CLIArgs,
-    mods: Vec<ModProvider>,
     ptrace_client: PtraceClient,
 ) -> Result<thread::JoinHandle<Option<u8>>, CLIError> {
     // Spawn first tracee
@@ -214,7 +204,6 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     let new_tracee_handler = sysaug::TraceeHandler::new(
         pid1,
         ptrace_client,
-        mods,
         Some(Arc::new(states)),
         None,
         shared_fd,

@@ -11,11 +11,10 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common::{
-    display_err, rwlock_read, rwlock_replace, Augments, ModBox, ModProvider, ModsByFeature,
+    display_err, rwlock_read, rwlock_replace, Augments,
     PermsMode, SysAugError, NO_MOD_SYSCALL,
 };
 use crate::config::{init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE};
-use crate::mods::{ModAction, ModFeature};
 use crate::rwlock_write;
 use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
@@ -100,7 +99,6 @@ macro_rules! call_augment {
 }
 
 pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
-    mod_providers: Vec<ModProvider>,
     pub pid: Pid,
     pub ptrace_client: PtraceClient,
     pub states: Arc<TraceeHandlerStates>,
@@ -129,7 +127,6 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub shared_fd: RawFd,
 
     // References to other helpers
-    pub mods: ModsByFeature,
     pub states: Arc<TraceeHandlerStates>,
     pub parent: Option<Arc<TraceeHandler<PtraceClient>>>,
     pub sync_handler: Weak<TraceeHandler<PtraceClient>>,
@@ -210,41 +207,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ));
         }
         Ok((*status).clone())
-    }
-
-    pub fn call_first_mod<F, T>(
-        &self,
-        feature: ModFeature,
-        func: F,
-    ) -> Result<Option<T>, SysAugError>
-    where
-        F: Fn(&ModBox) -> Result<T, SysAugError>,
-    {
-        let mod_map = &self.mods;
-        if let Some(mods_) = mod_map.get(&feature) {
-            if let Some(m) = mods_.get(0) {
-                return Ok(Some(func(m)?));
-            }
-        }
-        Ok(None)
-    }
-
-    pub async fn call_mods<F>(&self, feature: ModFeature, func: F) -> Result<(), SysAugError>
-    where
-        F: Fn(&ModBox) -> Result<ModAction, SysAugError>,
-    {
-        let mod_map = &self.mods;
-        if let Some(mods_) = mod_map.get(&feature) {
-            for m in mods_.iter() {
-                match func(m)? {
-                    ModAction::SkipSyscall(retval) => {
-                        self.do_skip_syscall(retval).await?;
-                    }
-                    ModAction::None => (),
-                }
-            }
-        }
-        Ok(())
     }
 
     // Send the content of `bytes` to tracee's stack, and return its address.
@@ -384,11 +346,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                                 .map_err(display_err);
                         }
                     });
-
-                    self.call_mods(ModFeature::OnCloneComplete, |m| {
-                        m.on_clone_complete(raw_pid as isize)
-                    })
-                    .await?;
                 }
                 continue;
             }
@@ -621,7 +578,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn new(
         pid: Pid,
         ptrace_client: PtraceClient,
-        mods: Vec<ModProvider>,
         states: Option<Arc<TraceeHandlerStates>>,
         parent: Option<Arc<TraceeHandler<PtraceClient>>>,
         shared_fd: RawFd,
@@ -631,7 +587,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         Ok(Arc::new(TraceeHandler {
             pid,
             ptrace_client,
-            mod_providers: mods,
             ignore_sigstops: Arc::new(RwLock::default()),
             mmap_tracer_addr: mmap_addr,
             shared_fd,
@@ -648,7 +603,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         TraceeHandler::new(
             child_pid,
             self.ptrace_client.clone(),
-            self.mod_providers.clone(),
             Some(self.states.clone()),
             Some(Arc::clone(self)),
             self.shared_fd,
@@ -723,19 +677,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
 
-        // Initialize Mods
-        let mut mod_map: ModsByFeature = HashMap::new();
-        for provider in self.mod_providers.iter() {
-            let m = provider(Arc::clone(&self.states));
-            for feature in m.get_features().iter() {
-                if !mod_map.contains_key(feature) {
-                    mod_map.insert(feature.clone(), Vec::new());
-                }
-                let vec = mod_map.get_mut(feature).unwrap();
-                vec.push(m.clone_box());
-            }
-        }
-
         // Initialize and store async loops and futures
         let async_runtime = PtraceAsyncRuntime::default();
         let async_handlers = AsyncTraceeHandler {
@@ -744,7 +685,6 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             pid: pid.clone(),
             shared_fd: self.shared_fd.clone(),
 
-            mods: mod_map,
             states: self.states.clone(),
             parent: self.parent.clone(),
             sync_handler: Arc::downgrade(&self),

@@ -19,12 +19,10 @@ mod aug_waitpid;
 mod common;
 mod config;
 mod handler;
-pub mod mods;
 mod syscalls;
 
 pub use crate::common::{
     display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault,
-    rwoption_take, DelType, ModProvider, PermType, PermsMode, SysAugError, SyscallInfo,
+    rwoption_take, DelType, PermType, PermsMode, SysAugError, SyscallInfo,
 };
 pub use crate::handler::{CLIArgs, TraceeHandler, TraceeHandlerStates};
-pub use crate::mods::Mod;

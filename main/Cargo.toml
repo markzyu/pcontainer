@@ -9,7 +9,6 @@ edition = "2018"
 
 [dependencies]
 executor = {path = "../executor"}
-mods = {path = "../mods"}
 procfs = {path = "../procfs"}
 ptrace = {path = "../ptrace"}
 sysaug = {path = "../sysaug"}

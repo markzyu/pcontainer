@@ -10,12 +10,24 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use crate::common::{SysAugError, SyscallInfo};
+use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::{get_mem_helper, AsyncTraceeHandler};
-use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
 use tracing::{event, Level};
+
+macro_rules! exec_setid {
+    ($perms_ids:expr, $which:expr, $path:expr, $id: expr) => {{
+        event!(
+            Level::INFO,
+            "Execve real path: {:?} set {:?} to {:?}",
+            $path,
+            $which,
+            $id,
+        );
+        (&$perms_ids).write().or(Err(SysAugError::LockTraceeHandler))?[$which].replace($id as usize);
+    }};
+}
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_exec(
@@ -66,8 +78,16 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let path_action = self
                 .calc_real_path(&new_elf_path, syscall, &read_args)
                 .await?;
-            self.notify_mods_about_path(syscall, &new_elf_path, &path_action)
-                .await?;
+            if let Ok(stat) = nix::sys::stat::stat(&new_elf_path) {
+                let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
+                let setgid = stat.st_mode & nix::sys::stat::Mode::S_ISGID.bits();
+                if setuid != 0 {
+                    exec_setid!(self.states.perms_ids, 5, &new_elf_path, stat.st_uid);
+                }
+                if setgid != 0 {
+                    exec_setid!(self.states.perms_ids, 1, &new_elf_path, stat.st_gid);
+                }
+            }
             if let PathAction::Override(new_path_val) = path_action {
                 new_elf_path = new_path_val;
             } else if path_action == PathAction::ELOOP {
@@ -103,8 +123,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let interp_path_buf = Self::path_from_bytes(buf)?;
             let path_action = self
                 .calc_real_path(&interp_path_buf, syscall, &read_args)
-                .await?;
-            self.notify_mods_about_path(syscall, &interp_path_buf, &path_action)
                 .await?;
 
             // Override final path of interpreter only if use_native_loader = false

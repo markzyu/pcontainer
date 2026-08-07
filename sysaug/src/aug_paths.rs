@@ -11,10 +11,8 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common;
-use crate::common::{SysAugError, SyscallInfo};
+use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::{get_mem_helper, AsyncTraceeHandler};
-use crate::mods;
-use crate::mods::PathAction;
 use ptrace::{GenericPurposeRegs, MemHelpers};
 use std::collections::HashSet;
 use std::os::unix::ffi::OsStrExt;
@@ -72,11 +70,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 ptrace_client.execute(move || (read_bytes_until_zero)(pid, arg_i))??;
             let orig_path_buf = Self::path_from_bytes(path_bytes)?;
 
-            // Calculate path_action, notify mods, and maybe update tracee
+            // Calculate path_action, and maybe update tracee
             let path_action = self
                 .calc_real_path(&orig_path_buf, syscall, &read_args)
-                .await?;
-            self.notify_mods_about_path(syscall, &orig_path_buf, &path_action)
                 .await?;
             match path_action {
                 PathAction::Override(new_path_val) => {
@@ -108,7 +104,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
         }
 
-        // Handle creation & deletion of hard links AS A CORE FUNCTION (unmoddable)
+        // TODO: Handle creation & deletion of hard links
         //
         // There are no symlinks being created in the rootfs. 'ln a b' will create a link in guest OS called "b" that's not visible from host
         //

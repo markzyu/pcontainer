@@ -11,10 +11,8 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common;
-use crate::common::{SysAugError, SyscallInfo};
+use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
-use crate::mods;
-use crate::mods::PathAction;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -100,7 +98,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             .await
     }
 
-    // Ask every mod to translate a path from rootfs point of view to real paths
+    // There are SysAugConfig configurations that can "modify" a guest/host path. This function applies them.
     // reverse: false = generating real paths on disk, true = generating fake paths from container
     // perspective
     pub async fn get_mod_path(
@@ -132,33 +130,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
         }
         Ok(PathAction::None)
-    }
-
-    pub async fn notify_mods_about_path(
-        &self,
-        syscall: &SyscallInfo,
-        orig_path: &Path,
-        path_action: &PathAction,
-    ) -> Result<(), SysAugError> {
-        self.call_mods(mods::ModFeature::OnFilePath, |m| {
-            m.on_file_path(orig_path, syscall)
-        })
-        .await?;
-        let notify_path = match path_action {
-            PathAction::Override(path) => path.as_path(),
-            _ => orig_path,
-        };
-        event!(
-            Level::DEBUG,
-            "Translate {} -> {}",
-            orig_path.to_string_lossy(),
-            notify_path.to_string_lossy()
-        );
-        self.call_mods(mods::ModFeature::OnFileRealPath, |m| {
-            m.on_file_real_path(notify_path, syscall)
-        })
-        .await?;
-        Ok(())
     }
 
     pub fn path_from_bytes(mut path_bytes: Vec<u8>) -> Result<PathBuf, SysAugError> {

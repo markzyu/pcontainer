@@ -14,7 +14,6 @@ use crate::common;
 use crate::common::{PermsMode, SysAugError, SyscallInfo};
 use crate::config::walk_resf_syscall;
 use crate::handler::AsyncTraceeHandler;
-use crate::mods;
 use ptrace::GenericPurposeRegs;
 use tracing::{event, Level};
 
