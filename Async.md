@@ -204,6 +204,11 @@ pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugEr
             // ... (wait for child, get status, handle crashes) ...
 
             // Unblock different futures in the proper order
+            // --------------------------------------------------
+            // Note: This might look equally complex as the if conditions on TraceeInitStage enums
+            //       But here the number of conditions grow with the TYPES of ptrace events, 
+            //       And that does not grow with the complexity of async logics.
+            // --------------------------------------------------
             if let Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
                 async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
                 break;

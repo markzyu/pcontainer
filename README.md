@@ -8,9 +8,7 @@ However, there are a few differences:
     - Multithreading mattered to me, more than the ptrace overhead. Because proot has a hardtime supporting heavy I/O from a multithreaded JVM running game servers, for example, to host Minecraft.
     - This project was an exploration of whether multithreading helps with heavy I/O. But I've been sidetracked by other issues like supporting `apt-get`.
 2. PRoot uses GPL Licenses. This project uses MIT icensing to maximize software freedom.
-3. PRoot has a longer history of proven success. But this project is still in its early stage. This is both good and bad.
-    - The Good: There are no rules for contributors. If you have a patch that helps, I'm willing to throw away existing code and use yours instead.
-    - The Bad: This project barely works. Basic shell commands work but `apt-get` is broken.
+3. PRoot has a longer history of proven success. But this project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
 
 Eventually, my goal is to be able to run any Docker container on any mobile device, without needing root. But there is a long way to go.
 
@@ -67,6 +65,13 @@ This `PtraceAsyncRuntime` is mostly an enabler of an anti-pattern: I chose to wr
 **Caveat**: this refactor from "synchronous spaghetti" to "async as a hacky state machine syntax" is still ongoing. You will see two hacky logics live next to each other. The synchronous logics use a ton of `Arc<Mutex<>>` types. And the async logics are always Pinned, not truly "async", and are more of a hacky use of the underlying state machine than a use of true async events
 
 Right now the repo lives in a very bad state and has a lot more runtime overhead than needed. I intend to move fully into async in hope that removing Arc will fix some of the overhead. But I'm starting to think I misunderstood how Rust handles async, and how heavy it truly is.
+
+## License
+
+Copyright (c) 2026 Zhongzhi Yu
+
+This project is licensed under the GNU Lesser General Public License v3.0 (LGPLv3) - 
+see [COPYING](COPYING) for details
 
 ## For Developers (Note: this might be outdated)
 
