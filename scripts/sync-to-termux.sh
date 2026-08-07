@@ -11,6 +11,6 @@ if ! ping -n 1 -w 1000 "$1"; then
 fi
 
 while true; do
-  rsync -av -e "ssh -p 8022" "$REPO_DIR/" user@"$1":pcontainer/ --exclude=target/
+  rsync -av -e "ssh -p 8022" "$REPO_DIR/" user@"$1":pcontainer/ --exclude=target/ --exclude=tests/fixtures/
   sleep 2
 done

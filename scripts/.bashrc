@@ -1,3 +1,7 @@
+parent_is_pcontainer() {
+  echo "$(ps -o comm= -p $(ps -o ppid= -p $$) | tail -n 1)" | grep -q "/dockify$"
+}
+
 battery_status_summary() {
   pct="$(termux-battery-status | jq .percentage)"
   if [ "$pct" -le 30 ]; then
@@ -12,4 +16,6 @@ battery_status_summary() {
   fi
 }
 
-export PS1="\w $(battery_status_summary) \$ "
+if ! parent_is_pcontainer; then
+  export PS1="\w $(battery_status_summary) \$ "
+fi
