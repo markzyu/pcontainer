@@ -18,7 +18,6 @@ use crate::common::{
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
-use std::convert::TryInto;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, OwnedFd};
 use tracing::{event, Level};
@@ -66,6 +65,7 @@ pub fn get_own_region_id(pid: &nix::unistd::Pid) -> Result<usize, PtraceError> {
 }
 
 /// Get a region id from any thread, for the tracee `pid`
+#[allow(dead_code)]
 fn get_region_id(pid: &nix::unistd::Pid) -> Result<Option<usize>, PtraceError> {
     let region_ids = REGION_IDS_BY_PID
         .read()

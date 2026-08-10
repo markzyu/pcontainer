@@ -10,9 +10,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use crate::common::{
-    display_err, rwlock_read, rwlock_replace, Augments, PermsMode, SysAugError, NO_MOD_SYSCALL,
-};
+use crate::common::{display_err, rwlock_read, Augments, PermsMode, SysAugError, NO_MOD_SYSCALL};
 use crate::config::{
     init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE,
 };
@@ -27,8 +25,7 @@ use ptrace::{
     DIRECT_MEM_HELPERS, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::collections::HashSet;
 use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
@@ -39,14 +36,14 @@ use sys::signal::Signal;
 use tracing::{event, info, span, Level};
 
 #[cfg(not(target_arch = "arm"))]
-const SYS_mmap: usize = libc::SYS_mmap as usize;
+const SYS_MMAP: usize = libc::SYS_mmap as usize;
 #[cfg(target_arch = "arm")]
-const SYS_mmap: usize = libc::SYS_mmap2 as usize;
+const SYS_MMAP: usize = libc::SYS_mmap2 as usize;
 
 #[cfg(not(target_arch = "arm"))]
-const SYS_mmap_pgoffset_block: usize = 1;
+const SYS_MMAP_PGOFFSET_BLOCK: usize = 1;
 #[cfg(target_arch = "arm")]
-const SYS_mmap_pgoffset_block: usize = 4096;
+const SYS_MMAP_PGOFFSET_BLOCK: usize = 4096;
 
 thread_local! {
     static MEM: RefCell<MemHelpers> = RefCell::new(SLOW_MEM_HELPERS.clone());
@@ -189,6 +186,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     /// Wait for a specific signal
+    #[allow(dead_code)]
     async fn wait_for_signal(&self, signal: Signal) -> Result<(), SysAugError> {
         loop {
             let signal2 = self.wait_for_any_signal().await?;
@@ -548,14 +546,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let mmap_regs = self
             ._insert_syscall(
                 "SYS_mmap",
-                SYS_mmap,
+                SYS_MMAP,
                 [
                     0,
                     STACK_SAFE_ZONE_SIZE,
                     libc::PROT_READ as usize,
                     libc::MAP_SHARED as usize,
                     self.shared_fd as usize,
-                    region_id * STACK_SAFE_ZONE_SIZE / SYS_mmap_pgoffset_block,
+                    region_id * STACK_SAFE_ZONE_SIZE / SYS_MMAP_PGOFFSET_BLOCK,
                 ],
             )
             .await?;

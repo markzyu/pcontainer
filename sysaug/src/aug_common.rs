@@ -13,7 +13,6 @@
 use crate::common;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
@@ -103,7 +102,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     // perspective
     pub async fn get_mod_path(
         &self,
-        syscall: &SyscallInfo,
+        _syscall: &SyscallInfo,
         orig_path: &Path,
         initial_override: PathAction,
         reverse: bool,

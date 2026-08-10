@@ -10,7 +10,6 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use crate::common;
 use crate::common::{PermsMode, SysAugError, SyscallInfo};
 use crate::config::walk_resf_syscall;
 use crate::handler::AsyncTraceeHandler;
@@ -70,12 +69,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                             *val,
                             syscall.name()
                         );
-                        self.write_retval(regs.clone(), *val);
+                        self.write_retval(regs.clone(), *val)?;
                     }
                     Ok(())
                 },
             )?;
-            if !is_known_getter && regs.syscall_retval() < 0 {
+            if !is_known_getter && (regs.syscall_retval() as isize) < 0 {
                 // The default behavior is to let the unknown getter syscall succeed.
                 return self.write_retval(regs, 0);
             }

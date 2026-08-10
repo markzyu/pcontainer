@@ -1,7 +1,6 @@
 use crate::common::{rwlock_write, SysAugError, SyscallInfo};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -190,7 +189,7 @@ impl Default for PermsConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct SysAugConfig {
+pub struct SysAugConfig {
     #[serde(default)]
     pub(crate) rootfs: RootfsConfig,
     #[serde(default)]

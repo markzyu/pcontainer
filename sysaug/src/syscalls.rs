@@ -11,10 +11,11 @@
 // GNU Lesser General Public License for more details.
 
 #![allow(non_snake_case)]
+#![allow(unused_macros)]
 use crate::common::{Augments, DelType, PermType, SyscallInfo, NO_MOD_SYSCALL};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-
+use tracing::{event, Level};
 /**
 TODO: a simple refactor (just move definitions to jsons so this looks more declarative):
 {
@@ -389,6 +390,7 @@ lazy_static! {
         }
 
         ans.remove(&NO_MOD_SYSCALL);
+        event!(Level::INFO, "Defined {} syscalls", ans.len());
         ans
     };
 }

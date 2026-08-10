@@ -23,6 +23,7 @@ pub struct ConfigGzLine {
 #[derive(Debug, Default)]
 pub struct ConfigGz {
     pub lines: Vec<ConfigGzLine>,
+    #[allow(dead_code)]
     override_lines: Vec<ConfigGzLine>,
 }
 

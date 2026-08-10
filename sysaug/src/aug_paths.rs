@@ -14,10 +14,8 @@ use crate::common;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::{get_mem_helper, AsyncTraceeHandler};
 use ptrace::{GenericPurposeRegs, MemHelpers};
-use std::collections::HashSet;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 use tracing::{event, Level};
 
 const META_INIT: &str = "{}\n";

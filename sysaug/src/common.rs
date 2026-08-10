@@ -10,12 +10,10 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use crate::handler::TraceeHandlerStates;
 use executor::{PtraceFutureTypes, PtraceStatus};
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 use tracing::{event, Level};
 
