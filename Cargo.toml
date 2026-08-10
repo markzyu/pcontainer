@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 
 members = [
   "executor",
@@ -7,3 +8,9 @@ members = [
   "ptrace",
   "sysaug",
 ]
+
+[workspace.lints.rust]
+rust_2024_compatibility = "warn"
+
+[workspace.lints.clippy]
+await_holding_lock = "warn"

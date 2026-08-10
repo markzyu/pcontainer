@@ -67,13 +67,6 @@ This `PtraceAsyncRuntime` is mostly an enabler of an anti-pattern: I chose to wr
 
 Right now the repo lives in a very bad state and has a lot more runtime overhead than needed. I intend to move fully into async in hope that removing Arc will fix some of the overhead. But I'm starting to think I misunderstood how Rust handles async, and how heavy it truly is.
 
-## License
-
-Copyright (c) 2026 Zhongzhi Yu
-
-This project is licensed under the GNU Lesser General Public License v3.0 (LGPLv3) - 
-see [COPYING](COPYING) for details
-
 ## For Developers (Note: this might be outdated)
 
 How to debug problems:
@@ -113,3 +106,16 @@ How to cross-compile for Android:
   - [Android 10 and above require executables to be codesigned](https://github.com/greenaddress/abcore/issues/97)
     - Termux is the only solution that works well in this situation. [Here is a page from their discussion.](https://github.com/termux/termux-app/issues/1072)
     - But apparently, IT'S EASIER IF `dockify` IS CODE SIGNED AS part of the readonly APK.
+
+## AI Usage
+
+I used AI to help review my code, especially during major updates like a Rust edition update.
+
+I don't use AI to directly generate large chunks of code.
+
+## License
+
+Copyright (c) 2026 Zhongzhi Yu
+
+This project is licensed under the GNU Lesser General Public License v3.0 (LGPLv3) - 
+see [COPYING](COPYING) for details

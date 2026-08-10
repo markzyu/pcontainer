@@ -3,7 +3,10 @@ name = "dockify"
 version = "0.2.0"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
 license = "LGPL-3.0-or-later"
-edition = "2018"
+edition = "2024"
+
+[lints]
+workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,7 +15,7 @@ executor = {path = "../executor"}
 procfs = {path = "../procfs"}
 ptrace = {path = "../ptrace"}
 sysaug = {path = "../sysaug"}
-clap = "3.0.0-beta.2"
+clap = { version = "4", features = ["derive"] }
 thiserror = "1.0.25"
 tracing = "0.1.26"
 tracing-appender = "0.2"

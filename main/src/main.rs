@@ -10,7 +10,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use clap::Clap;
+use clap::Parser;
 use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,60 +19,61 @@ use sysaug::{display_err, PermsMode};
 use thiserror::Error;
 use tracing::{event, Level};
 
-#[derive(Clap, Debug)]
+#[derive(Parser, Debug)]
+#[command(version = "0.2.0", author = "Zhongzhi Yu")]
 pub struct CLIArgs {
     /// Trace syscalls like strace (slow). Not all syscalls are supported.
-    #[clap(long)]
+    #[arg(long)]
     pub strace: bool,
 
     /// Chroot to this path upon tracee startup. Implies --rootfs
-    #[clap(long)]
+    #[arg(long)]
     pub chroot: Option<PathBuf>,
 
     /// Only use this flag if you see "PTRACE_ATTACH error: EPERM: Permission denied".
     /// This will solve those permission errors, but will also cause slowdowns.
     /// (implies --fix-mmap)
-    #[clap(long)]
+    #[arg(long)]
     pub fix_attach: bool,
 
     /// If your tracee crashes due to SIGSYS, use this flag.
-    #[clap(long)]
+    #[arg(long)]
     pub fix_sigsys: bool,
 
     /// If your kernel is older than v3.17, then please use this flag to avoid mmap errors
-    #[clap(long)]
+    #[arg(long)]
     pub fix_mmap: bool,
 
     /// Make your applications think they are root when they are not.
-    #[clap(long)]
+    #[arg(long)]
     pub root: bool,
 
     /// You probably want --chroot instead. This simulates rootfs without chroot, for files in this folder.
-    #[clap(long)]
+    #[arg(long)]
     pub rootfs: Option<PathBuf>,
 
     /// Make your applications think they can sudo when they cannot. Not compatible with --root
-    #[clap(long)]
+    #[arg(long)]
     pub sudo: bool,
 
     /// Override the command to execute
-    #[clap(long, default_value = "bash")]
+    #[arg(long, default_value = "bash")]
     pub cmd: String,
 
     /// Quit as soon as any application fails
-    #[clap(long)]
+    #[arg(long)]
     pub fail_fast: bool,
 
     /// Try to attach GDB to applications that crashed
-    #[clap(long)]
+    #[arg(long)]
     pub gdb: bool,
 
     /// Attach GDB after X number of system calls
-    #[clap(long)]
+    #[arg(long)]
     pub gdb_at: Option<u64>,
 
     /// Use the host ld.so instead of the one from the chroot environment
-    #[clap(long)]
+    #[arg(long)]
     pub use_native_loader: bool,
 }
 
