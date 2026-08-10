@@ -1,3 +1,6 @@
+MINDER_PID_FILE="$HOME/.shutdown_minder.pid"
+MINDER_TIMER_FILE="$HOME/.shutdown_minder.timer"
+
 parent_is_pcontainer() {
   echo "$(ps -o comm= -p $(ps -o ppid= -p $$) | tail -n 1)" | grep -q "/dockify$"
 }
@@ -17,6 +20,12 @@ battery_status_summary() {
   fi
 }
 
+reset_shutdown_minder() {
+  rm "$MINDER_TIMER_FILE" 2>/dev/null
+}
+
 if ! parent_is_pcontainer; then
   export PS1="\w $(battery_status_summary) \$ "
 fi
+
+reset_shutdown_minder

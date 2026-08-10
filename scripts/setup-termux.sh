@@ -12,3 +12,7 @@ git clone https://github.com/markzyu/pcontainer.git "$REPO_DIR"
 if ! [ -e "$HOME/.bashrc" ] && ! [ -L "$HOME/.bashrc" ]; then
   ln -s "$REPO_DIR/scripts/.bashrc" ~/.bashrc
 fi
+
+if ! [ -e "$HOME/.bash_logout" ] && ! [ -L "$HOME/.bash_logout" ]; then
+  ln -s "$REPO_DIR/scripts/.bash_logout" ~/.bash_logout
+fi
