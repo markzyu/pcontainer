@@ -12,7 +12,9 @@
 
 #![allow(non_snake_case)]
 #![allow(unused_macros)]
-use crate::common::{Augments, DelType, NO_MOD_SYSCALL, PermType, SyscallInfo, default_syscall_info};
+use crate::common::{
+    Augments, DelType, NO_MOD_SYSCALL, PermType, SyscallInfo, default_syscall_info,
+};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use tracing::{Level, event};
@@ -459,7 +461,6 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     iter
 };
 
-
 lazy_static! {
     pub static ref SYSCALL_INFOS: HashMap<usize, SyscallInfo> = {
         let mut ans = HashMap::<usize, SyscallInfo>::new();
@@ -471,23 +472,22 @@ lazy_static! {
         event!(Level::INFO, "Defined {} syscalls", ans.len());
         ans
     };
-
 }
-    /** TODO: This fails to compile because libc doesn't define BPF_* for android
-    pub static ref SECCOMP_PROGRAM: Vec<libc::sock_filter> = {
-        if (SYSCALL_INFOS.len() > MAX_RAW_SYSCALL_INFOS) {
-            panic!("Too many ptrace-eligible syscalls to fit in SECCOMP BPF filter");
-        }
+/** TODO: This fails to compile because libc doesn't define BPF_* for android
+pub static ref SECCOMP_PROGRAM: Vec<libc::sock_filter> = {
+    if (SYSCALL_INFOS.len() > MAX_RAW_SYSCALL_INFOS) {
+        panic!("Too many ptrace-eligible syscalls to fit in SECCOMP BPF filter");
+    }
 
-        let end_of_syscalls: u8 = (SYSCALL_INFOS.len() + 1) as u8;
-        let mut program = Vec::new();
-        program.push(libc::BPF_STMT(libc::BPF_LD + libc::BPF_W + libc::BPF_ABS, 2));
-        SYSCALL_INFOS.keys().for_each(|num| unsafe {
-            program.push(libc::BPF_JUMP(libc::BPF_JMP + libc::BPF_JEQ + libc::BPF_K, *num as u32, end_of_syscalls, 1));
-        });
-        program
-    };
-    */
+    let end_of_syscalls: u8 = (SYSCALL_INFOS.len() + 1) as u8;
+    let mut program = Vec::new();
+    program.push(libc::BPF_STMT(libc::BPF_LD + libc::BPF_W + libc::BPF_ABS, 2));
+    SYSCALL_INFOS.keys().for_each(|num| unsafe {
+        program.push(libc::BPF_JUMP(libc::BPF_JMP + libc::BPF_JEQ + libc::BPF_K, *num as u32, end_of_syscalls, 1));
+    });
+    program
+};
+*/
 
 #[cfg(any(target_arch = "aarch64"))]
 pub const SYSCALL_INSTRUCTION_SIZE: usize = 4;
