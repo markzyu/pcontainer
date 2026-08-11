@@ -121,7 +121,7 @@ pub enum SysAugError {
 
 // ------------------- AUGMENTS -------------------
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Augments {
     Clone,
     Exec,
@@ -155,13 +155,13 @@ pub enum PathAction {
 
 // ------------------- SYSCALLS -------------------
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DelType {
     File,
     Dir,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PermType {
     Chmod,
     Chown,
@@ -175,7 +175,7 @@ pub enum PermsMode {
     SudoOnly,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SyscallInfo {
     /// The type of augment that will handle this syscall
     pub augment: Augments,
@@ -201,6 +201,32 @@ pub struct SyscallInfo {
 
     pub num: libc::c_long,
     pub name: &'static str,
+}
+
+pub const fn default_syscall_info() -> SyscallInfo {
+    SyscallInfo {
+        augment: Augments::None,
+        flags: None,
+        path_positions: 0,
+        dirfd_position: None,
+        dirfd_precedes_path: false,
+        getdents_bits: None,
+        sets_file_perms: None,
+        deletion_type: None,
+        dont_follow_symlink: false,
+        flag_dont_follow_symlink: None,
+        is_setter: false,
+        res_bits: 0,
+        resf_bit: None,
+        num: 0,
+        name: "",
+    }
+}
+
+impl Default for SyscallInfo {
+    fn default() -> SyscallInfo {
+        default_syscall_info()
+    }
 }
 
 impl SyscallInfo {
