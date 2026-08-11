@@ -10,19 +10,19 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU Lesser General Public License for more details.
 
-use crate::common::{display_err, rwlock_read, Augments, PermsMode, SysAugError, NO_MOD_SYSCALL};
+use crate::common::{Augments, NO_MOD_SYSCALL, PermsMode, SysAugError, display_err, rwlock_read};
 use crate::config::{
-    init_passthroughs_from_config, init_perms_ids_from_config, SysAugConfig, PERMS_IDS_SIZE,
+    PERMS_IDS_SIZE, SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config,
 };
 use crate::rwlock_write;
-use crate::syscalls::{get_syscall, SYSCALL_INSTRUCTION_SIZE};
+use crate::syscalls::{SYSCALL_INSTRUCTION_SIZE, get_syscall};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use ptrace::{
-    get_own_region_id, set_tracee_write_region_addr, GenericPurposeRegs, MemHelpers,
-    DIRECT_MEM_HELPERS, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
+    DIRECT_MEM_HELPERS, GenericPurposeRegs, MemHelpers, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
+    get_own_region_id, set_tracee_write_region_addr,
 };
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, Weak};
 use std::thread;
 use sys::signal::Signal;
-use tracing::{event, info, span, Level};
+use tracing::{Level, event, info, span};
 
 #[cfg(not(target_arch = "arm"))]
 const SYS_MMAP: usize = libc::SYS_mmap as usize;

@@ -1,4 +1,4 @@
-use crate::common::{rwlock_write, SysAugError, SyscallInfo};
+use crate::common::{SysAugError, SyscallInfo, rwlock_write};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

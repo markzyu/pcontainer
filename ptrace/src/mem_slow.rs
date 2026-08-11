@@ -12,11 +12,11 @@
 
 // Slower, but more supported method to access tracee memory (ptrace)
 use crate::common::{
-    bytes_to_usizes, checked_add, checked_mul, checked_sub, getregs, write, MemHelpers,
-    PtraceError, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+    MemHelpers, PtraceError, STACK_SAFE_ZONE_SIZE, USIZE_SIZE, bytes_to_usizes, checked_add,
+    checked_mul, checked_sub, getregs, write,
 };
 use nix::sys;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 /// This always writes to the same location of tracee stack.
 /// So if you want to write multiple byte arrays, each one must have a different offset

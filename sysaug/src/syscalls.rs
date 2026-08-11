@@ -12,10 +12,10 @@
 
 #![allow(non_snake_case)]
 #![allow(unused_macros)]
-use crate::common::{Augments, DelType, PermType, SyscallInfo, NO_MOD_SYSCALL};
+use crate::common::{Augments, DelType, NO_MOD_SYSCALL, PermType, SyscallInfo};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use tracing::{event, Level};
+use tracing::{Level, event};
 /**
 TODO: a simple refactor (just move definitions to jsons so this looks more declarative):
 {

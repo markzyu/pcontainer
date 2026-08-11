@@ -12,15 +12,15 @@
 
 // Faster, but less supported method to access tracee memory (mmap)
 use crate::common::{
-    checked_add, MemHelpers, PtraceError, AVAILABLE_REGION_IDS, MAX_NUM_TRACEES, REGION_IDS_BY_PID,
-    SHARED_REGIONS, STACK_SAFE_ZONE_SIZE,
+    AVAILABLE_REGION_IDS, MAX_NUM_TRACEES, MemHelpers, PtraceError, REGION_IDS_BY_PID,
+    SHARED_REGIONS, STACK_SAFE_ZONE_SIZE, checked_add,
 };
 use nix::fcntl::OFlag;
 use nix::sys::stat::Mode;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, OwnedFd};
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 const READ_BUFFER_SIZE: usize = 1024;
 

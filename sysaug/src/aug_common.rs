@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 // Common helper functions used by aug_*.rs
 // Calculate real path of file based on its path in rootfs

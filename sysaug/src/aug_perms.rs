@@ -14,7 +14,7 @@ use crate::common::{PermsMode, SysAugError, SyscallInfo};
 use crate::config::walk_resf_syscall;
 use crate::handler::AsyncTraceeHandler;
 use ptrace::GenericPurposeRegs;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_perms(

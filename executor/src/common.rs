@@ -11,9 +11,9 @@
 // GNU Lesser General Public License for more details.
 
 use nix::sys;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{RecvError, RecvTimeoutError, SendError};
-use std::sync::Arc;
 use thiserror::Error;
 
 pub type SharedBool = Arc<AtomicBool>;

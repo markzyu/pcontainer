@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::RwLock;
 use thiserror::Error;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 pub const NT_PRSTATUS: libc::c_int = 1;
 

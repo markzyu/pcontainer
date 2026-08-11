@@ -12,11 +12,11 @@
 
 use crate::common;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
-use crate::handler::{get_mem_helper, AsyncTraceeHandler};
+use crate::handler::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 const META_INIT: &str = "{}\n";
 

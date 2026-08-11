@@ -15,9 +15,9 @@ use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{display_err, PermsMode};
+use sysaug::{PermsMode, display_err};
 use thiserror::Error;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 #[derive(Parser, Debug)]
 #[command(version = "0.2.0", author = "Zhongzhi Yu")]

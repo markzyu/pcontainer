@@ -11,10 +11,10 @@
 // GNU Lesser General Public License for more details.
 
 use crate::common::{PathAction, SysAugError, SyscallInfo};
-use crate::handler::{get_mem_helper, AsyncTraceeHandler};
+use crate::handler::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 macro_rules! exec_setid {
     ($perms_ids:expr, $which:expr, $path:expr, $id: expr) => {{

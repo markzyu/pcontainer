@@ -15,7 +15,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 #[derive(Debug, Error)]
 pub enum SysAugError {

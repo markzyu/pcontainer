@@ -15,11 +15,12 @@ mod mem_direct;
 mod mem_slow;
 
 pub use crate::common::{
-    getregs, read_bytes_to_structs, setregs, write, write_structs_to_tracee, CHeader, CStruct,
-    GenericPurposeRegs, MemHelpers, NixISize, PtraceError, SharedRegionContent, MAX_NUM_TRACEES,
-    PTRACE_GETEVENTMSG, SHARED_MMAP_SIZE, SHARED_REGIONS, STACK_SAFE_ZONE_SIZE, USIZE_SIZE,
+    CHeader, CStruct, GenericPurposeRegs, MAX_NUM_TRACEES, MemHelpers, NixISize,
+    PTRACE_GETEVENTMSG, PtraceError, SHARED_MMAP_SIZE, SHARED_REGIONS, STACK_SAFE_ZONE_SIZE,
+    SharedRegionContent, USIZE_SIZE, getregs, read_bytes_to_structs, setregs, write,
+    write_structs_to_tracee,
 };
-pub use crate::mem_direct::{get_own_region_id, set_tracee_write_region_addr, DIRECT_MEM_HELPERS};
+pub use crate::mem_direct::{DIRECT_MEM_HELPERS, get_own_region_id, set_tracee_write_region_addr};
 pub use crate::mem_slow::SLOW_MEM_HELPERS;
 
 use nix::sys;
@@ -32,7 +33,7 @@ use std::os::fd::AsRawFd;
 use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 pub fn is_trace_stop(status: &wait::WaitStatus) -> bool {
     matches!(

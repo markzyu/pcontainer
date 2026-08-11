@@ -22,7 +22,7 @@ mod handler;
 mod syscalls;
 
 pub use crate::common::{
-    display_err, rwlock_read, rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault,
-    rwoption_take, DelType, PermType, PermsMode, SysAugError, SyscallInfo,
+    DelType, PermType, PermsMode, SysAugError, SyscallInfo, display_err, rwlock_read,
+    rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault, rwoption_take,
 };
 pub use crate::handler::{CLIArgs, TraceeHandler, TraceeHandlerStates};

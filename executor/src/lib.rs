@@ -19,10 +19,10 @@ pub use crate::futures::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTyp
 use nix::{sys, unistd};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tracing::{event, Level};
+use tracing::{Level, event};
 
 pub trait PtraceServer {
     fn serve(&self) -> Result<(), PtraceExecutorError>;
@@ -195,7 +195,7 @@ impl PtraceClient for LocalPtraceClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::{new_main_thread_executor, PtraceClient, PtraceServer};
+    use crate::{PtraceClient, PtraceServer, new_main_thread_executor};
     use std::thread;
 
     #[test]
