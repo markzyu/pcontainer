@@ -117,5 +117,5 @@ I don't use AI to directly generate large chunks of code.
 
 Copyright (c) 2026 Zhongzhi Yu
 
-This project is licensed under the GNU Lesser General Public License v3.0 (LGPLv3) - 
+This project is licensed under the GNU General Public License v3.0 (GPLv3) - 
 see [COPYING](COPYING) for details

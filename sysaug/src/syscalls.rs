@@ -1,14 +1,14 @@
-// Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.comter>
+// Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 
 #![allow(non_snake_case)]
 #![allow(unused_macros)]
@@ -17,7 +17,7 @@ use crate::common::{
 };
 
 /// This limits how many syscalls can be ptrace-eligible.
-const MAX_RAW_SYSCALL_INFOS: usize = (u8::MAX as usize) - 4;
+const MAX_RAW_SYSCALL_INFOS: usize = 512;
 
 /// We use a raw array to index syscalls. This defines the max length of the array.
 const MAX_SYSCALL_NUMBER: usize = 1024;
@@ -35,6 +35,25 @@ macro_rules! define_syscall {
             augment: $augment,
             name: stringify!($name),
             num: $name,
+            ..default_syscall_info()
+        });
+    };
+}
+
+macro_rules! define_seccomp_syscall {
+    ($name:expr, $seccomp_position:expr, $iter:ident, $next:ident) => {
+        $next += 1;
+        if $next >= MAX_RAW_SYSCALL_INFOS {
+            panic!("No more space for syscalls");
+        }
+        if ($name as usize) == NO_MOD_SYSCALL {
+            panic!("Syscall list should not include NO_MOD_SYSCALL");
+        }
+        $iter[$next] = Some(SyscallInfo {
+            augment: Augments::Seccomp,
+            name: stringify!($name),
+            num: $name,
+            seccomp_position: Some($seccomp_position),
             ..default_syscall_info()
         });
     };
@@ -291,6 +310,9 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         define_perms_syscall!(libc::SYS_setfsuid32, true, 0, Some(7), iter, next);
     }
 
+    define_seccomp_syscall!(libc::SYS_prctl, 1, iter, next);
+    define_seccomp_syscall!(libc::SYS_seccomp, 0, iter, next);
+
     define_paths_syscall!(libc::SYS_acct, 1, iter, next);
     define_paths_syscall!(libc::SYS_chdir, 1, iter, next);
     define_paths_syscall!(libc::SYS_chroot, 1, iter, next);
@@ -463,7 +485,7 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
 };
 
 pub struct SyscallInfos {
-    syscall_to_index: [Option<usize>; MAX_SYSCALL_NUMBER]
+    syscall_to_index: [Option<usize>; MAX_SYSCALL_NUMBER],
 }
 
 impl SyscallInfos {
@@ -479,9 +501,7 @@ impl SyscallInfos {
             }
             index += 1;
         }
-        Self {
-            syscall_to_index
-        }
+        Self { syscall_to_index }
     }
 
     pub fn get(&self, syscall_num: &usize) -> Option<&SyscallInfo> {
@@ -498,21 +518,98 @@ impl SyscallInfos {
 
 pub const SYSCALL_INFOS: SyscallInfos = SyscallInfos::new();
 
-/** TODO: This fails to compile because libc doesn't define BPF_* for android
-pub static ref SECCOMP_PROGRAM: Vec<libc::sock_filter> = {
-    if (SYSCALL_INFOS.len() > MAX_RAW_SYSCALL_INFOS) {
+#[repr(C)]
+pub struct BpfFilter {
+    code: u16,
+    jt: u8,
+    jf: u8,
+    k: u32,
+}
+
+pub type SeccompFiltersArray = [BpfFilter; 2 * MAX_RAW_SYSCALL_INFOS + 2];
+
+#[repr(C)]
+pub struct SeccompFilters {
+    pub filters: SeccompFiltersArray,
+    pub actual_len: usize,
+}
+
+#[repr(C)]
+pub struct BpfProgram {
+    pub len: u16,
+    pub filters_ptr: usize,
+}
+
+// We have to redefine these constants because libc doesn't set them for android
+const BPF_LD: u16 = 0;
+const BPF_ABS: u16 = 0x20;
+const BPF_W: u16 = 0;
+const BPF_K: u16 = 0;
+const BPF_JMP: u16 = 0x05;
+const BPF_JEQ: u16 = 0x10;
+const BPF_RET: u16 = 0x06;
+const SECCOMP_SYSCALL_OFFSET: u32 = 0;
+const SECCOMP_RET_TRACE: u32 = 0x7ff00000;
+const SECCOMP_RET_ALLOW: u32 = 0x7fff0000;
+
+const DEFAULT_FILTER: BpfFilter = BpfFilter {
+    code: BPF_RET,
+    jt: 0,
+    jf: 0,
+    k: SECCOMP_RET_ALLOW,
+};
+
+#[allow(dead_code)]
+pub const SECCOMP_FILTERS: SeccompFilters = {
+    if RAW_SYSCALL_INFOS.len() > MAX_RAW_SYSCALL_INFOS {
         panic!("Too many ptrace-eligible syscalls to fit in SECCOMP BPF filter");
     }
 
-    let end_of_syscalls: u8 = (SYSCALL_INFOS.len() + 1) as u8;
-    let mut program = Vec::new();
-    program.push(libc::BPF_STMT(libc::BPF_LD + libc::BPF_W + libc::BPF_ABS, 2));
-    SYSCALL_INFOS.keys().for_each(|num| unsafe {
-        program.push(libc::BPF_JUMP(libc::BPF_JMP + libc::BPF_JEQ + libc::BPF_K, *num as u32, end_of_syscalls, 1));
-    });
-    program
+    let mut filters = [const { DEFAULT_FILTER }; 2 * MAX_RAW_SYSCALL_INFOS + 2];
+    let end_of_syscalls: u8 = (RAW_SYSCALL_INFOS.len() + 2) as u8;
+
+    filters[0] = BpfFilter {
+        code: BPF_LD + BPF_W + BPF_ABS,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_SYSCALL_OFFSET,
+    };
+
+    let mut idx = 0;
+    let mut write_idx = 1;
+    while idx < RAW_SYSCALL_INFOS.len() {
+        let Some(info) = RAW_SYSCALL_INFOS[idx].as_ref() else {
+            idx += 1;
+            continue;
+        };
+        let num = info.num as u32;
+        filters[write_idx] = BpfFilter {
+            code: BPF_JMP + BPF_JEQ + BPF_K,
+            jt: 0,
+            jf: 1,
+            k: num,
+        };
+        write_idx += 1;
+        filters[write_idx] = BpfFilter {
+            code: BPF_RET + BPF_K,
+            jt: 0,
+            jf: 0,
+            k: SECCOMP_RET_TRACE,
+        };
+        write_idx += 1;
+        idx += 1;
+    }
+    filters[write_idx] = BpfFilter {
+        code: BPF_RET + BPF_K,
+        jt: 0,
+        jf: 0,
+        k: SECCOMP_RET_ALLOW,
+    };
+    SeccompFilters {
+        filters,
+        actual_len: write_idx + 1,
+    }
 };
-*/
 
 #[cfg(any(target_arch = "aarch64"))]
 pub const SYSCALL_INSTRUCTION_SIZE: usize = 4;

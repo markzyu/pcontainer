@@ -1,21 +1,24 @@
 // Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 
-use crate::common::{Augments, NO_MOD_SYSCALL, PermsMode, SysAugError, display_err, rwlock_read};
+use crate::common::{
+    Augments, NO_MOD_SYSCALL, PR_SET_NO_NEW_PRIVS, PermsMode, SECCOMP_FILTER_FLAG_TSYNC,
+    SECCOMP_SET_MODE_FILTER, SysAugError, display_err, rwlock_read,
+};
 use crate::config::{
     PERMS_IDS_SIZE, SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config,
 };
 use crate::rwlock_write;
-use crate::syscalls::{SYSCALL_INSTRUCTION_SIZE, get_syscall};
+use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
 use nix::sys::wait::WaitStatus;
@@ -89,6 +92,7 @@ macro_rules! call_augment {
             Some(Augments::Paths) => $self.augment_sys_paths($regs, $syscall).await,
             Some(Augments::Perms) => $self.augment_sys_perms($regs, $syscall).await,
             Some(Augments::Waitpid) => $self.augment_sys_waitpid($regs, $syscall).await,
+            Some(Augments::Seccomp) => $self.augment_sys_seccomp($regs, $syscall).await,
             Some(Augments::Unimplemented) => Err(SysAugError::UnimplementedAugment),
             _ => Ok(()),
         }
@@ -210,9 +214,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok((*status).clone())
     }
 
-    // Send the content of `bytes` to tracee's stack, and return its address.
-    // This can be called multiple times and will add new content to the end of
-    // previous contents.
+    /// Send the content of `bytes` to tracee's stack, and return its address.
+    /// This can be called multiple times and will add new content to the end of
+    /// previous contents.
+    ///
+    /// Note: By default, you don't need to clean up this stack, because the
+    ///    `loop_handle_tracee_syscalls` function will cleanup before each syscall.
     pub fn tracee_stack_append(&self, bytes: Vec<u8>) -> Result<usize, SysAugError> {
         let MemHelpers {
             write_bytes_to_tracee,
@@ -229,6 +236,17 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(addr)
     }
 
+    /// This is similar to tracee_stack_append, but it **destructs** an object into bytes and appends them.
+    pub fn tracee_stack_append_fixed_size_obj<T: Sized>(
+        &self,
+        obj: T,
+    ) -> Result<usize, SysAugError> {
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(&obj as *const _ as *const u8, std::mem::size_of::<T>())
+        };
+        self.tracee_stack_append(bytes.to_vec())
+    }
+
     pub fn tracee_stack_append_str(&self, val: String) -> Result<usize, SysAugError> {
         let mut bytes: Vec<u8> = val.into();
         bytes.push(0);
@@ -241,10 +259,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         self.tracee_stack_append(bytes)
     }
 
-    // Change the address, to which the next tracee_stack_append will write contents.
-    // offset = how many bytes of previously written contents will stay after this
-    //
-    // Note: By default, this is called upon every syscall entry
+    /// Change the address, to which the next tracee_stack_append will write contents.
+    /// offset = how many bytes of previously written contents will stay after this
+    ///
+    /// Note: By default, this is called upon every syscall entry
     pub fn tracee_stack_seek(&self, offset: usize) -> Result<(), SysAugError> {
         let mut ref_offset = self.tracee_stack_offset.borrow_mut();
         *ref_offset = offset;
@@ -469,6 +487,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             if which_aug == Some(&Augments::Exec) {
                 self.initialize_tracee_mmaps().await?;
+                self.initialize_tracee_seccomp().await?;
             }
         }
     }
@@ -480,12 +499,15 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         args: [usize; 6],
     ) -> Result<GenericPurposeRegs, SysAugError> {
         // Note: This function must call self.yielder_syscall.unblock() manually
-        //       We are not trying to override any system during this time, so,
-        //       We should unblock yields whenever we await
+        //       So that signal handlers and non-syscall ptrace code can still run.
         let pid = self.pid;
 
-        // Wait the next system call entry, could be anything, including NO_MOD_SYSCALL
-        // (Because we know for sure our own code did not trigger it)
+        // Wait for the next system call entry, could be anything, including NO_MOD_SYSCALL
+        // (This won't cause a race on tracer side because:)
+        //    1. Tracee has not yet run the inserted syscall
+        //    2. Tracer loop_handle_tracee_syscalls() will not see any syscall until _insert_syscall() yields.
+        //    3. The syscall we get from wait_for_syscall() will not complete until _insert_syscall() yields.
+        //    4. When _insert_syscall() yields, both tracer and tracee will see the same syscall instead of the inserted one.
         self.yielder_syscall.unblock();
         self.wait_for_syscall().await?;
 
@@ -497,9 +519,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             "TraceeInit: Overriding first syscall after exec, was {:?}",
             orig_syscall_name
         );
-
-        // TODO: rename the fd to something much larger than 3. fd3 is often used in bash scripts
-        //       (cannot really remap all fds because thats too many syscalls)
 
         // Override that system call to run mmap instead
         regs.arg0 = args[0];
@@ -517,7 +536,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Wait for mmap to return
         event!(
             Level::DEBUG,
-            "TraceeInit: replaced first syscall with {}",
+            "TraceeInit: executing replacement syscall {}",
             syscall_name
         );
         self.yielder_syscall.unblock();
@@ -526,6 +545,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         // Reset tracee to register state before system call
         // and decrement PC pointer to immediately rerun system call
+        // (Note: This doesn't actually resume the syscall, so it's ok to call _insert_syscall() again)
         let mut new_regs = orig_regs;
         new_regs.pc -= SYSCALL_INSTRUCTION_SIZE;
         event!(
@@ -570,6 +590,57 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             Level::INFO,
             "Tracee mounted mmap address: {:x}",
             mmap_regs.syscall_retval()
+        );
+        Ok(())
+    }
+
+    async fn initialize_tracee_seccomp(&self) -> Result<(), SysAugError> {
+        let prctl_regs = self
+            ._insert_syscall(
+                "SYS_prctl",
+                libc::SYS_prctl as usize,
+                [PR_SET_NO_NEW_PRIVS as usize, 1, 0, 0, 0, 0],
+            )
+            .await?;
+        if prctl_regs.syscall_retval() != 0 {
+            return Err(SysAugError::SeccompInit);
+        }
+
+        let filters_len = SECCOMP_FILTERS.actual_len;
+        let filters_addr = self.tracee_stack_append_fixed_size_obj(SECCOMP_FILTERS.filters)?;
+
+        let program = BpfProgram {
+            len: filters_len as u16,
+            filters_ptr: filters_addr,
+        };
+        let program_addr = self.tracee_stack_append_fixed_size_obj(program)?;
+
+        let seccomp_regs = self
+            ._insert_syscall(
+                "SYS_seccomp",
+                libc::SYS_seccomp as usize,
+                [
+                    SECCOMP_SET_MODE_FILTER as usize,
+                    SECCOMP_FILTER_FLAG_TSYNC as usize,
+                    program_addr,
+                    0,
+                    0,
+                    0,
+                ],
+            )
+            .await?;
+        if seccomp_regs.syscall_retval() != 0 {
+            event!(
+                Level::ERROR,
+                "Tracee failed to initialize seccomp, syscall retval: {:x}",
+                seccomp_regs.syscall_retval()
+            );
+            return Err(SysAugError::SeccompInit);
+        }
+        event!(
+            Level::INFO,
+            "Tracee initialized seccomp with default filters, length {}",
+            filters_len
         );
         Ok(())
     }
@@ -626,7 +697,8 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                         | sys::ptrace::Options::PTRACE_O_TRACEEXIT
                         | sys::ptrace::Options::PTRACE_O_TRACECLONE
                         | sys::ptrace::Options::PTRACE_O_TRACEFORK
-                        | sys::ptrace::Options::PTRACE_O_TRACEVFORK,
+                        | sys::ptrace::Options::PTRACE_O_TRACEVFORK
+                        | sys::ptrace::Options::PTRACE_O_TRACESECCOMP,
                 )
             })?
             .map_err(SysAugError::PtraceSetOptions)?;

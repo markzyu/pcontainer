@@ -1,14 +1,14 @@
 // Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 
 use executor::{PtraceFutureTypes, PtraceStatus};
 use std::fmt::Display;
@@ -117,6 +117,9 @@ pub enum SysAugError {
 
     #[error("Internal error, weak reference is no longer valid")]
     WeakReference,
+
+    #[error("Failed to initialize seccomp")]
+    SeccompInit,
 }
 
 // ------------------- AUGMENTS -------------------
@@ -127,6 +130,7 @@ pub enum Augments {
     Exec,
     Paths,
     Perms,
+    Seccomp,
     Waitpid,
     None,
     Unimplemented,
@@ -199,6 +203,9 @@ pub struct SyscallInfo {
     /// the direct index of the perms_ids slot (from 0 to 8: rgid, egid, ssgid, fsgid, ruid, euid, ssuid, fsuid)
     pub resf_bit: Option<u8>,
 
+    /// The register location that store the seccomp operation flag
+    pub seccomp_position: Option<usize>,
+
     pub num: libc::c_long,
     pub name: &'static str,
 }
@@ -218,6 +225,7 @@ pub const fn default_syscall_info() -> SyscallInfo {
         is_setter: false,
         res_bits: 0,
         resf_bit: None,
+        seccomp_position: None,
         num: 0,
         name: "",
     }
@@ -237,6 +245,13 @@ impl SyscallInfo {
 
 // We promise not to modify this system call
 pub const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;
+
+// ------------------- Missing libc constants -------------------
+
+pub const PR_SET_SECCOMP: usize = 22;
+pub const PR_SET_NO_NEW_PRIVS: usize = 38;
+pub const SECCOMP_SET_MODE_FILTER: usize = 1;
+pub const SECCOMP_FILTER_FLAG_TSYNC: usize = 1;
 
 // ------------------- MISC -------------------
 

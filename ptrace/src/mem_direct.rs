@@ -1,16 +1,17 @@
 // Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 
-// Faster, but less supported method to access tracee memory (mmap)
+// A faster, less intrusive, but also less compatible method to access tracee memory
+// (Using a shared mmap instead of poking tracee's actual stack)
 use crate::common::{
     AVAILABLE_REGION_IDS, MAX_NUM_TRACEES, MemHelpers, PtraceError, REGION_IDS_BY_PID,
     SHARED_REGIONS, STACK_SAFE_ZONE_SIZE, checked_add,

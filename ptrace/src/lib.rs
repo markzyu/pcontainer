@@ -1,14 +1,14 @@
 // Copyright 2026 Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>
 //
 // This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
+// it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// GNU General Public License for more details.
 
 mod common;
 mod mem_direct;
@@ -57,7 +57,8 @@ pub fn start(
 ) -> Result<(unistd::Pid, RawFd, usize), PtraceError> {
     // Note: All FDs will auto close when dropped.
 
-    // Open many empty FDs to at least make sure we don't clobber FD3 (commonly used in bash scripts)
+    // Open many empty FDs to at least make sure we get a high number as FD,
+    //   so that we don't clobber FD3 (commonly used in bash scripts)
     let shared_fd = {
         let _empty_fds = (0..27)
             .map(|_| {
