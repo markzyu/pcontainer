@@ -15,11 +15,12 @@
 use crate::common::{
     Augments, DelType, NO_MOD_SYSCALL, PermType, SyscallInfo, default_syscall_info,
 };
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-use tracing::{Level, event};
 
+/// This limits how many syscalls can be ptrace-eligible.
 const MAX_RAW_SYSCALL_INFOS: usize = (u8::MAX as usize) - 4;
+
+/// We use a raw array to index syscalls. This defines the max length of the array.
+const MAX_SYSCALL_NUMBER: usize = 1024;
 
 macro_rules! define_syscall {
     ($name:expr, $augment:expr, $iter:ident, $next:ident) => {
@@ -461,18 +462,42 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     iter
 };
 
-lazy_static! {
-    pub static ref SYSCALL_INFOS: HashMap<usize, SyscallInfo> = {
-        let mut ans = HashMap::<usize, SyscallInfo>::new();
-        RAW_SYSCALL_INFOS.iter().for_each(|x| {
-            if let Some(val) = x {
-                ans.insert(val.num as usize, val.clone());
-            }
-        });
-        event!(Level::INFO, "Defined {} syscalls", ans.len());
-        ans
-    };
+pub struct SyscallInfos {
+    syscall_to_index: [Option<usize>; MAX_SYSCALL_NUMBER]
 }
+
+impl SyscallInfos {
+    pub const fn new() -> Self {
+        let mut syscall_to_index = [const { None }; MAX_SYSCALL_NUMBER];
+        let mut index = 0;
+        while index < RAW_SYSCALL_INFOS.len() {
+            if let Some(val) = RAW_SYSCALL_INFOS[index].as_ref() {
+                if val.num as usize >= MAX_SYSCALL_NUMBER {
+                    panic!("Syscall number out of bound");
+                }
+                syscall_to_index[val.num as usize] = Some(index);
+            }
+            index += 1;
+        }
+        Self {
+            syscall_to_index
+        }
+    }
+
+    pub fn get(&self, syscall_num: &usize) -> Option<&SyscallInfo> {
+        let syscall_num = *syscall_num;
+        if syscall_num >= MAX_SYSCALL_NUMBER {
+            return None;
+        }
+        let Some(idx) = self.syscall_to_index[syscall_num] else {
+            return None;
+        };
+        RAW_SYSCALL_INFOS[idx].as_ref()
+    }
+}
+
+pub const SYSCALL_INFOS: SyscallInfos = SyscallInfos::new();
+
 /** TODO: This fails to compile because libc doesn't define BPF_* for android
 pub static ref SECCOMP_PROGRAM: Vec<libc::sock_filter> = {
     if (SYSCALL_INFOS.len() > MAX_RAW_SYSCALL_INFOS) {
