@@ -41,11 +41,11 @@ unsafe fn write_bytes_to_tracee(
     offset: usize,
     bytes: &[u8],
 ) -> Result<(usize, usize), PtraceError> {
-    if offset % *USIZE_SIZE != 0 {
+    if offset % USIZE_SIZE != 0 {
         return Err(PtraceError::WriteOffsetNotAligned(offset));
     }
     let usizes = bytes_to_usizes(bytes)?;
-    let size = checked_mul(usizes.len(), *USIZE_SIZE)?;
+    let size = checked_mul(usizes.len(), USIZE_SIZE)?;
     let regs = getregs(pid)?;
     let total_offset = checked_add(offset, checked_add(STACK_SAFE_ZONE_SIZE, size)?)?;
     let start: usize = checked_sub(regs.sp, total_offset)?;
@@ -58,7 +58,7 @@ unsafe fn write_bytes_to_tracee(
     let mut addr = start;
     for value in usizes.iter() {
         write(pid, addr, *value)?;
-        addr = checked_add(addr, *USIZE_SIZE)?;
+        addr = checked_add(addr, USIZE_SIZE)?;
     }
 
     let new_offset = checked_add(offset, size)?;
@@ -76,7 +76,7 @@ fn read_bytes(
     let mut n_bytes_read = 0;
     while n_bytes_read < size {
         event!(Level::TRACE, "PTRACE_READ addr: {:x}", curr_addr);
-        let new_n_bytes_read = checked_add(n_bytes_read, *USIZE_SIZE)?;
+        let new_n_bytes_read = checked_add(n_bytes_read, USIZE_SIZE)?;
         if new_n_bytes_read > size {
             let machine_word = read(pid, curr_addr)?;
             for (i, byte) in machine_word
@@ -93,7 +93,7 @@ fn read_bytes(
                 *ptr = read(pid, curr_addr)?;
             }
         }
-        curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+        curr_addr = checked_add(curr_addr, USIZE_SIZE)?;
         n_bytes_read = new_n_bytes_read;
     }
     Ok(())
@@ -120,7 +120,7 @@ fn read_bytes_until_num_zeroes(
             }
             result.push(*byte);
         }
-        curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+        curr_addr = checked_add(curr_addr, USIZE_SIZE)?;
     }
 }
 

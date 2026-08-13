@@ -27,13 +27,13 @@ const READ_BUFFER_SIZE: usize = 1024;
 
 thread_local! {
     /// A lookup table of trace memory region files (as actual file names) to tracer mmap address
-    static TRACEE_READ_FD: RefCell<Option<OwnedFd>> = RefCell::new(None);
+    static TRACEE_READ_FD: RefCell<Option<OwnedFd>> = const { RefCell::new(None) };
 
     /// The tracee side pointer of its own writeable `shared_region`
-    static TRACEE_WRITE_REGION_ADDR: RefCell<Option<NonZeroUsize>> = RefCell::new(None);
+    static TRACEE_WRITE_REGION_ADDR: RefCell<Option<NonZeroUsize>> = const { RefCell::new(None) };
 
     /// The index into `SHARED_REGIONS`, which reveals a writeable mmap
-    static TRACEE_WRITE_REGION_ID: RefCell<Option<usize>> = RefCell::new(None);
+    static TRACEE_WRITE_REGION_ID: RefCell<Option<usize>> = const { RefCell::new(None) };
 }
 
 pub fn set_tracee_write_region_addr(addr: usize) -> Result<(), PtraceError> {

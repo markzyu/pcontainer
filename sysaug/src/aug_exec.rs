@@ -70,7 +70,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let arg1 = regs.arg1;
         let path_bytes = ptrace_client.execute(move || (read_bytes_until_zero)(pid, arg0))??;
         let argv_bytes = ptrace_client
-            .execute(move || (read_bytes_until_num_zeroes)(pid, arg1, *USIZE_SIZE))??;
+            .execute(move || (read_bytes_until_num_zeroes)(pid, arg1, USIZE_SIZE))??;
 
         let read_args = [regs.arg0, regs.arg1, regs.arg2, regs.arg3];
 
@@ -170,11 +170,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             // TODO: Consider edge case: https://unix.stackexchange.com/questions/315812/why-does-argv-include-the-program-name
             let interp_addr = self.tracee_stack_append_path(final_interp_path)?;
             let elf_addr = self.tracee_stack_append_path(final_elf_path_buf)?;
-            let new_argv_len = argv_bytes.len() + *USIZE_SIZE;
+            let new_argv_len = argv_bytes.len() + USIZE_SIZE;
             let mut new_argv: Vec<u8> = Vec::with_capacity(new_argv_len);
             new_argv.append(&mut interp_addr.to_ne_bytes().to_vec());
             new_argv.append(&mut elf_addr.to_ne_bytes().to_vec());
-            new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
+            new_argv.append(&mut argv_bytes[USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
             let new_argv_addr = self.tracee_stack_append(new_argv)?;
             regs.arg0 = interp_addr;
@@ -220,7 +220,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
 
             new_argv.append(&mut regs.arg0.to_ne_bytes().to_vec());
-            new_argv.append(&mut argv_bytes[*USIZE_SIZE..].to_vec());
+            new_argv.append(&mut argv_bytes[USIZE_SIZE..].to_vec());
             new_argv.append(&mut 0_usize.to_ne_bytes().to_vec());
 
             let new_argv_addr = self.tracee_stack_append(new_argv)?;

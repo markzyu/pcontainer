@@ -83,9 +83,9 @@ pub const NT_ARM_SYSTEM_CALL: u32 = 0x404;
 pub type SharedRegionContent = [u8; STACK_SAFE_ZONE_SIZE];
 pub type SharedRegions = [RwLock<Option<Box<SharedRegionContent>>>; MAX_NUM_TRACEES];
 
-lazy_static! {
-    pub static ref USIZE_SIZE: usize = std::mem::size_of::<usize>();
+pub const USIZE_SIZE: usize = std::mem::size_of::<usize>();
 
+lazy_static! {
     // The actual shared regions will be initialized in start() in lib.rs
     pub static ref SHARED_REGIONS: SharedRegions = core::array::from_fn(|_| RwLock::new(None));
 
@@ -313,7 +313,7 @@ where
     let final_addr = checked_add(addr, total_size)?;
     let t_size = std::mem::size_of::<T>();
     let header_size = std::mem::size_of::<T::H>();
-    if t_size % *USIZE_SIZE != 0 {
+    if t_size % USIZE_SIZE != 0 {
         return Err(PtraceError::ReadItemNotAligned(t_size));
     }
     if t_size > MAX_STRUCT_SIZE {
@@ -436,7 +436,7 @@ where
     let max_addr = checked_add(addr, buffer_size)?;
     let t_size = std::mem::size_of::<T>();
     let header_size = std::mem::size_of::<T::H>();
-    if t_size % *USIZE_SIZE != 0 {
+    if t_size % USIZE_SIZE != 0 {
         return Err(PtraceError::ReadItemNotAligned(t_size));
     }
     if t_size > MAX_STRUCT_SIZE {
@@ -445,14 +445,14 @@ where
     if t_size < header_size {
         return Err(PtraceError::HeaderTooBig(header_size, t_size));
     }
-    let skip_header = checked_div(aligned(header_size)?, *USIZE_SIZE)?;
-    let skip_header_bytes = checked_mul(skip_header, *USIZE_SIZE)?;
+    let skip_header = checked_div(aligned(header_size)?, USIZE_SIZE)?;
+    let skip_header_bytes = checked_mul(skip_header, USIZE_SIZE)?;
 
     for item in items.iter_mut() {
         let mut curr_remainder_addr = checked_add(curr_addr, skip_header_bytes)?;
         let buffer: &mut [usize] = unsafe {
             let ptr = item as *mut T as *mut usize;
-            let len = t_size / *USIZE_SIZE;
+            let len = t_size / USIZE_SIZE;
             std::slice::from_raw_parts_mut(ptr, len)
         };
         let header: &mut T::H = unsafe {
@@ -482,16 +482,16 @@ where
                 count_zeroes = 0;
             }
             checked_write(pid, curr_remainder_addr, max_addr, *machine_word)?;
-            curr_remainder_addr = checked_add(curr_remainder_addr, *USIZE_SIZE)?;
+            curr_remainder_addr = checked_add(curr_remainder_addr, USIZE_SIZE)?;
         }
 
         // Update T::H and write T::H
         if skipped_zeroes > 0 {
-            header.item_size_updater(checked_sub(t_size, skipped_zeroes * *USIZE_SIZE)?);
+            header.item_size_updater(checked_sub(t_size, skipped_zeroes * USIZE_SIZE)?);
         }
         for machine_word in buffer.iter().take(skip_header) {
             write(pid, curr_addr, *machine_word)?;
-            curr_addr = checked_add(curr_addr, *USIZE_SIZE)?;
+            curr_addr = checked_add(curr_addr, USIZE_SIZE)?;
         }
         curr_addr = curr_remainder_addr;
     }
@@ -740,14 +740,14 @@ pub fn checked_div(a: usize, b: usize) -> Result<usize, PtraceError> {
 
 pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
     let mut result: Vec<usize> = Vec::new();
-    let iter = bytes.chunks_exact(*USIZE_SIZE);
+    let iter = bytes.chunks_exact(USIZE_SIZE);
     for chunk in iter {
         result.push(usize::from_ne_bytes(chunk.try_into().unwrap()));
     }
 
-    let remainder_pos = checked_mul(result.len(), *USIZE_SIZE)?;
+    let remainder_pos = checked_mul(result.len(), USIZE_SIZE)?;
     let mut remainder_vec: Vec<u8> = Vec::new();
-    remainder_vec.resize(*USIZE_SIZE, 0);
+    remainder_vec.resize(USIZE_SIZE, 0);
 
     for (i, byte) in bytes.iter().skip(remainder_pos).enumerate() {
         remainder_vec[i] = *byte;
@@ -759,8 +759,8 @@ pub fn bytes_to_usizes(bytes: &[u8]) -> Result<Vec<usize>, PtraceError> {
 }
 
 pub fn aligned(val: usize) -> Result<usize, PtraceError> {
-    let num_usizes = checked_div(checked_sub(checked_add(val, *USIZE_SIZE)?, 1)?, *USIZE_SIZE)?;
-    checked_mul(num_usizes, *USIZE_SIZE)
+    let num_usizes = checked_div(checked_sub(checked_add(val, USIZE_SIZE)?, 1)?, USIZE_SIZE)?;
+    checked_mul(num_usizes, USIZE_SIZE)
 }
 
 #[cfg(target_arch = "aarch64")]

@@ -52,7 +52,7 @@ const SYS_MMAP_PGOFFSET_BLOCK: usize = 4096;
 const PTRACE_EVENT_SECCOMP: libc::c_int = sys::ptrace::Event::PTRACE_EVENT_SECCOMP as libc::c_int;
 
 thread_local! {
-    static MEM: RefCell<MemHelpers> = RefCell::new(SLOW_MEM_HELPERS.clone());
+    static MEM: RefCell<MemHelpers> = const { RefCell::new(MemHelpers { ..SLOW_MEM_HELPERS }) };
 }
 
 pub fn get_mem_helper() -> MemHelpers {
