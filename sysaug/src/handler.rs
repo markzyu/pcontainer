@@ -239,6 +239,15 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             .await;
 
         if !is_seccomp_ready {
+            if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &status.wait_status {
+                // Wait until the next PTRACE_SYSCALL
+                // (Note: This can happen in a child process when parent already enabled SECCOMP)
+                self.notifiers.resume_through_syscall.replace(true);
+                status = self
+                    .async_runtime
+                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .await;
+            }
             if !ptrace::is_syscall_stop(&status.wait_status) {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "non-syscall stop while initializing seccomp",
@@ -500,6 +509,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     async fn loop_handle_tracee_syscalls(&self) -> Result<u8, SysAugError> {
         let pid = self.pid;
         let mut total_times: u64 = 0;
+        let mut is_first_loop_after_init: bool = false;
         loop {
             // We just finished one round of syscall. Unblock any signal handler that yielded to us
             self.yielder_syscall.unblock();
@@ -543,7 +553,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 return Ok(0);
             }
 
-            // Check how we should augment the syscall
+            // AFTER System Call Entry:
+            // Update tracee_seccomp_init_complete when init is complete & when orig syscall completes
+            if is_first_loop_after_init {
+                self.tracee_seccomp_init_complete.replace(true);
+                is_first_loop_after_init = false;
+            }
+
+            // Augment the system call or resume (This will yield AFTER System Call Exit)
             if let Some(syscall_info) = maybe_syscall_info {
                 call_augment!(self, which_aug, regs.clone(), &syscall_info);
             } else {
@@ -561,10 +578,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 if !self.cli_args.fix_mmap {
                     self.initialize_tracee_mmaps().await?;
                 }
-                if !*self.tracee_seccomp_init_complete.borrow() {
+                if self.parent.is_none(){
                     self.initialize_tracee_seccomp().await?;
                 }
-                info!("TESTT2");
+                is_first_loop_after_init = true;
             }
         }
     }
@@ -732,7 +749,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             "Tracee initialized seccomp with default filters, length {}",
             filters_len
         );
-        *self.tracee_seccomp_init_complete.borrow_mut() = true;
         Ok(())
     }
 }
@@ -886,7 +902,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     .map_err(|_| maybe_error2)?;
                 major <= 4 && minor <= 7
             }),
-            tracee_seccomp_init_complete: RefCell::new(self.parent.is_some()),
+            tracee_seccomp_init_complete: RefCell::new(false),
             orig_syscall_num: RefCell::new(None),
         };
         let mut main_loop_future = async_handlers.all_tracee_loops();
