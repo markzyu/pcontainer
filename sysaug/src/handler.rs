@@ -154,6 +154,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     /// Whether seccomp has been initialized
     /// (note: this only matters for the root process. all children processes will already have seccomp initialized)
     pub tracee_seccomp_init_complete: RefCell<bool>,
+    pub orig_syscall_num: RefCell<Option<usize>>,
 }
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -506,6 +507,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // Wait for System Call Entry
             self.wait_for_syscall().await?;
+            self.orig_syscall_num.replace(None);
             let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
             let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
             let which_aug = maybe_syscall_info.map(|x| &x.augment);
@@ -556,8 +558,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let which_aug = _new_syscall_info.map(|x| &x.augment);
 
             if which_aug == Some(&Augments::Exec) {
-                self.initialize_tracee_mmaps().await?;
-                self.initialize_tracee_seccomp().await?;
+                if !self.cli_args.fix_mmap {
+                    self.initialize_tracee_mmaps().await?;
+                }
+                if !*self.tracee_seccomp_init_complete.borrow() {
+                    self.initialize_tracee_seccomp().await?;
+                }
+                info!("TESTT2");
             }
         }
     }
@@ -583,12 +590,22 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let orig_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
         let mut regs = orig_regs.clone();
-        let (_, orig_syscall_name) = get_syscall(&regs.syscall_num);
-        event!(
-            Level::INFO,
-            "TraceeInit: Overriding first syscall after exec, was {:?}",
-            orig_syscall_name
-        );
+
+        let clone_orig_syscall_num = {
+            self.orig_syscall_num.borrow().clone()
+        };
+        let orig_syscall_num = if let Some(val) = clone_orig_syscall_num{
+            val
+        } else {
+            let (_, orig_syscall_name) = get_syscall(&regs.syscall_num);
+            self.orig_syscall_num.replace(Some(regs.syscall_num));
+            event!(
+                Level::INFO,
+                "TraceeInit: Overriding first syscall, was {:?}",
+                orig_syscall_name
+            );
+            regs.syscall_num
+        };
 
         // Override that system call to run mmap instead
         regs.arg0 = args[0];
@@ -617,6 +634,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // and decrement PC pointer to immediately rerun system call
         // (Note: This doesn't actually resume the syscall, so it's ok to call _insert_syscall() again)
         let mut new_regs = orig_regs;
+        new_regs.syscall_num = orig_syscall_num;
         new_regs.pc -= SYSCALL_INSTRUCTION_SIZE;
         event!(
             Level::DEBUG,
@@ -626,6 +644,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         );
         self.ptrace_client
             .execute(move || ptrace::setregs(pid, new_regs))??;
+        self.ptrace_client
+            .execute(move || ptrace::set_syscall_num(pid, orig_syscall_num))??;
         Ok(result_regs)
     }
 
@@ -816,12 +836,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
         if resume_through_syscall {
-            event!(Level::TRACE, "PTRACE_SYSCALL");
+            event!(Level::DEBUG, "PTRACE_SYSCALL");
             self.ptrace_client
                 .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceSyscall)?;
         } else {
-            event!(Level::TRACE, "PTRACE_CONT");
+            event!(Level::DEBUG, "PTRACE_CONT");
             self.ptrace_client
                 .execute(move || sys::ptrace::cont(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceContinue)?;
@@ -867,6 +887,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 major <= 4 && minor <= 7
             }),
             tracee_seccomp_init_complete: RefCell::new(self.parent.is_some()),
+            orig_syscall_num: RefCell::new(None),
         };
         let mut main_loop_future = async_handlers.all_tracee_loops();
 
