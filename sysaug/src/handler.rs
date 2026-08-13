@@ -147,7 +147,8 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub mmap_tracee_addr: RefCell<usize>,
     notifiers: AsyncNotifications,
     pub tracee_stack_offset: RefCell<usize>,
-    pub is_at_seccomp_stop: RefCell<bool>,
+    /// This tracks completion of either syscall-entry-stop or seccomp-stop
+    pub is_after_syscall_entry: RefCell<bool>,
 
     /// Whether kernel version is < 4.8
     pub is_legacy_seccomp: RefCell<bool>,
@@ -227,12 +228,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     async fn wait_for_syscall(&self) -> Result<PtraceStatus, SysAugError> {
         let is_legacy = { *self.is_legacy_seccomp.borrow() };
         let is_seccomp_ready = { *self.tracee_seccomp_init_complete.borrow() };
-        let starts_from_seccomp = self.is_at_seccomp_stop.replace(false);
+        let expects_syscall_exit = self.is_after_syscall_entry.replace(false);
 
         // Run PTRACE_CONT / PTRACE_SYSCALL
         self.notifiers
             .resume_through_syscall
-            .replace(starts_from_seccomp);
+            .replace(expects_syscall_exit);
         let mut status = self
             .async_runtime
             .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
@@ -254,27 +255,26 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     (*status).clone(),
                 ));
             }
-            self.is_at_seccomp_stop.replace(false);
             return Ok((*status).clone());
         }
 
         if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &status.wait_status {
-            if starts_from_seccomp {
+            if expects_syscall_exit {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "seccomp stop right after seccomp stop",
                     (*status).clone(),
                 ));
             }
-            self.is_at_seccomp_stop.replace(true);
+            self.is_after_syscall_entry.replace(true);
             return Ok((*status).clone());
-        } else if ptrace::is_syscall_stop(&status.wait_status) && starts_from_seccomp {
+        } else if ptrace::is_syscall_stop(&status.wait_status) && expects_syscall_exit {
             if !is_legacy {
-                self.is_at_seccomp_stop.replace(false);
+                self.is_after_syscall_entry.replace(false);
                 return Ok((*status).clone());
             }
 
             // We are in kernel version < 4.8 and need to do an extra round of ptrace_syscall (through async)
-            self.is_at_seccomp_stop.replace(false);
+            self.is_after_syscall_entry.replace(false);
 
             // Run PTRACE_SYSCALL
             self.notifiers.resume_through_syscall.replace(true);
@@ -284,7 +284,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 .await;
 
             if ptrace::is_syscall_stop(&status.wait_status) {
-                self.is_at_seccomp_stop.replace(false);
+                self.is_after_syscall_entry.replace(false);
                 return Ok((*status).clone());
             }
         }
@@ -557,7 +557,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             // Update tracee_seccomp_init_complete when init is complete & when orig syscall completes
             if is_first_loop_after_init {
                 self.tracee_seccomp_init_complete.replace(true);
-                self.is_at_seccomp_stop.replace(true);
+                self.is_after_syscall_entry.replace(true);
                 is_first_loop_after_init = false;
             }
 
@@ -886,7 +886,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             mmap_tracee_addr: RefCell::default(),
             notifiers: AsyncNotifications::default(),
             tracee_stack_offset: RefCell::default(),
-            is_at_seccomp_stop: RefCell::default(),
+            is_after_syscall_entry: RefCell::default(),
             is_legacy_seccomp: RefCell::new({
                 let uname_result = uname().map_err(SysAugError::ReadKernelVersion)?;
                 let kernel_version = uname_result.release().to_string_lossy();
