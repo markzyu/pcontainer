@@ -151,6 +151,9 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 
     /// Whether kernel version is < 4.8
     pub is_legacy_seccomp: RefCell<bool>,
+    /// Whether seccomp has been initialized
+    /// (note: this only matters for the root process. all children processes will already have seccomp initialized)
+    pub tracee_seccomp_init_complete: RefCell<bool>,
 }
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
@@ -222,6 +225,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ///    * We don't have access to PTRACE_GET_SYSCALL_INFO (kernel < 5.4)
     async fn wait_for_syscall(&self) -> Result<PtraceStatus, SysAugError> {
         let is_legacy = { *self.is_legacy_seccomp.borrow() };
+        let is_seccomp_ready = { *self.tracee_seccomp_init_complete.borrow() };
         let starts_from_seccomp = self.is_at_seccomp_stop.replace(false);
 
         // Run PTRACE_CONT / PTRACE_SYSCALL
@@ -233,10 +237,21 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
             .await;
 
+        if !is_seccomp_ready {
+            if !ptrace::is_syscall_stop(&status.wait_status) {
+                return Err(SysAugError::AsyncMisMatchSyscall(
+                    "non-syscall stop while initializing seccomp",
+                    (*status).clone(),
+                ));
+            }
+            self.is_at_seccomp_stop.replace(false);
+            return Ok((*status).clone());
+        }
+
         if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &status.wait_status {
             if starts_from_seccomp {
-                return Err(SysAugError::AsyncMismatch(
-                    PtraceFutureTypes::WaitForPtraceSyscall,
+                return Err(SysAugError::AsyncMisMatchSyscall(
+                    "seccomp stop right after seccomp stop",
                     (*status).clone(),
                 ));
             }
@@ -697,6 +712,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             "Tracee initialized seccomp with default filters, length {}",
             filters_len
         );
+        *self.tracee_seccomp_init_complete.borrow_mut() = true;
         Ok(())
     }
 }
@@ -799,15 +815,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         resume_through_syscall: bool,
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
-        event!(
-            Level::TRACE,
-            "Requesting kernel to resume tracee until next syscall"
-        );
         if resume_through_syscall {
+            event!(Level::TRACE, "PTRACE_SYSCALL");
             self.ptrace_client
                 .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceSyscall)?;
         } else {
+            event!(Level::TRACE, "PTRACE_CONT");
             self.ptrace_client
                 .execute(move || sys::ptrace::cont(pid, maybe_signal))?
                 .map_err(SysAugError::PtraceContinue)?;
@@ -852,6 +866,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     .map_err(|_| maybe_error2)?;
                 major <= 4 && minor <= 7
             }),
+            tracee_seccomp_init_complete: RefCell::new(self.parent.is_some()),
         };
         let mut main_loop_future = async_handlers.all_tracee_loops();
 
@@ -877,6 +892,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 // Also, use maybe_signal.take() so that the signal is only sent once
                 self._ptrace_request_next_syscall(maybe_signal.take(), {
                     *async_handlers.notifiers.resume_through_syscall.borrow()
+                        || !*async_handlers.tracee_seccomp_init_complete.borrow()
                 })?;
                 let wait_status = ptrace::waitpid_hang(pid)?;
                 event!(Level::TRACE, "child status {:?}", &wait_status);

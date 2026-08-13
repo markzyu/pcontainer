@@ -124,6 +124,11 @@ pub enum SysAugError {
     )]
     AsyncMismatch(PtraceFutureTypes, PtraceStatus),
 
+    #[error(
+        "Internal error, ptrace async executor expected normal syscall workflow, but got: {0}; status: {1:?}"
+    )]
+    AsyncMisMatchSyscall(&'static str, PtraceStatus),
+
     #[error("Internal error, weak reference is no longer valid")]
     WeakReference,
 
