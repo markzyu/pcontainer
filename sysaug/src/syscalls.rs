@@ -566,7 +566,6 @@ pub const SECCOMP_FILTERS: SeccompFilters = {
     }
 
     let mut filters = [const { DEFAULT_FILTER }; 2 * MAX_RAW_SYSCALL_INFOS + 2];
-    let end_of_syscalls: u8 = (RAW_SYSCALL_INFOS.len() + 2) as u8;
 
     filters[0] = BpfFilter {
         code: BPF_LD + BPF_W + BPF_ABS,

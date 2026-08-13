@@ -51,6 +51,18 @@ pub fn is_still_alive(status: &wait::WaitStatus) -> bool {
     !matches!(status, wait::WaitStatus::Exited(_, _))
 }
 
+#[derive(Debug, Default, Clone)]
+#[repr(C)]
+pub struct PtraceSyscallInfo {
+    pub op: u8,
+    _reserved1: u8,
+    flags: u16,
+    arch: u32,
+    instruction_pointer: u64,
+    stack_pointer: u64,
+    _reserved2: [u64; 3],
+}
+
 pub fn start(
     cmd: &mut process::Command,
     no_attach: bool,

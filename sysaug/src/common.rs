@@ -49,6 +49,15 @@ pub enum SysAugError {
     #[error("PTRACE_SYSCALL error: {0}")]
     PtraceSyscall(nix::Error),
 
+    #[error("PTRACE_CONT error: {0}")]
+    PtraceContinue(nix::Error),
+
+    #[error("Cannot get kernel version: {0}")]
+    ReadKernelVersion(nix::Error),
+
+    #[error("Cannot parse kernel version: {0}")]
+    ParseKernelVersion(String),
+
     #[error("Not a valid absolute path: {0}")]
     AbsolutePath(std::path::PathBuf),
 
@@ -248,10 +257,29 @@ pub const NO_MOD_SYSCALL: usize = libc::SYS_getpid as usize;
 
 // ------------------- Missing libc constants -------------------
 
+#[allow(dead_code)]
 pub const PR_SET_SECCOMP: usize = 22;
+
+#[allow(dead_code)]
 pub const PR_SET_NO_NEW_PRIVS: usize = 38;
+
+#[allow(dead_code)]
 pub const SECCOMP_SET_MODE_FILTER: usize = 1;
+
+#[allow(dead_code)]
 pub const SECCOMP_FILTER_FLAG_TSYNC: usize = 1;
+
+#[allow(dead_code)]
+pub const PTRACE_SYSCALL_INFO_NONE: u8 = 0;
+
+#[allow(dead_code)]
+pub const PTRACE_SYSCALL_INFO_ENTRY: u8 = 1;
+
+#[allow(dead_code)]
+pub const PTRACE_SYSCALL_INFO_EXIT: u8 = 2;
+
+#[allow(dead_code)]
+pub const PTRACE_SYSCALL_INFO_SECCOMP: u8 = 3;
 
 // ------------------- MISC -------------------
 
