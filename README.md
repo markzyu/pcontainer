@@ -1,30 +1,12 @@
 ## So this is just PRoot?
 
-The fundamental idea is not that different from proot. In fact, it's inspiried by proot -- both can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. 
+The fundamental idea is not that different from proot. In fact, it's inspiried by proot -- both make use of SECCOMP to improve performance. Both can intercept system calls through ptrace() and simulate the chroot() system call so that we can chroot into a different Linux Distro on a non-rooted phone. The main difference is this: This solution is multithreaded, while proot itself is single threaded.
 
-The main difference: This solution is multithreaded, while proot itself is single threaded. (And yes, I know they also have a Rust version)
-    - Multithreading mattered to me, more than the ptrace overhead. Because proot has a hardtime supporting heavy I/O from a multithreaded JVM running game servers, for example, to host Minecraft.
-    - This project was an exploration of whether multithreading helps with heavy I/O. But I've been sidetracked by other issues like supporting `apt-get`.
-
-
-Most likely, you should just use PRoot instead. It has a history of proven stability and success.
+You should just use PRoot instead. It has a history of proven stability and success.
 
 My project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
 
 Eventually, my goal is to be able to run Docker container on any mobile device, without needing root, by creating a configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
-
-## Warning: Outdated code (Don't use in prod)
-
-In Cargo.toml, the Rust compiler edition and many dependencies are outdated. (I used very old versions of libc and nix. And there are a lot of dirty workarounds in my code to fix missing syscall constants)
-
-The following designs are outdated:
-
-* The "mods" crate is outdated. 
-* The "procfs" crate is an empty placeholder for procfs simulation. It is not being used at all.
-
-Regarding "mods" crate, the idea was to implement optional features and logics here. In reality, this proved unfit. Dynamically loading mods slows down Rust because it involves dyn pointers.
-
-To actually achieve "turning on/off features at runtime", we should just create a better config schema so that we can customize "sysaug" crate behavior with a descriptive json config that's passed in during pcontainer initialization
 
 ## Multithreading model 
 
@@ -40,16 +22,7 @@ If the host OS does not permit PTRACE_ATTACH, pcontainer will try to cumulate pt
 
 ## Project structure
 
-
-Both sysaug and mods crates are supposed to modify the behavior of system calls. But here are the differences:
-
-Sysaug is a backend while mods are the frontend.
-- `sysaug` is a backend, low level ability to modify specific syscalls (i.e. remapping path of openat())
-- `mods` are the fronted, high level features (provides chroot / root, without having root)
-
-Mods are dynamic but sysaug isn't.
-- `mods` can be imported, enabled, and disabled dynamically. Disabling mods should improve efficiency.
-- `sysaug` is not dynamic and cannot be turned on/off or imported without rebuilding the binary, but frontend mods should eventually be able to.
+Sysaug crate contains the core logics of pconainer. The full name is System Augmentation, implying a backend, low level ability to modify specific syscalls (i.e. remapping path of openat())
 
 Within `sysaug` crate, there are two major parts:
 
@@ -84,24 +57,18 @@ proot slows down `git status` to about 5x its original run time.
 
 As long as our parallel proot doesn't slow down the tracee by more than 5x. It should be fine.
 
+It's highly recommended to simply install rust on Termux and perform native compilation.
 
-How to cross-compile for Android:
+Here are some (outdated) instructions about Android cross-compilation without Termux:
 
-- Install `arm-linux-*-gcc` and `aarch64-linux-*-gcc`
-  - Depending on the license of these softwares, the `*` portion might differ
-  - We prefer [Musl libc toolchains](https://musl.cc/).
+- Install GNU toolchains (`arm-linux-*-gcc` and `aarch64-linux-*-gcc`)
 - Update your `~/.cargo/config`:
   ```
-  [target.armv7-unknown-linux-musleabihf]
+  [target.armv7-unknown-linux-gnueabihf]
   rustflags = ["-C", "target-feature=+crt-static"]
   linker = "arm-linux-foobar-gcc"
-
-  [target.armv7-unknown-linux-musl]
-  rustflags = ["-C", "target-feature=+crt-static"]
-  linker = "aarch64-linux-foobar-gcc"
   ```
-- Run `cargo build --target=armv7-unknown-linux-musleabihf --release`
-- Or run `cargo build --target=aarch64-unknown-linux-musl --release`
+- Run `cargo build --target=armv7-unknown-linux-gnueabihf --release`
 - **Android permissions**
   - The terminal emulator must request specific permissions to unlock the ability to execute `./dockify`. The exact permission name is unknown.
   - Older Android versions work better with https://f-droid.org/en/packages/org.galexander.sshd/
