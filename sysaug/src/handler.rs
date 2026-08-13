@@ -229,26 +229,22 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let is_legacy = { *self.is_legacy_seccomp.borrow() };
         let is_seccomp_ready = { *self.tracee_seccomp_init_complete.borrow() };
         let expects_syscall_exit = self.is_after_syscall_entry.replace(false);
+        let expects_syscall_stop = !is_seccomp_ready || expects_syscall_exit;
 
         // Run PTRACE_CONT / PTRACE_SYSCALL
         self.notifiers
             .resume_through_syscall
-            .replace(expects_syscall_exit);
-        let mut status = self
-            .async_runtime
-            .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
-            .await;
+            .replace(expects_syscall_stop);
+
+        // Wait for one round of syscall-*-stop OR seccomp-stop
+        let future_type = if expects_syscall_stop {
+            PtraceFutureTypes::WaitForPtraceSyscall
+        } else {
+            PtraceFutureTypes::WaitForPtraceSeccomp
+        };
+        let mut status = self.async_runtime.new_ptrace_future(future_type).await;
 
         if !is_seccomp_ready {
-            if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &status.wait_status {
-                // Wait until the next PTRACE_SYSCALL
-                // (Note: This can happen in a child process when parent already enabled SECCOMP)
-                self.notifiers.resume_through_syscall.replace(true);
-                status = self
-                    .async_runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
-                    .await;
-            }
             if !ptrace::is_syscall_stop(&status.wait_status) {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "non-syscall stop while initializing seccomp",
@@ -275,8 +271,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // We are in kernel version < 4.8 and need to do an extra round of ptrace_syscall (through async)
             self.is_after_syscall_entry.replace(false);
-
-            // Run PTRACE_SYSCALL
             self.notifiers.resume_through_syscall.replace(true);
             status = self
                 .async_runtime
@@ -844,13 +838,14 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         self.states.failed.load(Ordering::Relaxed)
     }
 
-    pub fn _ptrace_request_next_syscall(
+    fn _ptrace_request_next_syscall(
         &self,
         maybe_signal: Option<Signal>,
-        resume_through_syscall: bool,
+        notifiers: &AsyncNotifications,
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
-        if resume_through_syscall {
+        let is_single_syscall = { *notifiers.resume_through_syscall.borrow() };
+        if is_single_syscall {
             event!(Level::DEBUG, "PTRACE_SYSCALL");
             self.ptrace_client
                 .execute(move || sys::ptrace::syscall(pid, maybe_signal))?
@@ -926,10 +921,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             loop {
                 // Send ptrace calls, resume tracee, until we have unblocked a future
                 // Also, use maybe_signal.take() so that the signal is only sent once
-                self._ptrace_request_next_syscall(maybe_signal.take(), {
-                    *async_handlers.notifiers.resume_through_syscall.borrow()
-                        || !*async_handlers.tracee_seccomp_init_complete.borrow()
-                })?;
+                self._ptrace_request_next_syscall(maybe_signal.take(), &async_handlers.notifiers)?;
                 let wait_status = ptrace::waitpid_hang(pid)?;
                 event!(Level::TRACE, "child status {:?}", &wait_status);
 
@@ -951,7 +943,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                     async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
                     break;
                 } else if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status);
+                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSeccomp, status);
                     break;
                 } else if let WaitStatus::PtraceEvent(..) = &wait_status {
                     async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status);

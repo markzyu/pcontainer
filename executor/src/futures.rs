@@ -41,7 +41,8 @@ use std::task::{Context, Poll, Wake};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum PtraceFutureTypes {
-    /// This only unblocks at syscall-exit-stop OR seccomp (never at syscall-entry-stop)
+    WaitForPtraceSeccomp,
+    /// Warning: This can happen at both syscall-exit-stop and syscall-entry-stop
     WaitForPtraceSyscall,
     WaitForPtraceEvent,
     WaitForSignal,
