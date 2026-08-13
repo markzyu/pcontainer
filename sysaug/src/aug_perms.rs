@@ -24,7 +24,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ) -> Result<(), SysAugError> {
         let possible_args = &[orig_regs.arg0, orig_regs.arg1, orig_regs.arg2];
         if syscall.is_setter && self.cli_args.perms_mode != PermsMode::Passthrough {
-            let is_handled = walk_resf_syscall(syscall, true, &self.states.perms_ids, |i, val| {
+            let is_handled = walk_resf_syscall(syscall, true, &self.perms_ids, |i, val| {
                 let proposed_id = if let Some(i) = i {
                     possible_args[i]
                 } else {
@@ -46,7 +46,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let is_known_getter = walk_resf_syscall(
                 syscall,
                 regs.syscall_retval() == 0,
-                &self.states.perms_ids,
+                &self.perms_ids,
                 |i, val| {
                     if let Some(i) = i {
                         let pid = self.pid;

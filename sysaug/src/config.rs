@@ -10,13 +10,13 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use crate::common::{SysAugError, SyscallInfo, rwlock_write};
+use crate::common::{SysAugError, SyscallInfo};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::RwLock;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,10 +100,10 @@ pub(crate) const PERMS_IDS_SIZE: usize = 8;
 pub(crate) fn walk_resf_syscall(
     syscall: &SyscallInfo,
     multi_getter_is_success: bool,
-    perms_ids: &RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
+    perms_ids: &RefCell<[Option<usize>; PERMS_IDS_SIZE]>,
     callback: impl Fn(Option<usize>, &mut Option<usize>) -> Result<(), SysAugError>,
 ) -> Result<bool, SysAugError> {
-    let mut guard = rwlock_write(perms_ids)?;
+    let mut guard = perms_ids.borrow_mut();
     if let Some(resf_bit) = syscall.resf_bit {
         callback(None, &mut guard[resf_bit as usize])?;
         return Ok(true);
@@ -162,10 +162,10 @@ impl FromStr for ResfUgType {
 }
 
 pub(crate) fn init_perms_ids_from_config(
-    perms_ids: &RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
+    perms_ids: &RefCell<[Option<usize>; PERMS_IDS_SIZE]>,
     config: &PermsConfig,
 ) -> Result<(), SysAugError> {
-    let mut guard = rwlock_write(perms_ids)?;
+    let mut guard = perms_ids.borrow_mut();
     for (ty, id) in &config.root_ids {
         guard[ty.index()] = Some(*id);
     }

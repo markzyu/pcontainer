@@ -25,10 +25,7 @@ macro_rules! exec_setid {
             $which,
             $id,
         );
-        (&$perms_ids)
-            .write()
-            .or(Err(SysAugError::LockTraceeHandler))?[$which]
-            .replace($id as usize);
+        (&$perms_ids).borrow_mut()[$which].replace($id as usize);
     }};
 }
 
@@ -85,10 +82,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 let setuid = stat.st_mode & nix::sys::stat::Mode::S_ISUID.bits();
                 let setgid = stat.st_mode & nix::sys::stat::Mode::S_ISGID.bits();
                 if setuid != 0 {
-                    exec_setid!(self.states.perms_ids, 5, &new_elf_path, stat.st_uid);
+                    exec_setid!(self.perms_ids, 5, &new_elf_path, stat.st_uid);
                 }
                 if setgid != 0 {
-                    exec_setid!(self.states.perms_ids, 1, &new_elf_path, stat.st_gid);
+                    exec_setid!(self.perms_ids, 1, &new_elf_path, stat.st_gid);
                 }
             }
             if let PathAction::Override(new_path_val) = path_action {

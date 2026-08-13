@@ -10,7 +10,6 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use crate::common;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler::AsyncTraceeHandler;
 use std::collections::HashSet;
@@ -28,8 +27,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         syscall: &SyscallInfo,
     ) -> Result<PathAction, SysAugError> {
         let mut new_path = PathAction::None;
-        let prefix_maybe = common::rwlock_read(&self.states.path_prefix)?;
-        let exclude_list = common::rwlock_read(&self.states.path_prefix_excludes)?;
+        let prefix_maybe = self.path_prefix.borrow();
+        let exclude_list = self.path_prefix_excludes.borrow();
         if !exclude_list.iter().any(|x| orig_path.starts_with(x)) {
             if let Some(prefix) = prefix_maybe.as_ref() {
                 if orig_path.is_absolute() {

@@ -17,7 +17,6 @@ use crate::common::{
 use crate::config::{
     PERMS_IDS_SIZE, SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config,
 };
-use crate::rwlock_write;
 use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
@@ -79,9 +78,6 @@ pub struct TraceeHandlerStates {
     pub args: CLIArgs,
     pub config: SysAugConfig,
     pub failed: AtomicBool,
-    pub perms_ids: RwLock<[Option<usize>; PERMS_IDS_SIZE]>,
-    pub path_prefix: RwLock<Option<PathBuf>>,
-    pub path_prefix_excludes: RwLock<Vec<PathBuf>>,
     pub pid: Pid,
     pub root_pid: Pid,
 }
@@ -142,10 +138,15 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 
     /// Yield until the next syscall poll has happened
     pub yielder_syscall: PtraceAsyncYielder,
-
-    // Actual shared states that are owned by this AsyncTraceeHandler
-    pub mmap_tracee_addr: RefCell<usize>,
+    /// Notify the outside, synchronous event loop about states from async
     notifiers: AsyncNotifications,
+
+    //  ------- Actual shared states that are owned by this AsyncTraceeHandler   ------
+    pub perms_ids: RefCell<[Option<usize>; PERMS_IDS_SIZE]>,
+    pub path_prefix: RefCell<Option<PathBuf>>,
+    pub path_prefix_excludes: RefCell<Vec<PathBuf>>,
+
+    pub mmap_tracee_addr: RefCell<usize>,
     pub tracee_stack_offset: RefCell<usize>,
     /// This tracks completion of either syscall-entry-stop or seccomp-stop
     pub is_after_syscall_entry: RefCell<bool>,
@@ -161,15 +162,6 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
-        // Initialize
-        init_perms_ids_from_config(&self.states.perms_ids, &self.states.config.perms)?;
-        if self.states.args.chroot.is_some() {
-            let mut path_prefix = rwlock_write(&self.states.path_prefix)?;
-            let mut path_prefix_excludes = rwlock_write(&self.states.path_prefix_excludes)?;
-            init_passthroughs_from_config(&mut *path_prefix_excludes, &self.states.config.rootfs);
-            *path_prefix = self.states.args.chroot.clone();
-        }
-
         // Event loops
         // (The order here matters. It's the order of polling precedence.)
         let result = futures_lite::future::or(
@@ -859,7 +851,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         Ok(())
     }
 
-    pub fn event_loop(self: Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
+    pub fn event_loop(self: &Arc<TraceeHandler<PtraceClient>>) -> Result<u8, SysAugError> {
         let pid = self.pid;
 
         // Initialize and store async loops and futures
@@ -877,9 +869,13 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ignore_sigstops: self.ignore_sigstops.clone(),
 
             yielder_syscall: PtraceAsyncYielder::default(),
+            notifiers: AsyncNotifications::default(),
+
+            perms_ids: RefCell::default(),
+            path_prefix: RefCell::default(),
+            path_prefix_excludes: RefCell::default(),
 
             mmap_tracee_addr: RefCell::default(),
-            notifiers: AsyncNotifications::default(),
             tracee_stack_offset: RefCell::default(),
             is_after_syscall_entry: RefCell::default(),
             is_legacy_seccomp: RefCell::new({
@@ -899,6 +895,16 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             tracee_seccomp_init_complete: RefCell::new(false),
             orig_syscall_num: RefCell::new(None),
         };
+
+        // Initialize async states from config json
+        init_perms_ids_from_config(&async_handlers.perms_ids, &self.states.config.perms)?;
+        if self.states.args.chroot.is_some() {
+            let mut path_prefix = async_handlers.path_prefix.borrow_mut();
+            let mut path_prefix_excludes = async_handlers.path_prefix_excludes.borrow_mut();
+            init_passthroughs_from_config(&mut *path_prefix_excludes, &self.states.config.rootfs);
+            *path_prefix = self.states.args.chroot.clone();
+        }
+
         let mut main_loop_future = async_handlers.all_tracee_loops();
 
         // Attach ptrace to tracee
@@ -991,6 +997,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
     }
 }
 
+#[allow(dead_code)]
 fn clone_locked<T: Clone>(lock: &RwLock<T>) -> Result<RwLock<T>, SysAugError> {
     let val = rwlock_read(lock)?;
     Ok(RwLock::new(val.clone()))
@@ -1002,9 +1009,6 @@ impl Default for TraceeHandlerStates {
             args: CLIArgs::default(),
             config: SysAugConfig::default(),
             failed: AtomicBool::new(false),
-            perms_ids: RwLock::default(),
-            path_prefix: RwLock::default(),
-            path_prefix_excludes: RwLock::default(),
             pid: Pid::from_raw(0),
             root_pid: Pid::from_raw(0),
         }
@@ -1017,9 +1021,6 @@ impl TraceeHandlerStates {
             args: self.args.clone(),
             config: self.config.clone(),
             failed: AtomicBool::new(false),
-            perms_ids: clone_locked(&self.perms_ids)?,
-            path_prefix: clone_locked(&self.path_prefix)?,
-            path_prefix_excludes: clone_locked(&self.path_prefix_excludes)?,
             pid: self.pid,
             root_pid: self.root_pid,
         })
