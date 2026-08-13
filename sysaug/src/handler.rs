@@ -557,6 +557,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             // Update tracee_seccomp_init_complete when init is complete & when orig syscall completes
             if is_first_loop_after_init {
                 self.tracee_seccomp_init_complete.replace(true);
+                self.is_at_seccomp_stop.replace(true);
                 is_first_loop_after_init = false;
             }
 
@@ -578,7 +579,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 if !self.cli_args.fix_mmap {
                     self.initialize_tracee_mmaps().await?;
                 }
-                if self.parent.is_none(){
+                if self.parent.is_none() {
                     self.initialize_tracee_seccomp().await?;
                 }
                 is_first_loop_after_init = true;
@@ -608,10 +609,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let orig_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
         let mut regs = orig_regs.clone();
 
-        let clone_orig_syscall_num = {
-            self.orig_syscall_num.borrow().clone()
-        };
-        let orig_syscall_num = if let Some(val) = clone_orig_syscall_num{
+        let clone_orig_syscall_num = { self.orig_syscall_num.borrow().clone() };
+        let orig_syscall_num = if let Some(val) = clone_orig_syscall_num {
             val
         } else {
             let (_, orig_syscall_name) = get_syscall(&regs.syscall_num);
