@@ -26,13 +26,15 @@ Regarding "mods" crate, the idea was to implement optional features and logics h
 
 To actually achieve "turning on/off features at runtime", we should just create a better config schema so that we can customize "sysaug" crate behavior with a descriptive json config that's passed in during pcontainer initialization
 
-## Multithreading model and Fallback model
+## Multithreading model 
 
 By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
 
 But this requires the permission for PTRACE_ATTACH. And on some systems, this permission is blocked, and tracer can only attach to their direct children from main threads.
 
-In that case, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
+## Fallback model
+
+If the host OS does not permit PTRACE_ATTACH, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
 
 ![Fallback threading model](FallbackThreadingModel.png)
 
