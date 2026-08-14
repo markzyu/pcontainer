@@ -11,7 +11,7 @@
 // GNU General Public License for more details.
 
 use crate::common::{PR_SET_SECCOMP, SECCOMP_SET_MODE_FILTER, SysAugError, SyscallInfo};
-use crate::handler::AsyncTraceeHandler;
+use crate::handler_async::AsyncTraceeHandler;
 use ptrace::GenericPurposeRegs;
 use tracing::{Level, event};
 

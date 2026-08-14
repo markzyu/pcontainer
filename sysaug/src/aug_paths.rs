@@ -12,7 +12,7 @@
 
 use crate::common;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
-use crate::handler::{AsyncTraceeHandler, get_mem_helper};
+use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
@@ -239,7 +239,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     fn _get_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
-        if self.states.args.rootfs.is_none() {
+        if self.consts.args.rootfs.is_none() {
             return Ok(None);
         }
         let maybe_meta_path = self.__resolve_metadata_path(path)?;
@@ -253,7 +253,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
-        if self.states.args.rootfs.is_none() {
+        if self.consts.args.rootfs.is_none() {
             return Ok(());
         }
         if let Some(meta_path) = self._get_metadata_path(path)? {
@@ -279,7 +279,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     fn delete_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
-        if self.states.args.rootfs.is_none() {
+        if self.consts.args.rootfs.is_none() {
             return Ok(());
         }
         if let Some(meta_path) = self._get_metadata_path(path)? {
@@ -306,7 +306,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     fn __resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
-        let args = &self.states.args;
+        let args = &self.consts.args;
         let Some(rootfs) = args.rootfs.as_ref() else {
             return Ok(None);
         };

@@ -11,7 +11,7 @@
 // GNU General Public License for more details.
 
 use crate::common::{PathAction, SysAugError, SyscallInfo};
-use crate::handler::{AsyncTraceeHandler, get_mem_helper};
+use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
 use tracing::{Level, event};
@@ -127,7 +127,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // Override final path of interpreter only if use_native_loader = false
             let mut final_interp_path = interp_path_buf;
-            if self.cli_args.chroot.is_some() && !self.cli_args.use_native_loader {
+            if self.consts.args.chroot.is_some() && !self.consts.args.use_native_loader {
                 if let PathAction::Override(new_path_val) = path_action {
                     final_interp_path = new_path_val;
                 }
@@ -136,7 +136,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             // Convert elf path to absolute path in container. Some linkers require this.
             let mut final_elf_path_buf = elf_path_buf.clone();
             if final_elf_path_buf.is_relative() {
-                if let Some(chroot_path) = &self.cli_args.chroot {
+                if let Some(chroot_path) = &self.consts.args.chroot {
                     event!(
                         Level::DEBUG,
                         "Converting relative exe path in chroot: {}",

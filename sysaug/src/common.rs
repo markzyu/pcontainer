@@ -136,6 +136,21 @@ pub enum SysAugError {
     SeccompInit,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SysAugArgs {
+    pub chroot: Option<PathBuf>,
+    pub rootfs: Option<PathBuf>,
+    pub perms_mode: PermsMode,
+    pub fail_fast: bool,
+    pub fix_sigsys: bool,
+    pub fix_mmap: bool,
+    pub gdb: bool,
+    pub gdb_at: Option<u64>,
+
+    /// Use the host ld.so instead of the one from the chroot environment
+    pub use_native_loader: bool,
+}
+
 // ------------------- AUGMENTS -------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -285,6 +300,19 @@ pub const PTRACE_SYSCALL_INFO_EXIT: u8 = 2;
 
 #[allow(dead_code)]
 pub const PTRACE_SYSCALL_INFO_SECCOMP: u8 = 3;
+
+#[cfg(not(target_arch = "arm"))]
+pub const SYS_MMAP: usize = libc::SYS_mmap as usize;
+#[cfg(target_arch = "arm")]
+pub const SYS_MMAP: usize = libc::SYS_mmap2 as usize;
+
+#[cfg(not(target_arch = "arm"))]
+pub const SYS_MMAP_PGOFFSET_BLOCK: usize = 1;
+#[cfg(target_arch = "arm")]
+pub const SYS_MMAP_PGOFFSET_BLOCK: usize = 4096;
+
+pub const PTRACE_EVENT_SECCOMP: libc::c_int =
+    nix::sys::ptrace::Event::PTRACE_EVENT_SECCOMP as libc::c_int;
 
 // ------------------- MISC -------------------
 

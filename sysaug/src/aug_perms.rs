@@ -12,7 +12,7 @@
 
 use crate::common::{PermsMode, SysAugError, SyscallInfo};
 use crate::config::walk_resf_syscall;
-use crate::handler::AsyncTraceeHandler;
+use crate::handler_async::AsyncTraceeHandler;
 use ptrace::GenericPurposeRegs;
 use tracing::{Level, event};
 
@@ -23,7 +23,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         syscall: &SyscallInfo,
     ) -> Result<(), SysAugError> {
         let possible_args = &[orig_regs.arg0, orig_regs.arg1, orig_regs.arg2];
-        if syscall.is_setter && self.cli_args.perms_mode != PermsMode::Passthrough {
+        if syscall.is_setter && self.consts.args.perms_mode != PermsMode::Passthrough {
             let is_handled = walk_resf_syscall(syscall, true, &self.perms_ids, |i, val| {
                 let proposed_id = if let Some(i) = i {
                     possible_args[i]
@@ -42,7 +42,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let regs = self.do_resume_syscall().await?;
 
-        if !syscall.is_setter && self.cli_args.perms_mode != PermsMode::Passthrough {
+        if !syscall.is_setter && self.consts.args.perms_mode != PermsMode::Passthrough {
             let is_known_getter = walk_resf_syscall(
                 syscall,
                 regs.syscall_retval() == 0,
@@ -87,7 +87,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         syscall: &SyscallInfo,
         proposed_id: usize,
     ) -> Result<usize, SysAugError> {
-        if self.cli_args.perms_mode == PermsMode::RootOnly {
+        if self.consts.args.perms_mode == PermsMode::RootOnly {
             if proposed_id >= usize::MAX / 2 {
                 event!(
                     Level::INFO,

@@ -11,7 +11,7 @@
 // GNU General Public License for more details.
 
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::AsyncTraceeHandler;
+use crate::handler_async::AsyncTraceeHandler;
 use ptrace::GenericPurposeRegs;
 
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {

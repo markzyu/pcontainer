@@ -12,7 +12,7 @@
 
 use crate::common;
 use crate::common::{SysAugError, SyscallInfo};
-use crate::handler::{AsyncTraceeHandler, get_mem_helper};
+use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
 use ptrace::{GenericPurposeRegs, MemHelpers};

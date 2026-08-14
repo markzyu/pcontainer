@@ -19,11 +19,12 @@ mod aug_seccomp;
 mod aug_waitpid;
 mod common;
 mod config;
-mod handler;
+mod handler_async;
+mod handler_sync;
 mod syscalls;
 
 pub use crate::common::{
-    DelType, PermType, PermsMode, SysAugError, SyscallInfo, display_err, rwlock_read,
+    DelType, PermType, PermsMode, SysAugArgs, SysAugError, SyscallInfo, display_err, rwlock_read,
     rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault, rwoption_take,
 };
-pub use crate::handler::{CLIArgs, TraceeHandler, TraceeHandlerStates};
+pub use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};

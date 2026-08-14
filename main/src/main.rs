@@ -15,7 +15,7 @@ use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{PermsMode, display_err};
+use sysaug::{PermsMode, SysAugArgs, display_err};
 use thiserror::Error;
 use tracing::{Level, event};
 
@@ -177,7 +177,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
     let chroot_copy = canonicalize_clone(&args.chroot)?;
 
     // Setup tracee handler states
-    let args2 = sysaug::CLIArgs {
+    let args2 = SysAugArgs {
         chroot: canonicalize_clone(&args.chroot)?,
         rootfs: canonicalize_clone(&args.rootfs)?.or_else(|| chroot_copy),
         perms_mode: if args.root {
@@ -194,7 +194,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         gdb_at: args.gdb_at,
         use_native_loader: args.use_native_loader,
     };
-    let states = sysaug::TraceeHandlerStates {
+    let states = sysaug::TraceeHandlerConsts {
         args: args2,
         root_pid: pid1,
         ..Default::default()

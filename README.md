@@ -27,7 +27,7 @@ Sysaug crate contains the core logics of pconainer. The full name is System Augm
 Within `sysaug` crate, there are two major parts:
 
 * `aug_*.rs` defines Augments which have separate concerns based on the type of syscalls they augment
-* `handler.rs` defines the core "state machine" that translates TraceeHandlerStates and various trackers of tracee's stack and hacky mmap injection addresses, into how exactly to rewrite every syscalls + followup on them in multi-step algorithms.
+* `handler.rs` defines the core "state machine" that translates TraceeHandlerConsts and various trackers of tracee's stack and hacky mmap injection addresses, into how exactly to rewrite every syscalls + followup on them in multi-step algorithms.
 
 Additionally, 
 

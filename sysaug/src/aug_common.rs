@@ -11,7 +11,7 @@
 // GNU General Public License for more details.
 
 use crate::common::{PathAction, SysAugError, SyscallInfo};
-use crate::handler::AsyncTraceeHandler;
+use crate::handler_async::AsyncTraceeHandler;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
@@ -112,9 +112,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         };
         let bytes_str = curr_path.as_os_str().as_encoded_bytes();
         let rename_map = if reverse {
-            &self.states.config.rootfs.rename_guest_paths
+            &self.consts.config.rootfs.rename_guest_paths
         } else {
-            &self.states.config.rootfs.rename_host_paths
+            &self.consts.config.rootfs.rename_host_paths
         };
         for config in rename_map {
             if config.regex.is_match(bytes_str) {
