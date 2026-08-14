@@ -541,7 +541,6 @@ pub fn write_fixed_sized_objs_to_tracee<T>(
     addr: usize,
     buffer_size: usize,
     items: Vec<T>,
-    mem_helpers: MemHelpers,
 ) -> Result<usize, PtraceError>
 where
     T: Sized,
@@ -563,18 +562,19 @@ where
     }
 
     for item in items.iter() {
-        let buffer: &[u8] = unsafe {
-            let ptr = item as *const T as *const u8;
-            std::slice::from_raw_parts(ptr, t_size)
+        let buffer: &[usize] = unsafe {
+            let ptr = item as *const T as *const usize;
+            let len = t_size / USIZE_SIZE;
+            std::slice::from_raw_parts(ptr, len)
         };
         if curr_addr + t_size > max_addr {
             return Err(PtraceError::BufferOverflow(t_size, curr_addr, max_addr));
         }
 
-        unsafe {
-            (mem_helpers.write_bytes_to_tracee)(pid, curr_addr, buffer)?;
+        for machine_word in buffer.iter() {
+            write(pid, curr_addr, *machine_word)?;
+            curr_addr = checked_add(curr_addr, USIZE_SIZE)?;
         }
-        curr_addr = checked_add(curr_addr, t_size)?;
     }
     Ok(curr_addr - addr)
 }

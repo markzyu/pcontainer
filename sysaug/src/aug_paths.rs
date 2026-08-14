@@ -38,12 +38,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             orig_regs.arg1,
             orig_regs.arg2,
             orig_regs.arg3,
+            orig_regs.arg4,
         ];
         let mut write_args = [
             &mut orig_regs.arg0,
             &mut orig_regs.arg1,
             &mut orig_regs.arg2,
             &mut orig_regs.arg3,
+            &mut orig_regs.arg4,
         ];
         let mut need_write_regs = false;
         let mut save_paths: [Option<PathBuf>; 4] = Default::default();
@@ -305,12 +307,16 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             return Ok(());
         };
         let mem_helpers = get_mem_helper();
-        let mem_helpers2 = get_mem_helper();
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
         let mut stats: Vec<T> = ptrace_client
             .execute(move || ptrace::read_bytes_to_fixed_sized_objs(pid, addr, 1, mem_helpers))??;
-        event!(Level::DEBUG, "Intercepting {} stat entries", stats.len());
+        event!(
+            Level::INFO,
+            "Intercepting {} stat entries for {:?}.",
+            stats.len(),
+            path
+        );
 
         stats.iter_mut().for_each(move |x| {
             if let Some(chmod) = &meta.chmod {
@@ -326,7 +332,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let max_size = stats.len() * std::mem::size_of::<T>();
         ptrace_client.execute(move || {
-            ptrace::write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats, mem_helpers2)
+            ptrace::write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats)
         })??;
         Ok(())
     }

@@ -402,19 +402,17 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         val.stat_legacy_buf_position = Some(1);
     }
 
+    define_dirfd_syscall!(libc::SYS_statx, 2, 0, iter, next);
+    if let Some(val) = iter[next].as_mut() {
+        val.flags = Some(2);
+        val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+        val.statx_buf_position = Some(4);
+    }
+
     #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
     {
         define_paths_syscall!(libc::SYS_truncate, 1, iter, next);
         define_paths_syscall!(libc::SYS_statfs, 1, iter, next);
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        define_dirfd_syscall!(libc::SYS_statx, 2, 0, iter, next);
-        if let Some(val) = iter[next].as_mut() {
-            val.flags = Some(2);
-            val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
-            val.statx_buf_position = Some(4);
-        }
     }
 
     define_dirfd_syscall!(libc::SYS_utimensat, 2, 0, iter, next);
