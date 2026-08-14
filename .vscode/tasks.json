@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Cargo Check (Target Arch)",
+      "type": "shell",
+      "command": "cargo check --target ${input:targetArch}",
+      "problemMatcher": "$rustc",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "targetArch",
+      "type": "pickString",
+      "description": "Select target architecture",
+      "options": [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-linux-android",
+        "armv7-linux-androideabi"
+      ],
+      "default": "x86_64-unknown-linux-gnu"
+    }
+  ]
+}
