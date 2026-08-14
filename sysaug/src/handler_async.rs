@@ -11,17 +11,15 @@
 // GNU General Public License for more details.
 
 use crate::common::{
-    Augments, NO_MOD_SYSCALL, PR_SET_NO_NEW_PRIVS, PermsMode, SECCOMP_FILTER_FLAG_TSYNC,
-    SECCOMP_SET_MODE_FILTER, SysAugArgs, SysAugError, display_err, rwlock_read,
+    Augments, NO_MOD_SYSCALL, PR_SET_NO_NEW_PRIVS, PTRACE_EVENT_SECCOMP, SECCOMP_FILTER_FLAG_TSYNC,
+    SECCOMP_SET_MODE_FILTER, SYS_MMAP, SYS_MMAP_PGOFFSET_BLOCK, SysAugError, display_err,
+    rwlock_read,
 };
-use crate::config::{
-    PERMS_IDS_SIZE, SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config,
-};
+use crate::config::PERMS_IDS_SIZE;
 use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};
 use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
-use nix::sys::utsname::uname;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
 use ptrace::{
@@ -33,23 +31,9 @@ use std::collections::HashSet;
 use std::os::fd::RawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, Weak};
-use std::thread;
 use sys::signal::Signal;
 use tracing::{Level, event, info, span};
-
-#[cfg(not(target_arch = "arm"))]
-const SYS_MMAP: usize = libc::SYS_mmap as usize;
-#[cfg(target_arch = "arm")]
-const SYS_MMAP: usize = libc::SYS_mmap2 as usize;
-
-#[cfg(not(target_arch = "arm"))]
-const SYS_MMAP_PGOFFSET_BLOCK: usize = 1;
-#[cfg(target_arch = "arm")]
-const SYS_MMAP_PGOFFSET_BLOCK: usize = 4096;
-
-const PTRACE_EVENT_SECCOMP: libc::c_int = sys::ptrace::Event::PTRACE_EVENT_SECCOMP as libc::c_int;
 
 thread_local! {
     static MEM: RefCell<MemHelpers> = const { RefCell::new(MemHelpers { ..SLOW_MEM_HELPERS }) };

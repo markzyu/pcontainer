@@ -10,32 +10,19 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use crate::common::{
-    Augments, NO_MOD_SYSCALL, PR_SET_NO_NEW_PRIVS, PTRACE_EVENT_SECCOMP, PermsMode,
-    SECCOMP_FILTER_FLAG_TSYNC, SECCOMP_SET_MODE_FILTER, SysAugArgs, SysAugError, display_err,
-    rwlock_read,
-};
-use crate::config::{
-    PERMS_IDS_SIZE, SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config,
-};
+use crate::common::{PTRACE_EVENT_SECCOMP, SysAugArgs, SysAugError, display_err, rwlock_read};
+use crate::config::{SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config};
 use crate::handler_async::{AsyncNotifications, AsyncTraceeHandler};
-use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
 use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
 use nix::sys;
 use nix::sys::utsname::uname;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::{
-    DIRECT_MEM_HELPERS, GenericPurposeRegs, MemHelpers, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
-    get_own_region_id, set_tracee_write_region_addr,
-};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::os::fd::RawFd;
-use std::os::unix::ffi::OsStringExt;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use sys::signal::Signal;
 use tracing::{Level, event, info, span};
