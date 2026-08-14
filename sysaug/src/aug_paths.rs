@@ -135,6 +135,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     "Chmod syscall doesn't have sets_file_perms",
                 ))?;
             let new_mod = read_args[*position as usize];
+            event!(Level::INFO, "Handling chmod: {:b}", new_mod);
             for path in save_paths.iter().flatten() {
                 self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod))?;
             }
@@ -147,6 +148,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 ))?;
             let new_owner = read_args[*position as usize];
             let new_group = read_args[(*position + 1) as usize];
+            event!(Level::INFO, "Handling chown: {}, {}", new_owner, new_group);
             for path in save_paths.iter().flatten() {
                 self.save_metadata_for_file(path, |x| {
                     x.chown_owner = Some(new_owner);
