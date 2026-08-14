@@ -125,7 +125,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
 
-        let mut regs = self.do_resume_syscall().await?;
+        let regs = self.do_resume_syscall().await?;
         let retval = regs.syscall_retval() as isize;
 
         if let Some(PermType::Chmod) = &syscall.sets_file_perms {
@@ -167,19 +167,23 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         if let Some(position) = &syscall.stat_buf_position {
             let path = maybe_stat_path?.as_path();
-            self.replace_statbuf_result::<libc::stat>(syscall, &mut regs, path)
+            let addr = read_args[*position as usize];
+            self.replace_statbuf_result::<libc::stat>(addr, path)
                 .await?;
         } else if let Some(position) = &syscall.stat_legacy_buf_position {
             let path = maybe_stat_path?.as_path();
-            self.replace_statbuf_result::<StatLegacy>(syscall, &mut regs, path)
+            let addr = read_args[*position as usize];
+            self.replace_statbuf_result::<StatLegacy>(addr, path)
                 .await?;
         } else if let Some(position) = &syscall.stat64_buf_position {
             let path = maybe_stat_path?.as_path();
-            self.replace_statbuf_result::<libc::stat64>(syscall, &mut regs, path)
+            let addr = read_args[*position as usize];
+            self.replace_statbuf_result::<libc::stat64>(addr, path)
                 .await?;
         } else if let Some(position) = &syscall.statx_buf_position {
             let path = maybe_stat_path?.as_path();
-            self.replace_statbuf_result::<libc::statx>(syscall, &mut regs, path)
+            let addr = read_args[*position as usize];
+            self.replace_statbuf_result::<libc::statx>(addr, path)
                 .await?;
         }
 
@@ -293,16 +297,37 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(())
     }
 
-    async fn replace_statbuf_result<T>(
-        &self,
-        syscall: &SyscallInfo,
-        regs: &mut GenericPurposeRegs,
-        path: &Path,
-    ) -> Result<(), SysAugError>
+    async fn replace_statbuf_result<T>(&self, addr: usize, path: &Path) -> Result<(), SysAugError>
     where
-        T: Clone + Send + 'static,
+        T: IStat + Clone + Send + 'static,
     {
-        let meta = self.read_metadata_for_file(path)?;
+        let Some(meta) = self.read_metadata_for_file(path)? else {
+            return Ok(());
+        };
+        let mem_helpers = get_mem_helper();
+        let mem_helpers2 = get_mem_helper();
+        let pid = self.pid;
+        let ptrace_client = &self.ptrace_client;
+        let mut stats: Vec<T> = ptrace_client
+            .execute(move || ptrace::read_bytes_to_fixed_sized_objs(pid, addr, 1, mem_helpers))??;
+        event!(Level::DEBUG, "Intercepting {} stat entries", stats.len());
+
+        stats.iter_mut().for_each(move |x| {
+            if let Some(chmod) = &meta.chmod {
+                x.set_mode(*chmod);
+            }
+            if let Some(chown_owner) = &meta.chown_owner {
+                x.set_uid(*chown_owner);
+            }
+            if let Some(chown_group) = &meta.chown_group {
+                x.set_gid(*chown_group);
+            }
+        });
+
+        let max_size = stats.len() * std::mem::size_of::<T>();
+        ptrace_client.execute(move || {
+            ptrace::write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats, mem_helpers2)
+        })??;
         Ok(())
     }
 }
@@ -382,5 +407,79 @@ impl ptrace::CHeader for DirentHeader {
     }
 }
 
+trait IStat: Sized + std::fmt::Debug {
+    fn set_mode(&mut self, val: usize);
+    fn set_uid(&mut self, val: usize);
+    fn set_gid(&mut self, val: usize);
+}
+
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
-struct StatLegacy {}
+struct StatLegacy {
+    st_dev: u16,
+    st_ino: u16,
+    st_mode: u16,
+    st_nlink: u16,
+    st_uid: u16,
+    st_gid: u16,
+    st_rdev: u16,
+
+    /// size, atime, mtime, ctime have unknown bit widths
+    _paddings: [usize; 4],
+}
+
+impl IStat for libc::stat {
+    fn set_mode(&mut self, val: usize) {
+        self.st_mode = val as u32;
+    }
+
+    fn set_gid(&mut self, val: usize) {
+        self.st_gid = val as u32;
+    }
+
+    fn set_uid(&mut self, val: usize) {
+        self.st_uid = val as u32;
+    }
+}
+
+impl IStat for libc::stat64 {
+    fn set_mode(&mut self, val: usize) {
+        self.st_mode = val as u32;
+    }
+
+    fn set_gid(&mut self, val: usize) {
+        self.st_gid = val as u32;
+    }
+
+    fn set_uid(&mut self, val: usize) {
+        self.st_uid = val as u32;
+    }
+}
+
+impl IStat for libc::statx {
+    fn set_mode(&mut self, val: usize) {
+        self.stx_mode = val as u16;
+    }
+
+    fn set_gid(&mut self, val: usize) {
+        self.stx_gid = val as u32;
+    }
+
+    fn set_uid(&mut self, val: usize) {
+        self.stx_uid = val as u32;
+    }
+}
+
+impl IStat for StatLegacy {
+    fn set_mode(&mut self, val: usize) {
+        self.st_mode = val as u16;
+    }
+
+    fn set_gid(&mut self, val: usize) {
+        self.st_gid = val as u16;
+    }
+
+    fn set_uid(&mut self, val: usize) {
+        self.st_uid = val as u16;
+    }
+}

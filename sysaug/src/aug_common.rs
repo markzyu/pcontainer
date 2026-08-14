@@ -14,6 +14,7 @@ use crate::common::{PathAction, RootFsMetadata, SysAugError, SyscallInfo, displa
 use crate::handler_async::AsyncTraceeHandler;
 use std::collections::HashSet;
 use std::ffi::OsString;
+use std::io::Seek;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Component, Path, PathBuf};
 use tracing::{Level, event};
@@ -60,14 +61,27 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let file = std::fs::File::options()
                 .write(true)
                 .read(true)
-                .open(meta_path)
+                .create(true)
+                .open(&meta_path)
                 .map_err(|e| SysAugError::WriteMetadata(e.to_string()))?;
-            let file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+            let mut file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
                 .map_err(|_| SysAugError::LockRootFsMetadata)?;
-            let mut curr_data: RootFsMetadata =
-                serde_json::from_reader(&*file).map_err(SysAugError::ParseRootFsMetadata)?;
+
+            let exists = std::fs::exists(&meta_path).map_err(SysAugError::CheckRootFsMetadata)?;
+            let mut curr_data: RootFsMetadata = if !exists {
+                serde_json::from_reader(&*file).map_err(SysAugError::ParseRootFsMetadata)?
+            } else {
+                RootFsMetadata::default()
+            };
+
             update_fn(&mut curr_data);
-            serde_json::to_writer(&*file, &curr_data).map_err(SysAugError::WriteRootFsMetadata)?;
+
+            if exists {
+                file.seek(std::io::SeekFrom::Start(0))
+                    .map_err(SysAugError::WriteRootFsMetadata)?;
+                file.set_len(0).map_err(SysAugError::WriteRootFsMetadata)?;
+            }
+            serde_json::to_writer(&*file, &curr_data).map_err(SysAugError::WriteRootFsMetadata2)?;
         }
         Ok(())
     }

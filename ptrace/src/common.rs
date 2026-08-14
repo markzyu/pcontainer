@@ -374,6 +374,44 @@ where
     Ok(result)
 }
 
+pub fn read_bytes_to_fixed_sized_objs<T>(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    num_objs: usize,
+    mem_helpers: MemHelpers,
+) -> Result<Vec<T>, PtraceError>
+where
+    T: Sized + Clone,
+{
+    let mut result: Vec<T> = Vec::new();
+    let mut curr_addr = addr;
+    let t_size = std::mem::size_of::<T>();
+    let total_size = checked_mul(t_size, num_objs)?;
+    let final_addr = checked_add(addr, total_size)?;
+    if t_size % USIZE_SIZE != 0 {
+        return Err(PtraceError::ReadItemNotAligned(t_size));
+    }
+    if t_size > MAX_STRUCT_SIZE {
+        return Err(PtraceError::ReadItemTooBig(t_size, MAX_STRUCT_SIZE));
+    }
+
+    while curr_addr < final_addr {
+        let mut buffer = [0_u8; MAX_STRUCT_SIZE];
+        let item: &T = unsafe {
+            (buffer.as_ptr() as *const T)
+                .as_ref()
+                .ok_or(PtraceError::Pointer)?
+        };
+
+        (mem_helpers.read_bytes)(pid, curr_addr, t_size, &mut buffer)?;
+        curr_addr = checked_add(curr_addr, t_size)?;
+
+        // Save item to result
+        result.push(item.clone());
+    }
+    Ok(result)
+}
+
 /// Write multiple "repr(C)" structs back to tracee memory.
 /// Here is an explannation:
 ///
@@ -494,6 +532,49 @@ where
             curr_addr = checked_add(curr_addr, USIZE_SIZE)?;
         }
         curr_addr = curr_remainder_addr;
+    }
+    Ok(curr_addr - addr)
+}
+
+pub fn write_fixed_sized_objs_to_tracee<T>(
+    pid: nix::unistd::Pid,
+    addr: usize,
+    buffer_size: usize,
+    items: Vec<T>,
+    mem_helpers: MemHelpers,
+) -> Result<usize, PtraceError>
+where
+    T: Sized,
+{
+    event!(
+        Level::TRACE,
+        "Writing ~{} bytes to tracee buffer, {:#x}",
+        buffer_size,
+        addr
+    );
+    let mut curr_addr = addr;
+    let max_addr = checked_add(addr, buffer_size)?;
+    let t_size = std::mem::size_of::<T>();
+    if t_size % USIZE_SIZE != 0 {
+        return Err(PtraceError::ReadItemNotAligned(t_size));
+    }
+    if t_size > MAX_STRUCT_SIZE {
+        return Err(PtraceError::ReadItemTooBig(t_size, MAX_STRUCT_SIZE));
+    }
+
+    for item in items.iter() {
+        let buffer: &[u8] = unsafe {
+            let ptr = item as *const T as *const u8;
+            std::slice::from_raw_parts(ptr, t_size)
+        };
+        if curr_addr + t_size > max_addr {
+            return Err(PtraceError::BufferOverflow(t_size, curr_addr, max_addr));
+        }
+
+        unsafe {
+            (mem_helpers.write_bytes_to_tracee)(pid, curr_addr, buffer)?;
+        }
+        curr_addr = checked_add(curr_addr, t_size)?;
     }
     Ok(curr_addr - addr)
 }

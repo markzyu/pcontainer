@@ -140,7 +140,10 @@ pub enum SysAugError {
     ParseRootFsMetadata(serde_json::Error),
 
     #[error("Failed to write rootfs metadata json: {0}")]
-    WriteRootFsMetadata(serde_json::Error),
+    WriteRootFsMetadata(std::io::Error),
+
+    #[error("Failed to write rootfs metadata json: {0}")]
+    WriteRootFsMetadata2(serde_json::Error),
 
     #[error("Failed to create lock for rootfs metadata")]
     LockRootFsMetadata,
