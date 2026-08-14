@@ -10,15 +10,13 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use crate::common::{PathAction, SysAugError, SyscallInfo, display_err};
+use crate::common::{PathAction, RootFsMetadata, SysAugError, SyscallInfo, display_err};
 use crate::handler_async::AsyncTraceeHandler;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Component, Path, PathBuf};
 use tracing::{Level, event};
-
-const META_INIT: &str = "{}\n";
 
 // Common helper functions used by aug_*.rs
 // Calculate real path of file based on its path in rootfs
@@ -41,7 +39,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(maybe_meta_path)
     }
 
-    pub fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+    pub fn save_metadata_for_file(
+        &self,
+        path: &Path,
+        update_fn: impl FnOnce(&mut RootFsMetadata) -> (),
+    ) -> Result<(), SysAugError> {
         if self.consts.args.rootfs.is_none() {
             return Ok(());
         }
@@ -55,16 +57,44 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let _ = std::fs::create_dir_all(metadir)
                 .map_err(SysAugError::MetadataDir)
                 .map_err(display_err);
-            return match std::fs::write(meta_path, META_INIT) {
-                Ok(_) => Ok(()),
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::PermissionDenied => Ok(()),
-                    std::io::ErrorKind::NotFound => Ok(()),
-                    _ => Err(SysAugError::WriteMetadata(e.to_string())),
-                },
-            };
+            let file = std::fs::File::options()
+                .write(true)
+                .read(true)
+                .open(meta_path)
+                .map_err(|e| SysAugError::WriteMetadata(e.to_string()))?;
+            let file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
+                .map_err(|_| SysAugError::LockRootFsMetadata)?;
+            let mut curr_data: RootFsMetadata =
+                serde_json::from_reader(&*file).map_err(SysAugError::ParseRootFsMetadata)?;
+            update_fn(&mut curr_data);
+            serde_json::to_writer(&*file, &curr_data).map_err(SysAugError::WriteRootFsMetadata)?;
         }
         Ok(())
+    }
+
+    pub fn read_metadata_for_file(
+        &self,
+        path: &Path,
+    ) -> Result<Option<RootFsMetadata>, SysAugError> {
+        if self.consts.args.rootfs.is_none() {
+            return Ok(None);
+        }
+        if let Some(meta_path) = self._get_metadata_path(path)? {
+            event!(
+                Level::DEBUG,
+                "Reading metadata file: {:?}",
+                meta_path.to_string_lossy()
+            );
+            if !std::fs::exists(&meta_path).map_err(SysAugError::CheckRootFsMetadata)? {
+                return Ok(None);
+            }
+            let file = std::fs::File::options()
+                .read(true)
+                .open(meta_path)
+                .map_err(|e| SysAugError::WriteMetadata(e.to_string()))?;
+            return Ok(serde_json::from_reader(file).map_err(SysAugError::ParseRootFsMetadata)?);
+        }
+        Ok(None)
     }
 
     pub fn delete_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {

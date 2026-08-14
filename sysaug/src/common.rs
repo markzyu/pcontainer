@@ -11,6 +11,7 @@
 // GNU General Public License for more details.
 
 use executor::{PtraceFutureTypes, PtraceStatus};
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -134,6 +135,21 @@ pub enum SysAugError {
 
     #[error("Failed to initialize seccomp")]
     SeccompInit,
+
+    #[error("Failed to read rootfs metadata json: {0}")]
+    ParseRootFsMetadata(serde_json::Error),
+
+    #[error("Failed to write rootfs metadata json: {0}")]
+    WriteRootFsMetadata(serde_json::Error),
+
+    #[error("Failed to create lock for rootfs metadata")]
+    LockRootFsMetadata,
+
+    #[error("Failed to check whether rootfs metadata exists: {0}")]
+    CheckRootFsMetadata(std::io::Error),
+
+    #[error("Internal error: bad syscall config: {0}")]
+    SyscallMissingField(&'static str),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -186,10 +202,12 @@ pub enum PathAction {
     Override(PathBuf),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RootFsMetadata {
     pub chmod: Option<usize>,
-    pub chown: Option<usize>,
+    pub chown_owner: Option<usize>,
+    pub chown_group: Option<usize>,
 }
 
 // ------------------- SYSCALLS -------------------
@@ -221,12 +239,20 @@ pub struct SyscallInfo {
     /// The syscall argument that stores flags like AT_SYMLINK_NOFOLLOW
     pub flags: Option<usize>,
 
-    /// Bitwise representation. Bit0: arg0 is path. Bit1 = arg1 ...
+    // Naming conventions:
+    // "positions" = Bitwise representation. Bit0: arg0 is path. Bit1 = arg1 ...
+    // "position" = None, or, Some(register) (0 = arg0, 1 = arg1, 2 = arg2 ...)
     pub path_positions: usize,
     pub dirfd_position: Option<u8>,
+    pub filefd_position: Option<u8>,
     pub dirfd_precedes_path: bool,
     pub getdents_bits: Option<u8>,
+    pub stat_buf_position: Option<u8>,
+    pub stat_legacy_buf_position: Option<u8>,
+    pub stat64_buf_position: Option<u8>,
+    pub statx_buf_position: Option<u8>,
     pub sets_file_perms: Option<PermType>,
+    pub file_perms_position: Option<u8>,
     pub deletion_type: Option<DelType>,
     pub dont_follow_symlink: bool,
     pub flag_dont_follow_symlink: Option<usize>,
@@ -251,9 +277,15 @@ pub const fn default_syscall_info() -> SyscallInfo {
         flags: None,
         path_positions: 0,
         dirfd_position: None,
+        filefd_position: None,
         dirfd_precedes_path: false,
         getdents_bits: None,
+        stat_buf_position: None,
+        stat_legacy_buf_position: None,
+        stat64_buf_position: None,
+        statx_buf_position: None,
         sets_file_perms: None,
+        file_perms_position: None,
         deletion_type: None,
         dont_follow_symlink: false,
         flag_dont_follow_symlink: None,

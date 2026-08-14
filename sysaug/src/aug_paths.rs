@@ -10,6 +10,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
+use crate::PermType;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers};
@@ -57,7 +58,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
 
             let dirfd_path = self
-                .get_dirfd_path(&copy_regs, syscall, i)?
+                .get_fd_path(&copy_regs, syscall, i)?
                 .unwrap_or("".into());
 
             // Read orig_path from registers
@@ -83,6 +84,16 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     save_paths[i] = Some(dirfd_path.join(orig_path_buf));
                 }
             }
+        }
+
+        // Handle filefd_position (This overwrites all other save_paths)
+        if let Some(position) = syscall.filefd_position {
+            save_paths[0] = Some(
+                self.get_fd_path(&copy_regs, syscall, position as usize)?
+                    .unwrap_or("".into()),
+            );
+
+            // There is no need to calc_real_path, because pcontainer cannot override real fds
         }
 
         // Handle getdents (make the buffer seem smaller)
@@ -114,15 +125,60 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
 
-        let regs = self.do_resume_syscall().await?;
-
-        let paths = save_paths;
-        let del_type = &syscall.deletion_type;
+        let mut regs = self.do_resume_syscall().await?;
         let retval = regs.syscall_retval() as isize;
-        if del_type.is_none() || retval < 0 {
-            for path in paths.iter().flatten() {
-                self.save_metadata_for_file(path)?;
+
+        if let Some(PermType::Chmod) = &syscall.sets_file_perms {
+            let position = &syscall
+                .file_perms_position
+                .ok_or(SysAugError::SyscallMissingField(
+                    "Chmod syscall doesn't have sets_file_perms",
+                ))?;
+            let new_mod = read_args[*position as usize];
+            for path in save_paths.iter().flatten() {
+                self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod))?;
             }
+        }
+        if let Some(PermType::Chown) = &syscall.sets_file_perms {
+            let position = &syscall
+                .file_perms_position
+                .ok_or(SysAugError::SyscallMissingField(
+                    "Chown syscall doesn't have sets_file_perms",
+                ))?;
+            let new_owner = read_args[*position as usize];
+            let new_group = read_args[(*position + 1) as usize];
+            for path in save_paths.iter().flatten() {
+                self.save_metadata_for_file(path, |x| {
+                    x.chown_owner = Some(new_owner);
+                    x.chown_group = Some(new_group);
+                })?;
+            }
+        }
+
+        let maybe_stat_path =
+            save_paths
+                .iter()
+                .find_map(|x| x.as_ref())
+                .ok_or(SysAugError::SyscallMissingField(
+                    "stat syscalls don't have a corresponding path/fd to read from",
+                ));
+
+        if let Some(position) = &syscall.stat_buf_position {
+            let path = maybe_stat_path?.as_path();
+            self.replace_statbuf_result::<libc::stat>(syscall, &mut regs, path)
+                .await?;
+        } else if let Some(position) = &syscall.stat_legacy_buf_position {
+            let path = maybe_stat_path?.as_path();
+            self.replace_statbuf_result::<StatLegacy>(syscall, &mut regs, path)
+                .await?;
+        } else if let Some(position) = &syscall.stat64_buf_position {
+            let path = maybe_stat_path?.as_path();
+            self.replace_statbuf_result::<libc::stat64>(syscall, &mut regs, path)
+                .await?;
+        } else if let Some(position) = &syscall.statx_buf_position {
+            let path = maybe_stat_path?.as_path();
+            self.replace_statbuf_result::<libc::statx>(syscall, &mut regs, path)
+                .await?;
         }
 
         if retval <= 0 {
@@ -142,7 +198,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(())
     }
 
-    fn get_dirfd_path(
+    fn get_fd_path(
         &self,
         regs: &GenericPurposeRegs,
         syscall: &SyscallInfo,
@@ -234,6 +290,19 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         Ok(())
     }
+
+    async fn replace_statbuf_result<T>(
+        &self,
+        syscall: &SyscallInfo,
+        regs: &mut GenericPurposeRegs,
+        path: &Path,
+    ) -> Result<(), SysAugError>
+    where
+        T: Clone + Send + 'static,
+    {
+        let meta = self.read_metadata_for_file(path)?;
+        Ok(())
+    }
 }
 
 trait IDirent: ptrace::CStruct + std::fmt::Debug {
@@ -310,3 +379,6 @@ impl ptrace::CHeader for DirentHeader {
         self.reclen = size as u16;
     }
 }
+
+#[derive(Clone, Debug)]
+struct StatLegacy {}

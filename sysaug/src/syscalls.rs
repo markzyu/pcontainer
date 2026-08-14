@@ -60,7 +60,7 @@ macro_rules! define_seccomp_syscall {
 }
 
 macro_rules! define_setperms_syscall {
-    ($name:expr, $perm_type:expr, $iter:ident, $next:ident) => {
+    ($name:expr, $perm_type:expr, $perms_pos:expr, $iter:ident, $next:ident) => {
         $next += 1;
         if $next >= MAX_RAW_SYSCALL_INFOS {
             panic!("No more space for syscalls");
@@ -72,6 +72,7 @@ macro_rules! define_setperms_syscall {
             name: stringify!($name),
             num: $name,
             sets_file_perms: Some($perm_type),
+            file_perms_position: Some($perms_pos),
             ..default_syscall_info()
         });
     };
@@ -140,7 +141,7 @@ macro_rules! define_paths_deletion_syscall {
 }
 
 macro_rules! define_paths_setperms_syscall {
-    ($name:expr, $path_positions:expr, $perm_type:expr, $iter:ident, $next:ident) => {
+    ($name:expr, $path_positions:expr, $perm_type:expr, $perms_pos:expr, $iter:ident, $next:ident) => {
         $next += 1;
         if $next >= MAX_RAW_SYSCALL_INFOS {
             panic!("No more space for syscalls");
@@ -155,6 +156,7 @@ macro_rules! define_paths_setperms_syscall {
             path_positions: $path_positions,
             getdents_bits: None,
             sets_file_perms: Some($perm_type),
+            file_perms_position: Some($perms_pos),
             ..default_syscall_info()
         });
     };
@@ -176,6 +178,27 @@ macro_rules! define_dirfd_syscall {
             num: $name,
             path_positions: $path_positions,
             dirfd_position: Some($dirfd_position),
+            getdents_bits: None,
+            ..default_syscall_info()
+        });
+    };
+}
+
+// In this version, there is no file path or parent dirfd. The fd specifies the file itself
+macro_rules! define_filefd_syscall {
+    ($name:expr, $filefd_position:expr, $iter:ident, $next:ident) => {
+        $next += 1;
+        if $next >= MAX_RAW_SYSCALL_INFOS {
+            panic!("No more space for syscalls");
+        }
+        if ($name as usize) == NO_MOD_SYSCALL {
+            panic!("Syscall list should not include NO_MOD_SYSCALL");
+        }
+        $iter[$next] = Some(SyscallInfo {
+            augment: Augments::Paths,
+            name: stringify!($name),
+            num: $name,
+            filefd_position: Some($filefd_position),
             getdents_bits: None,
             ..default_syscall_info()
         });
@@ -228,7 +251,7 @@ macro_rules! define_dirfd_deletion_syscall {
 }
 
 macro_rules! define_dirfd_setperms_syscall {
-    ($name:expr, $path_positions:expr, $dirfd_position:expr, $perm_type:expr, $iter:ident, $next:ident) => {
+    ($name:expr, $path_positions:expr, $dirfd_position:expr, $perm_type:expr, $perms_pos:expr, $iter:ident, $next:ident) => {
         $next += 1;
         if $next >= MAX_RAW_SYSCALL_INFOS {
             panic!("No more space for syscalls");
@@ -244,6 +267,7 @@ macro_rules! define_dirfd_setperms_syscall {
             dirfd_position: Some($dirfd_position),
             getdents_bits: None,
             sets_file_perms: Some($perm_type),
+            file_perms_position: Some($perms_pos),
             ..default_syscall_info()
         });
     };
@@ -328,8 +352,8 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     define_dirfd_syscall!(libc::SYS_openat, 2, 0, iter, next);
     define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, iter, next);
     define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, iter, next);
-    define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, PermType::Chmod, iter, next);
-    define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, iter, next);
+    define_dirfd_setperms_syscall!(libc::SYS_fchmodat, 2, 0, PermType::Chmod, 2, iter, next);
+    define_dirfd_setperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, 2, iter, next);
     define_dirfd2_syscall!(libc::SYS_linkat, 10, iter, next);
     define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, iter, next);
 
@@ -368,6 +392,11 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         val.dont_follow_symlink = true;
     }
 
+    define_filefd_syscall!(libc::SYS_fstat, 0, iter, next);
+    if let Some(val) = iter[next].as_mut() {
+        val.stat_legacy_buf_position = Some(1);
+    }
+
     #[cfg(not(all(target_os = "android", target_arch = "aarch64")))]
     {
         define_paths_syscall!(libc::SYS_truncate, 1, iter, next);
@@ -379,6 +408,7 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         if let Some(val) = iter[next].as_mut() {
             val.flags = Some(2);
             val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            val.statx_buf_position = Some(4);
         }
     }
 
@@ -390,13 +420,29 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
 
     define_getdents_syscall!(libc::SYS_getdents64, 64, iter, next);
 
-    define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, iter, next);
-    define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, iter, next);
+    define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, 1, iter, next);
+    define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, 1, iter, next);
 
     #[cfg(target_arch = "arm")]
     {
         define_paths_syscall!(libc::SYS_chown32, 1, iter, next);
         define_paths_syscall!(libc::SYS_stat64, 1, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.stat64_buf_position = Some(1);
+        }
+
+        define_filefd_syscall!(libc::SYS_fstat64, 0, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.stat64_buf_position = Some(1);
+        }
+
+        define_dirfd_syscall!(libc::SYS_fstatat64, 2, 0, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.flags = Some(3);
+            val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            val.stat64_buf_position = Some(2);
+        }
+
         define_paths_syscall!(libc::SYS_statfs64, 1, iter, next);
         define_paths_syscall!(libc::SYS_truncate64, 1, iter, next);
 
@@ -408,6 +454,7 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         define_paths_syscall!(libc::SYS_lstat64, 1, iter, next);
         if let Some(val) = iter[next].as_mut() {
             val.dont_follow_symlink = true;
+            val.stat64_buf_position = Some(1);
         }
     }
 
@@ -435,17 +482,17 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         if let Some(val) = iter[next].as_mut() {
             val.flags = Some(3);
             val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
+            val.stat_buf_position = Some(2);
         }
     }
 
     #[cfg(any(target_arch = "x86_64", target_arch = "arm"))]
     {
         define_paths_syscall!(libc::SYS_access, 1, iter, next);
-        define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, iter, next);
-        define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, iter, next);
+        define_paths_setperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, 1, iter, next);
+        define_paths_setperms_syscall!(libc::SYS_chown, 1, PermType::Chown, 1, iter, next);
         define_paths_syscall!(libc::SYS_mknod, 1, iter, next);
         define_paths_syscall!(libc::SYS_creat, 1, iter, next);
-        define_paths_syscall!(libc::SYS_stat, 1, iter, next);
         define_paths_syscall!(libc::SYS_uselib, 1, iter, next);
         define_paths_syscall!(libc::SYS_utimes, 1, iter, next);
         define_dirfd_syscall!(libc::SYS_futimesat, 2, 0, iter, next);
@@ -457,14 +504,21 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
             val.dont_follow_symlink = true;
         }
 
-        define_paths_setperms_syscall!(libc::SYS_lchown, 1, PermType::Chown, iter, next);
+        define_paths_setperms_syscall!(libc::SYS_lchown, 1, PermType::Chown, 1, iter, next);
         if let Some(val) = iter[next].as_mut() {
             val.dont_follow_symlink = true;
+        }
+
+        define_paths_syscall!(libc::SYS_stat, 1, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.dont_follow_symlink = true;
+            val.stat_legacy_buf_position = Some(1);
         }
 
         define_paths_syscall!(libc::SYS_lstat, 1, iter, next);
         if let Some(val) = iter[next].as_mut() {
             val.dont_follow_symlink = true;
+            val.stat_legacy_buf_position = Some(1);
         }
 
         define_paths_syscall!(libc::SYS_symlink, 2, iter, next);
