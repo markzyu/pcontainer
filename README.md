@@ -78,9 +78,11 @@ Here are some (outdated) instructions about Android cross-compilation without Te
 
 ## AI Usage
 
-I used AI to help review my code, especially during major updates like a Rust edition update.
+I use the same IDE across many projects. For a few days, I forgot to disable AI in this repository, so I have occasionally used AI to help review my code, especially during major updates like a Rust edition update.
 
-I don't use AI to directly generate large chunks of code.
+I don't use AI to directly generate large chunks of code in this repository. I have occasionally used it to speed up import edits especially on Windows, where Rust Analyzer gives up because Windows can't natively compile `nix` crate.
+
+Since commit `c52081394cb4949304004b2167e65a6960051cc2`, I've disabled AI code completion for Rust and text files, because the suggestions are getting too noisy.
 
 ## License
 

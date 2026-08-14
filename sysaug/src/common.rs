@@ -186,6 +186,12 @@ pub enum PathAction {
     Override(PathBuf),
 }
 
+#[derive(Debug)]
+pub struct RootFsMetadata {
+    pub chmod: Option<usize>,
+    pub chown: Option<usize>,
+}
+
 // ------------------- SYSCALLS -------------------
 
 #[derive(Clone, Debug, PartialEq)]

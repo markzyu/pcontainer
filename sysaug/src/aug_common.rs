@@ -10,17 +10,142 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use crate::common::{PathAction, SysAugError, SyscallInfo};
+use crate::common::{PathAction, SysAugError, SyscallInfo, display_err};
 use crate::handler_async::AsyncTraceeHandler;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tracing::{Level, event};
+
+const META_INIT: &str = "{}\n";
 
 // Common helper functions used by aug_*.rs
 // Calculate real path of file based on its path in rootfs
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+    // -----------------------------------------------------------------------------
+    // ------------------------ RootFS Metadata (Perms, etc) -----------------------
+    // -----------------------------------------------------------------------------
+
+    fn _get_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
+        if self.consts.args.rootfs.is_none() {
+            return Ok(None);
+        }
+        let maybe_meta_path = self.__resolve_metadata_path(path)?;
+        event!(
+            Level::TRACE,
+            "Checking metadata for: {:?} = {:?}",
+            path.to_string_lossy(),
+            maybe_meta_path,
+        );
+        Ok(maybe_meta_path)
+    }
+
+    pub fn save_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+        if self.consts.args.rootfs.is_none() {
+            return Ok(());
+        }
+        if let Some(meta_path) = self._get_metadata_path(path)? {
+            event!(
+                Level::DEBUG,
+                "Writing metadata file: {:?}",
+                meta_path.to_string_lossy()
+            );
+            let metadir = meta_path.parent().unwrap();
+            let _ = std::fs::create_dir_all(metadir)
+                .map_err(SysAugError::MetadataDir)
+                .map_err(display_err);
+            return match std::fs::write(meta_path, META_INIT) {
+                Ok(_) => Ok(()),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => Ok(()),
+                    std::io::ErrorKind::NotFound => Ok(()),
+                    _ => Err(SysAugError::WriteMetadata(e.to_string())),
+                },
+            };
+        }
+        Ok(())
+    }
+
+    pub fn delete_metadata_for_file(&self, path: &Path) -> Result<(), SysAugError> {
+        if self.consts.args.rootfs.is_none() {
+            return Ok(());
+        }
+        if let Some(meta_path) = self._get_metadata_path(path)? {
+            event!(
+                Level::TRACE,
+                "Deleting metadata file: {:?}",
+                meta_path.to_string_lossy()
+            );
+            if !meta_path.exists() {
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(meta_path)
+                .map_err(SysAugError::DeleteMetadata)
+                .map_err(display_err);
+        }
+
+        if path.is_dir() {
+            if let Some(mut meta_path) = self._get_metadata_path(path)? {
+                meta_path.pop();
+                let _ = std::fs::remove_dir_all(meta_path);
+            }
+        }
+        Ok(())
+    }
+
+    fn __resolve_metadata_path(&self, path: &Path) -> Result<Option<PathBuf>, SysAugError> {
+        let args = &self.consts.args;
+        let Some(rootfs) = args.rootfs.as_ref() else {
+            return Ok(None);
+        };
+        if rootfs == Path::new("/") {
+            // If setting real root as chroot/rootfs, don't create metadata
+            return Ok(None);
+        }
+        if !path.exists() {
+            return Ok(None);
+        }
+        let canonical_path = path.canonicalize();
+        if canonical_path.is_err() {
+            return Ok(None);
+        }
+        let canonical_path_unwrap = canonical_path.unwrap();
+
+        let mut metaname = rootfs.file_name().unwrap().to_os_string();
+        metaname.push(".metadata");
+        let mut metadir = rootfs.with_file_name(metaname);
+        metadir.push("rootfs");
+
+        let relative_path = canonical_path_unwrap.strip_prefix(rootfs);
+        if relative_path.is_err() {
+            return Ok(None);
+        }
+        let relative_path_unwrap = relative_path.unwrap();
+
+        metadir.push("chld");
+        for component in relative_path_unwrap.components() {
+            if component == Component::CurDir {
+                continue;
+            }
+            if component == Component::RootDir {
+                continue;
+            }
+            if let Component::Normal(part) = component {
+                metadir.push(part);
+                metadir.push("chld");
+            } else {
+                return Ok(None);
+            }
+        }
+        metadir.pop();
+        Ok(Some(metadir.join("meta")))
+    }
+
+    // -----------------------------------------------------------------------------
+    // ------------------------ Path Modifications (Chroot) ------------------------
+    // -----------------------------------------------------------------------------
+
     pub async fn calc_real_path_simple(
         &self,
         orig_path: &Path,

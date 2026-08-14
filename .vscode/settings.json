@@ -1,0 +1,7 @@
+{
+  "cursor.cpp.disabledLanguages": [
+    "markdown",
+    "plaintext",
+    "rust"
+  ]
+}
