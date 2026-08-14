@@ -392,7 +392,12 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         val.dont_follow_symlink = true;
     }
 
+    #[cfg(not(target_arch = "aarch64"))]
     define_filefd_syscall!(libc::SYS_fstat, 0, iter, next);
+    #[cfg(target_arch = "aarch64")]
+    let SYS_fstat: i64 = 80;
+    #[cfg(target_arch = "aarch64")]
+    define_filefd_syscall!(SYS_fstat, 0, iter, next);
     if let Some(val) = iter[next].as_mut() {
         val.stat_legacy_buf_position = Some(1);
     }
