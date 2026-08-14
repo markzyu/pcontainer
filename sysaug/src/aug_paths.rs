@@ -176,7 +176,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     "stat syscalls don't have a corresponding path/fd to read from",
                 ));
 
-        if retval <= 0 {
+        if retval < 0 {
             return Ok(());
         }
 
@@ -201,6 +201,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             self.replace_statbuf_result::<libc::statx>(addr, path)
                 .await?;
         }
+
+        if retval == 0 {
+            return Ok(());
+        }
+
         match syscall.getdents_bits {
             Some(32) => {
                 self.replace_getdents_result::<Dirent>(syscall, regs)
