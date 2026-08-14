@@ -124,6 +124,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Upon deletion of /a, we RENAME "a" to "b" based on the path list. If no path is left, we delete it.
 
         if need_write_regs {
+            // Update registers, before real syscall
             ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
 
@@ -141,6 +142,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             for path in save_paths.iter().flatten() {
                 self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod))?;
             }
+
+            let mut regs = regs.clone();
+            regs.set_syscall_retval(0);
+            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
         if let Some(PermType::Chown) = &syscall.sets_file_perms {
             let position = &syscall
@@ -157,6 +162,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     x.chown_group = Some(new_group);
                 })?;
             }
+
+            let mut regs = regs.clone();
+            regs.set_syscall_retval(0);
+            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
 
         let maybe_stat_path =
@@ -166,6 +175,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 .ok_or(SysAugError::SyscallMissingField(
                     "stat syscalls don't have a corresponding path/fd to read from",
                 ));
+
+        if retval <= 0 {
+            return Ok(());
+        }
 
         if let Some(position) = &syscall.stat_buf_position {
             let path = maybe_stat_path?.as_path();
@@ -187,10 +200,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let addr = read_args[*position as usize];
             self.replace_statbuf_result::<libc::statx>(addr, path)
                 .await?;
-        }
-
-        if retval <= 0 {
-            return Ok(());
         }
         match syscall.getdents_bits {
             Some(32) => {
