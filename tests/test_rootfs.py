@@ -58,10 +58,26 @@ class TestRootFs(t.TestCase):
         )
         self.assertEqual(ans.returncode, 0)
 
-    def compare_tar_with_dir(self, dir, tar, ignore_perms=False):
+    def _create_tar_from_container(self, dir, tar_name, **kwargs):
+        ans = c.run_script(
+            f"""
+            echo "[PCONTAINER] [CREATING TAR]" >&2
+            cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
+            if [ $? -ne 0 ]; then
+                echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
+                exit $?
+            fi
+            echo "[PCONTAINER] [CREATED TAR]" >&2
+            """.encode(),
+            rootfs=True,
+            **kwargs,
+        )
+        self.assertEqual(ans.returncode, 0)
+
+    def _create_tar_from_host_os(self, dir, tar_name):
         cmd = f"""
         echo "[ASSERT] [TARRING DIR FOR COMPARISON] {dir}" >&2
-        cd {dir} && rm -f ../result.tar && tar cf ../result.tar .
+        cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
         if [ $? -ne 0 ]; then
             echo "[ASSERT] [ERROR TARRING DIR FOR COMPARISON]" >&2
             exit $?
@@ -70,6 +86,12 @@ class TestRootFs(t.TestCase):
         """
         ok = os.system(cmd)
         self.assertEqual(ok, 0)
+
+    def compare_tar_with_dir(self, dir, tar, ignore_perms=False):
+        if ignore_perms:
+            self._create_tar_from_host_os(dir, "result.tar")
+        else:
+            self._create_tar_from_container(dir, "result.tar")
 
         tar_info_fn = _tar_info_minimal_no_perms if ignore_perms else _tar_info_minimal
 
