@@ -28,4 +28,4 @@ pub use crate::common::{
     rwlock_replace, rwlock_write, rwoption_replace, rwoption_setdefault, rwoption_take,
 };
 pub use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};
-pub use crate::syscalls::{SYSCALL_INFOS, RAW_SYSCALL_INFOS};
+pub use crate::syscalls::{RAW_SYSCALL_INFOS, SYSCALL_INFOS};

@@ -37,7 +37,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     ) -> Result<(), SysAugError> {
         let pid = self.pid;
         if !self.expand_exec_with_parser(&mut regs, syscall).await? {
-            // Note: expand_exec_with_parser might also skip syscalls... Maybe don't do it twice
             self.do_skip_syscall(-libc::ENOENT as usize).await?;
             return Ok(());
         }

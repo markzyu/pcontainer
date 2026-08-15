@@ -339,7 +339,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             if let Some(chmod) = &meta.chmod {
                 let old_mode = x.get_mode();
                 let new_mode = (old_mode & !FILE_PERMS_MASK) | (*chmod & FILE_PERMS_MASK);
-                event!(Level::INFO, "Faking new file modes: {:x} -> {:x}", old_mode, new_mode);
+                event!(
+                    Level::INFO,
+                    "Faking new file modes: {:x} -> {:x}",
+                    old_mode,
+                    new_mode
+                );
                 x.set_mode(new_mode);
             }
             if let Some(chown_owner) = &meta.chown_owner {

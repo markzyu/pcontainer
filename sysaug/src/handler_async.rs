@@ -426,10 +426,24 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     /// Skip the system call (clobbering current tracee register states, setting sysret=0)
     pub async fn do_skip_syscall(&self, syscall_retval: usize) -> Result<(), SysAugError> {
         let pid = self.pid;
-        event!(Level::DEBUG, "Attempting to skip syscall");
+        event!(Level::INFO, "Attempting to skip syscall");
         self.ptrace_client
             .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
-        let mut regs = self.do_resume_syscall().await?;
+
+        // Wait for syscall-exit-stop (We can't use do_resume_syscall here: it'll be Seccomp, not PTRACE_SYSCALL)
+        self.notifiers.resume_through_syscall.replace(true);
+        let status = self
+            .async_runtime
+            .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+            .await;
+        if !ptrace::is_syscall_stop(&status.wait_status) {
+            return Err(SysAugError::AsyncMisMatchSyscall(
+                "non-syscall stop while skipping syscall",
+                (*status).clone(),
+            ));
+        }
+
+        let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
 
         event!(
             Level::DEBUG,
@@ -524,7 +538,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         }
     }
 
-    async fn _insert_syscall(
+    /// This function can only be called during Tracee Initialization
+    async unsafe fn _insert_syscall_during_init(
         &self,
         syscall_name: &'static str,
         syscall_num: usize,
@@ -537,9 +552,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Wait for the next system call entry, could be anything, including NO_MOD_SYSCALL
         // (This won't cause a race on tracer side because:)
         //    1. Tracee has not yet run the inserted syscall
-        //    2. Tracer loop_handle_tracee_syscalls() will not see any syscall until _insert_syscall() yields.
-        //    3. The syscall we get from wait_for_syscall() will not complete until _insert_syscall() yields.
-        //    4. When _insert_syscall() yields, both tracer and tracee will see the same syscall instead of the inserted one.
+        //    2. Tracer loop_handle_tracee_syscalls() will not see any syscall until _insert_syscall_during_init() yields.
+        //    3. The syscall we get from wait_for_syscall() will not complete until _insert_syscall_during_init() yields.
+        //    4. When _insert_syscall_during_init() yields, both tracer and tracee will see the same syscall instead of the inserted one.
         self.yielder_syscall.unblock();
         self.wait_for_syscall().await?;
 
@@ -585,7 +600,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         // Reset tracee to register state before system call
         // and decrement PC pointer to immediately rerun system call
-        // (Note: This doesn't actually resume the syscall, so it's ok to call _insert_syscall() again)
+        // (Note: This doesn't actually resume the syscall, so it's ok to call _insert_syscall_during_init() again)
         let mut new_regs = orig_regs;
         new_regs.syscall_num = orig_syscall_num;
         new_regs.pc -= SYSCALL_INSTRUCTION_SIZE;
@@ -606,8 +621,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     async fn initialize_tracee_mmaps(&self) -> Result<(), SysAugError> {
         let pid = self.pid;
         let region_id = get_own_region_id(&pid)?;
-        let mmap_regs = self
-            ._insert_syscall(
+        let mmap_regs = unsafe {
+            self._insert_syscall_during_init(
                 "SYS_mmap",
                 SYS_MMAP,
                 [
@@ -619,7 +634,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     region_id * STACK_SAFE_ZONE_SIZE / SYS_MMAP_PGOFFSET_BLOCK,
                 ],
             )
-            .await?;
+            .await?
+        };
 
         let mut tracee_addr = self.mmap_tracee_addr.borrow_mut();
         *tracee_addr = mmap_regs.syscall_retval();
@@ -638,13 +654,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     async fn initialize_tracee_seccomp(&self) -> Result<(), SysAugError> {
-        let prctl_regs = self
-            ._insert_syscall(
+        let prctl_regs = unsafe {
+            self._insert_syscall_during_init(
                 "SYS_prctl",
                 libc::SYS_prctl as usize,
                 [PR_SET_NO_NEW_PRIVS as usize, 1, 0, 0, 0, 0],
             )
-            .await?;
+            .await?
+        };
         if prctl_regs.syscall_retval() != 0 {
             return Err(SysAugError::SeccompInit);
         }
@@ -658,8 +675,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         };
         let program_addr = self.tracee_stack_append_fixed_size_obj(program)?;
 
-        let seccomp_regs = self
-            ._insert_syscall(
+        let seccomp_regs = unsafe {
+            self._insert_syscall_during_init(
                 "SYS_seccomp",
                 libc::SYS_seccomp as usize,
                 [
@@ -671,7 +688,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     0,
                 ],
             )
-            .await?;
+            .await?
+        };
         if seccomp_regs.syscall_retval() != 0 {
             event!(
                 Level::ERROR,
