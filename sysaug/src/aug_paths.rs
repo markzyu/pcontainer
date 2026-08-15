@@ -94,7 +94,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Handle filefd_position (This overwrites all other save_paths)
         if let Some(position) = syscall.filefd_position {
             save_paths[0] = Some(
-                procfs::getfd_path(pid, read_args[position as usize] as isize)?.unwrap_or("".into())
+                procfs::getfd_path(pid, read_args[position as usize] as isize)?
+                    .unwrap_or("".into()),
             );
 
             // There is no need to calc_real_path, because pcontainer cannot override real fds
