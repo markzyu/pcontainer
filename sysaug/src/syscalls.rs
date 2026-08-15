@@ -424,7 +424,14 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     define_getdents_syscall!(libc::SYS_getdents64, 64, iter, next);
 
     define_setperms_syscall!(libc::SYS_fchmod, PermType::Chmod, 1, iter, next);
+    if let Some(val) = iter[next].as_mut() {
+        val.filefd_position = Some(0);
+    }
+
     define_setperms_syscall!(libc::SYS_fchown, PermType::Chown, 1, iter, next);
+    if let Some(val) = iter[next].as_mut() {
+        val.filefd_position = Some(0);
+    }
 
     #[cfg(target_arch = "arm")]
     {

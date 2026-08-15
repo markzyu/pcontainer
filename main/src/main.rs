@@ -15,7 +15,7 @@ use executor::PtraceServer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{PermsMode, SysAugArgs, display_err};
+use sysaug::{PermsMode, RAW_SYSCALL_INFOS, SysAugArgs, display_err};
 use thiserror::Error;
 use tracing::{Level, event};
 
@@ -55,6 +55,10 @@ pub struct CLIArgs {
     /// Make your applications think they can sudo when they cannot. Not compatible with --root
     #[arg(long)]
     pub sudo: bool,
+
+    /// Do not start a pcontainer. Instead, print the list of known syscalls
+    #[arg(long)]
+    pub show_syscalls: bool,
 
     /// Override the command to execute
     #[arg(long, default_value = "bash")]
@@ -127,6 +131,15 @@ fn actual_main() -> Result<(), CLIError> {
     // Initialize, parse args
     let _guard = init_logging();
     let args = CLIArgs::parse();
+
+    if args.show_syscalls {
+        for maybe_syscall in RAW_SYSCALL_INFOS.iter() {
+            if let Some(syscall) = maybe_syscall {
+                println!("{}: {:?}", syscall.name, syscall);
+            }
+        }
+        return Ok(());
+    }
 
     if args.root && args.sudo {
         event!(Level::ERROR, "You cannot use both --root and --sudo");
