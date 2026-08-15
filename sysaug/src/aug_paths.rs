@@ -130,7 +130,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
 
-        let regs = self.do_resume_syscall().await?;
+        let regs = if syscall.sets_file_perms.is_some() {
+            self.do_skip_syscall(0).await?;
+            self.ptrace_client.execute(move || ptrace::getregs(pid))??
+        } else {
+            self.do_resume_syscall().await?
+        };
         let retval = regs.syscall_retval() as isize;
 
         if let Some(PermType::Chmod) = &syscall.sets_file_perms {
@@ -144,10 +149,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             for path in save_paths.iter().flatten() {
                 self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
             }
-
-            let mut regs = regs.clone();
-            regs.set_syscall_retval(0);
-            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
         if let Some(PermType::Chown) = &syscall.sets_file_perms {
             let position = &syscall
@@ -164,10 +165,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     x.chown_group = Some(new_group);
                 })?;
             }
-
-            let mut regs = regs.clone();
-            regs.set_syscall_retval(0);
-            ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
         }
 
         let maybe_stat_path =
