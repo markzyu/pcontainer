@@ -222,36 +222,81 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         visited.insert(orig_path.into());
         let action = self.calc_real_path_simple(orig_path, syscall).await?;
         if let PathAction::Override(real_path) = &action {
-            if syscall.dont_follow_symlink {
-                return Ok(action);
-            } else if let (Some(flag), Some(flag_reg)) =
-                (syscall.flag_dont_follow_symlink, syscall.flags)
-            {
-                if args[flag_reg] | flag != 0 {
-                    return Ok(action);
+            let result = self
+                .calc_follow_symlink(real_path, syscall, &mut visited, args)
+                .await?;
+            match result {
+                Err(false) => return Ok(action),
+                Err(true) => return Ok(PathAction::ELOOP),
+                Ok(link) => {
+                    return Box::pin(self.calc_real_path_recurse(
+                        link.as_path(),
+                        syscall,
+                        visited,
+                        args,
+                    ))
+                    .await;
                 }
             }
-            if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
-                if !metadata.file_type().is_symlink() {
-                    return Ok(action);
+        } else if action == PathAction::None {
+            let exclude_list = self.path_prefix_excludes.borrow();
+            if exclude_list.iter().any(|x| orig_path.starts_with(x)) {
+                // We should NOT follow symlink for paths excluded from Paths augmentation
+                return Ok(PathAction::None);
+            }
+
+            let orig_path_buf: PathBuf = orig_path.into();
+            let result = self
+                .calc_follow_symlink(&orig_path_buf, syscall, &mut visited, args)
+                .await?;
+            match result {
+                Err(false) => return Ok(PathAction::None),
+                Err(true) => return Ok(PathAction::ELOOP),
+                Ok(link) => {
+                    return Box::pin(self.calc_real_path_recurse(
+                        link.as_path(),
+                        syscall,
+                        visited,
+                        args,
+                    ))
+                    .await;
                 }
-                let link = real_path.read_link().map_err(SysAugError::ReadSymlink)?;
-                if link.is_relative() {
-                    return Ok(action);
-                }
-                if visited.contains(&link) {
-                    return Ok(PathAction::ELOOP);
-                }
-                return Box::pin(self.calc_real_path_recurse(
-                    link.as_path(),
-                    syscall,
-                    visited,
-                    args,
-                ))
-                .await;
             }
         }
         Ok(action)
+    }
+
+    /// Follow only one layer of symlink without doing translations (Returns Ok(Err(true)) if loop)
+    pub async fn calc_follow_symlink(
+        &self,
+        real_path: &PathBuf,
+        syscall: &SyscallInfo,
+        visited: &mut HashSet<PathBuf>,
+        args: &[usize],
+    ) -> Result<Result<PathBuf, bool>, SysAugError> {
+        if syscall.dont_follow_symlink {
+            return Ok(Err(false));
+        } else if let (Some(flag), Some(flag_reg)) =
+            (syscall.flag_dont_follow_symlink, syscall.flags)
+        {
+            if args[flag_reg] | flag != 0 {
+                return Ok(Err(false));
+            }
+        }
+        if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
+            if !metadata.file_type().is_symlink() {
+                return Ok(Err(false));
+            }
+            let link = real_path.read_link().map_err(SysAugError::ReadSymlink)?;
+            if link.is_relative() {
+                return Ok(Err(false));
+            }
+            if visited.contains(&link) {
+                return Ok(Err(true));
+            }
+            return Ok(Ok(link));
+        }
+        Ok(Err(false))
     }
 
     // Same as calc_real_path_recurse
