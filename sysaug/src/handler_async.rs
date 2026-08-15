@@ -430,20 +430,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         self.ptrace_client
             .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
 
-        // Wait for syscall-exit-stop (We can't use do_resume_syscall here: it'll be Seccomp, not PTRACE_SYSCALL)
-        self.notifiers.resume_through_syscall.replace(true);
-        let status = self
-            .async_runtime
-            .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
-            .await;
-        if !ptrace::is_syscall_stop(&status.wait_status) {
-            return Err(SysAugError::AsyncMisMatchSyscall(
-                "non-syscall stop while skipping syscall",
-                (*status).clone(),
-            ));
-        }
-
-        let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let mut regs = self.do_resume_syscall().await?;
 
         event!(
             Level::DEBUG,
