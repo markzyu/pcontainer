@@ -150,6 +150,21 @@ class TestRootFs(t.TestCase):
             ),
         )
         self.assertEqual(ans.returncode, 0)
+    
+    def test_chroot_fchown(self):
+        os.system(f"ls -l {STAGING}")
+        ans = c.run_elf_chroot("tests/fixtures/1a-fchown.out")
+        stdout = ans.stdout.decode("utf8")
+        print("Actual stdout:")
+        print(stdout)
+        print()
+        self.assertEqual(
+            stdout,
+            (
+                "fstatat(/x): owner = 0 group = 0\n"
+            ),
+        )
+        self.assertEqual(ans.returncode, 0)
 
 
 def _sort_tar_info(obj):
