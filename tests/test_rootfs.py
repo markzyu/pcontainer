@@ -45,13 +45,15 @@ class TestRootFs(t.TestCase):
         ans = c.run_script(
             f"""
             echo "[PCONTAINER] [CREATING STAGING FROM TAR]" >&2
-            cd {STAGING} && tar xf ../{tar_name};
+            cd {STAGING} && tar xpf ../{tar_name};
             if [ $? -ne 0 ]; then
                 echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
                 exit $?
             fi
             echo "[PCONTAINER] [CREATED STAGING FROM TAR]" >&2
             """.encode(),
+            rootfs=True,
+            root=True,
             **kwargs,
         )
         self.assertEqual(ans.returncode, 0)
@@ -59,7 +61,7 @@ class TestRootFs(t.TestCase):
     def compare_tar_with_dir(self, dir, tar, ignore_perms=False):
         cmd = f"""
         echo "[ASSERT] [TARRING DIR FOR COMPARISON] {dir}" >&2
-        cd {dir} && rm ../result.tar && tar cf ../result.tar .
+        cd {dir} && rm -f ../result.tar && tar cf ../result.tar .
         if [ $? -ne 0 ]; then
             echo "[ASSERT] [ERROR TARRING DIR FOR COMPARISON]" >&2
             exit $?
@@ -78,7 +80,7 @@ class TestRootFs(t.TestCase):
         self.assertEqual(expect_val, actual_val)
 
     def test_rootfs_creates_metadata(self):
-        self._setup_untar_in_container("01-rootfs-metadata-mounted.tar", rootfs=True)
+        self._setup_untar_in_container("01-rootfs-metadata-mounted.tar")
         self.compare_tar_with_dir(METADATA, "01-rootfs-metadata-raw.tar", ignore_perms=True)
         self.compare_tar_with_dir(STAGING, "01-rootfs-metadata-mounted.tar")
 

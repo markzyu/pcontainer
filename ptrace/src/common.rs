@@ -691,6 +691,7 @@ impl GenericPurposeRegs {
     }
 
     pub fn set_syscall_retval(&mut self, val: usize) {
+        event!(Level::INFO, "Setting return value: {}", val);
         self.arg0 = val
     }
 }
@@ -702,6 +703,7 @@ impl GenericPurposeRegs {
     }
 
     pub fn set_syscall_retval(&mut self, val: usize) {
+        event!(Level::INFO, "Setting return value: {}", val);
         self.rax = val
     }
 }

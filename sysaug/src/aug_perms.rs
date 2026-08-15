@@ -107,7 +107,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     }
 
     fn write_retval(&self, mut regs: GenericPurposeRegs, val: usize) -> Result<(), SysAugError> {
-        event!(Level::INFO, "Setting return value: {}", val);
         regs.set_syscall_retval(val);
         let pid = self.pid;
         self.ptrace_client

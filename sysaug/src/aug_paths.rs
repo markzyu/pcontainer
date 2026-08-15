@@ -63,7 +63,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
 
             let dirfd_path = self
-                .get_fd_path(&copy_regs, syscall, i)?
+                .get_dirfd_path(&copy_regs, syscall, i)?
                 .unwrap_or("".into());
 
             // Read orig_path from registers
@@ -94,10 +94,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Handle filefd_position (This overwrites all other save_paths)
         if let Some(position) = syscall.filefd_position {
             save_paths[0] = Some(
-                self.get_fd_path(&copy_regs, syscall, position as usize)?
-                    .unwrap_or("".into()),
+                procfs::getfd_path(pid, read_args[position as usize] as isize)?.unwrap_or("".into())
             );
 
+            event!(Level::INFO, "{} :Inferred file path from filefd: {:?}", syscall.name(), &save_paths[0]);
             // There is no need to calc_real_path, because pcontainer cannot override real fds
         }
 
@@ -223,7 +223,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         Ok(())
     }
 
-    fn get_fd_path(
+    fn get_dirfd_path(
         &self,
         regs: &GenericPurposeRegs,
         syscall: &SyscallInfo,
