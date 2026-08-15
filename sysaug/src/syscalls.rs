@@ -357,6 +357,7 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     define_dirfd_fileperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, 2, iter, next);
     define_dirfd2_syscall!(libc::SYS_linkat, 10, iter, next);
     define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, iter, next);
+    define_dirfd_syscall!(libc::SYS_mknodat, 2, 0, iter, next);
 
     define_dirfd_syscall!(libc::SYS_readlinkat, 2, 0, iter, next);
     if let Some(val) = iter[next].as_mut() {
