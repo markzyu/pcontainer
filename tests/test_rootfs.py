@@ -15,11 +15,14 @@ class TestRootFs(t.TestCase):
         init_ok = os.system(
             f"""
             pwd >&2;
+            set -e
+            echo "[INITIALIZING TESTS]" >&2
             rm -rf {STAGING}; 
             rm -rf {METADATA}; 
             mkdir -p {STAGING}; 
             cd {STAGING};
             rm -f ../result.tar;
+            echo "[INITIALIZED TESTS]" >&2
             """
         )
         self.assertEqual(init_ok, 0)
@@ -27,8 +30,13 @@ class TestRootFs(t.TestCase):
     def _setup_untar(self, tar_name):
         init_ok = os.system(
             f"""
-            cd {STAGING};
-            tar xf ../{tar_name};
+            echo "[CREATING STAGING FROM TAR]" >&2
+            cd {STAGING} && tar xf ../{tar_name};
+            if [ $? -ne 0 ]; then
+                echo "[ERROR CREATING STAGING FROM TAR]" >&2
+                exit $?
+            fi
+            echo "[CREATED STAGING FROM TAR]" >&2
             """
         )
         self.assertEqual(init_ok, 0)
@@ -36,8 +44,13 @@ class TestRootFs(t.TestCase):
     def _setup_untar_in_container(self, tar_name, **kwargs):
         ans = c.run_script(
             f"""
-            cd {STAGING};
-            tar xf ../{tar_name};
+            echo "[PCONTAINER] [CREATING STAGING FROM TAR]" >&2
+            cd {STAGING} && tar xf ../{tar_name};
+            if [ $? -ne 0 ]; then
+                echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
+                exit $?
+            fi
+            echo "[PCONTAINER] [CREATED STAGING FROM TAR]" >&2
             """.encode(),
             **kwargs,
         )
@@ -45,9 +58,13 @@ class TestRootFs(t.TestCase):
 
     def compare_tar_with_dir(self, dir, tar, ignore_perms=False):
         cmd = f"""
-        cd {dir};
-        rm ../result.tar;
-        tar cf ../result.tar .
+        echo "[ASSERT] [TARRING DIR FOR COMPARISON] {dir}" >&2
+        cd {dir} && rm ../result.tar && tar cf ../result.tar .
+        if [ $? -ne 0 ]; then
+            echo "[ASSERT] [ERROR TARRING DIR FOR COMPARISON]" >&2
+            exit $?
+        fi
+        echo "[ASSERT] [TARRED DIR FOR COMPARISON]" >&2
         """
         ok = os.system(cmd)
         self.assertEqual(ok, 0)
