@@ -18,6 +18,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tracing::{Level, event};
 
+/// Per Linux inode.7 documentation, stx_mode needs a mask, if we only want to manipulate chmod
+const FILE_PERMS_MASK: usize = 0o7777;
+
 impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_paths(
         &self,
@@ -140,7 +143,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let new_mod = read_args[*position as usize];
             event!(Level::INFO, "Handling chmod: {:b}", new_mod);
             for path in save_paths.iter().flatten() {
-                self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod))?;
+                self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
             }
 
             let mut regs = regs.clone();
@@ -334,7 +337,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         stats.iter_mut().for_each(move |x| {
             if let Some(chmod) = &meta.chmod {
-                x.set_mode(*chmod);
+                let old_mode = x.get_mode();
+                let new_mode = (old_mode & !FILE_PERMS_MASK) | (*chmod & FILE_PERMS_MASK);
+                event!(Level::INFO, "Faking new file modes: {:x} -> {:x}", old_mode, new_mode);
+                x.set_mode(new_mode);
             }
             if let Some(chown_owner) = &meta.chown_owner {
                 x.set_uid(*chown_owner);
@@ -428,6 +434,7 @@ impl ptrace::CHeader for DirentHeader {
 }
 
 trait IStat: Sized + std::fmt::Debug {
+    fn get_mode(&self) -> usize;
     fn set_mode(&mut self, val: usize);
     fn set_uid(&mut self, val: usize);
     fn set_gid(&mut self, val: usize);
@@ -449,6 +456,10 @@ struct StatLegacy {
 }
 
 impl IStat for libc::stat {
+    fn get_mode(&self) -> usize {
+        self.st_mode as usize
+    }
+
     fn set_mode(&mut self, val: usize) {
         self.st_mode = val as u32;
     }
@@ -463,6 +474,10 @@ impl IStat for libc::stat {
 }
 
 impl IStat for libc::stat64 {
+    fn get_mode(&self) -> usize {
+        self.st_mode as usize
+    }
+
     fn set_mode(&mut self, val: usize) {
         self.st_mode = val as u32;
     }
@@ -477,6 +492,10 @@ impl IStat for libc::stat64 {
 }
 
 impl IStat for libc::statx {
+    fn get_mode(&self) -> usize {
+        self.stx_mode as usize
+    }
+
     fn set_mode(&mut self, val: usize) {
         self.stx_mode = val as u16;
     }
@@ -491,6 +510,10 @@ impl IStat for libc::statx {
 }
 
 impl IStat for StatLegacy {
+    fn get_mode(&self) -> usize {
+        self.st_mode as usize
+    }
+
     fn set_mode(&mut self, val: usize) {
         self.st_mode = val as u16;
     }
