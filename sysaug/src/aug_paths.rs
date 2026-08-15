@@ -188,8 +188,17 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         } else if let Some(position) = &syscall.stat_legacy_buf_position {
             let path = maybe_stat_path?.as_path();
             let addr = read_args[*position as usize];
-            self.replace_statbuf_result::<StatLegacy>(addr, path)
-                .await?;
+
+            #[cfg(target_pointer_width = "32")]
+            {
+                self.replace_statbuf_result::<StatLegacy>(addr, path)
+                    .await?;
+            }
+            #[cfg(target_pointer_width = "64")]
+            {
+                self.replace_statbuf_result::<libc::stat>(addr, path)
+                    .await?;
+            }
         } else if let Some(position) = &syscall.stat64_buf_position {
             let path = maybe_stat_path?.as_path();
             let addr = read_args[*position as usize];
@@ -444,6 +453,7 @@ trait IStat: Sized + std::fmt::Debug {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
+/// Legacy version of stat used by very old 32bit kernels
 struct StatLegacy {
     st_dev: u16,
     st_ino: u16,
