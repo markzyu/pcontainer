@@ -54,6 +54,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 "Writing metadata file: {:?}",
                 meta_path.to_string_lossy()
             );
+            let exists = std::fs::exists(&meta_path).map_err(SysAugError::CheckRootFsMetadata)?;
             let metadir = meta_path.parent().unwrap();
             let _ = std::fs::create_dir_all(metadir)
                 .map_err(SysAugError::MetadataDir)
@@ -67,11 +68,10 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let mut file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
                 .map_err(|_| SysAugError::LockRootFsMetadata)?;
 
-            let exists = std::fs::exists(&meta_path).map_err(SysAugError::CheckRootFsMetadata)?;
             let mut curr_data: RootFsMetadata = if !exists {
-                serde_json::from_reader(&*file).map_err(SysAugError::ParseRootFsMetadata)?
-            } else {
                 RootFsMetadata::default()
+            } else {
+                serde_json::from_reader(&*file).map_err(SysAugError::ParseRootFsMetadata)?
             };
 
             update_fn(&mut curr_data);
