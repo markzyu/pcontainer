@@ -158,8 +158,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     "Chmod syscall doesn't have sets_file_perms",
                 ))?;
             let new_mod = read_args[*position as usize];
-            event!(Level::INFO, "Handling chmod: {:b}", new_mod);
             for path in save_paths.iter().flatten() {
+                event!(Level::INFO, "Handling chmod: {:?}, {:b}", &path, new_mod);
                 self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
             }
         }
@@ -171,8 +171,14 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 ))?;
             let new_owner = read_args[*position as usize];
             let new_group = read_args[(*position + 1) as usize];
-            event!(Level::INFO, "Handling chown: {}, {}", new_owner, new_group);
             for path in save_paths.iter().flatten() {
+                event!(
+                    Level::INFO,
+                    "Handling chown: {:?}, {}, {}",
+                    &path,
+                    new_owner,
+                    new_group
+                );
                 self.save_metadata_for_file(path, |x| {
                     x.chown_owner = Some(new_owner);
                     x.chown_group = Some(new_group);
@@ -294,7 +300,6 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let action = self
                 .get_mod_path(syscall, orig_path, PathAction::None, true)
                 .await?;
-            // event!(Level::INFO, "Intercepting dir entry {:?} -> {:?}", orig_path, &action);
             let delete = match &action {
                 PathAction::Override(override_path) => {
                     let bytes = override_path.as_os_str().as_bytes();
@@ -363,7 +368,8 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 let new_mode = (old_mode & !FILE_PERMS_MASK) | (*chmod & FILE_PERMS_MASK);
                 event!(
                     Level::INFO,
-                    "Faking new file modes: {:x} -> {:x}",
+                    "Faking new file modes: {:?}: {:x} -> {:x}",
+                    path,
                     old_mode,
                     new_mode
                 );
