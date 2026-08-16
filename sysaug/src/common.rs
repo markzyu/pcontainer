@@ -224,6 +224,7 @@ pub enum DelType {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PermType {
     Chmod,
+    ChmodOnCreation,
     Chown,
 }
 
