@@ -47,6 +47,12 @@ pub(crate) struct RootfsConfig {
     #[serde(default = "default_host_file_perms")]
     pub(crate) host_file_perms: usize,
 
+    #[serde(default = "default_host_uid")]
+    pub(crate) host_uid: usize,
+
+    #[serde(default = "default_host_gid")]
+    pub(crate) host_gid: usize,
+
     /// The key (original path) is a regex string with named captures. The value (new path) is a template string.
     #[serde(default = "default_rename_configs")]
     pub(crate) rename_guest_paths: Vec<RenameConfig>,
@@ -75,6 +81,14 @@ fn default_host_file_perms() -> usize {
     0o700
 }
 
+fn default_host_uid() -> usize {
+    nix::unistd::getuid().as_raw() as usize
+}
+
+fn default_host_gid() -> usize {
+    nix::unistd::getgid().as_raw() as usize
+}
+
 pub(crate) fn init_passthroughs_from_config(
     passthroughs: &mut Vec<PathBuf>,
     config: &RootfsConfig,
@@ -95,6 +109,8 @@ impl Default for RootfsConfig {
             passthroughs: default_passthroughs(),
             default_file_perms: default_file_perms(),
             host_file_perms: default_host_file_perms(),
+            host_uid: default_host_uid(),
+            host_gid: default_host_gid(),
             rename_guest_paths: default_rename_configs(),
             rename_host_paths: default_rename_configs(),
         }

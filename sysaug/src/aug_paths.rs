@@ -138,7 +138,16 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         //
         // Upon deletion of /a, we RENAME "a" to "b" based on the path list. If no path is left, we delete it.
 
-        if syscall.sets_file_perms.is_some() {
+        if &syscall.sets_file_perms == &Some(PermType::Chown) {
+            let position = &syscall
+                .file_perms_position
+                .ok_or(SysAugError::SyscallMissingField(
+                    "Chmod syscall doesn't have sets_file_perms",
+                ))?;
+            *write_args[*position as usize] = self.consts.config.rootfs.host_uid;
+            *write_args[*position as usize + 1] = self.consts.config.rootfs.host_gid;
+            need_write_regs = true;
+        } else if syscall.sets_file_perms.is_some() {
             let position = &syscall
                 .file_perms_position
                 .ok_or(SysAugError::SyscallMissingField(
