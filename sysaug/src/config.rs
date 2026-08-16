@@ -41,9 +41,6 @@ pub(crate) struct RootfsConfig {
     #[serde(default = "default_passthroughs")]
     pub(crate) passthroughs: Vec<String>,
 
-    #[serde(default = "default_file_perms")]
-    pub(crate) default_file_perms: usize,
-
     #[serde(default = "default_host_file_perms")]
     pub(crate) host_file_perms: usize,
 
@@ -71,10 +68,6 @@ fn default_passthroughs() -> Vec<String> {
         "/system/lib64".to_string(),
         "/system/lib".to_string(),
     ]
-}
-
-fn default_file_perms() -> usize {
-    0o600
 }
 
 fn default_host_file_perms() -> usize {
@@ -107,7 +100,6 @@ impl Default for RootfsConfig {
     fn default() -> Self {
         Self {
             passthroughs: default_passthroughs(),
-            default_file_perms: default_file_perms(),
             host_file_perms: default_host_file_perms(),
             host_uid: default_host_uid(),
             host_gid: default_host_gid(),

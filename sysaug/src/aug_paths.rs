@@ -11,7 +11,7 @@
 // GNU General Public License for more details.
 
 use crate::PermType;
-use crate::common::{PathAction, RootFsMetadata, SysAugError, SyscallInfo};
+use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use ptrace::{GenericPurposeRegs, MemHelpers};
 use std::os::unix::ffi::OsStrExt;
@@ -378,13 +378,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     where
         T: IStat + Clone + Send + 'static,
     {
-        let meta = self
-            .read_metadata_for_file(path)?
-            .unwrap_or(RootFsMetadata {
-                chmod: Some(self.consts.config.rootfs.default_file_perms),
-                chown_owner: None,
-                chown_group: None,
-            });
+        let Some(meta) = self.read_metadata_for_file(path)? else {
+            return Ok(());
+        };
         let mem_helpers = get_mem_helper();
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
