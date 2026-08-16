@@ -486,17 +486,24 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
 
         define_paths_syscall!(libc::SYS_utime, 1, iter, next);
         define_getdents_syscall!(libc::SYS_getdents, 32, iter, next);
+
+        // New System call in Linux v6.6: fchmodat2
+        let libc__SYS_fchmodat2: usize = 452;
+        define_dirfd_fileperms_syscall!(libc__SYS_fchmodat2, 2, 0, PermType::Chmod, 2, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.flags = Some(3);
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
-    let SYS_newfstatat: i64 = libc::SYS_newfstatat;
+    let libc__SYS_newfstatat: i64 = libc::SYS_newfstatat;
 
     #[cfg(target_arch = "aarch64")]
-    let SYS_newfstatat: i64 = 79;
+    let libc__SYS_newfstatat: i64 = 79;
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        define_dirfd_syscall!(SYS_newfstatat, 2, 0, iter, next);
+        define_dirfd_syscall!(libc__SYS_newfstatat, 2, 0, iter, next);
         if let Some(val) = iter[next].as_mut() {
             val.flags = Some(3);
             val.flag_dont_follow_symlink = Some(libc::AT_SYMLINK_NOFOLLOW as usize);
