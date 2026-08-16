@@ -229,13 +229,18 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 Err(false) => return Ok(action),
                 Err(true) => return Ok(PathAction::ELOOP),
                 Ok(link) => {
-                    return Box::pin(self.calc_real_path_recurse(
+                    let new_action = Box::pin(self.calc_real_path_recurse(
                         link.as_path(),
                         syscall,
                         visited,
                         args,
                     ))
-                    .await;
+                    .await?;
+                    if new_action == PathAction::None {
+                        return Ok(PathAction::Override(link));
+                    } else {
+                        return Ok(new_action);
+                    }
                 }
             }
         } else if action == PathAction::None {
@@ -253,13 +258,18 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 Err(false) => return Ok(PathAction::None),
                 Err(true) => return Ok(PathAction::ELOOP),
                 Ok(link) => {
-                    return Box::pin(self.calc_real_path_recurse(
+                    let new_action = Box::pin(self.calc_real_path_recurse(
                         link.as_path(),
                         syscall,
                         visited,
                         args,
                     ))
-                    .await;
+                    .await?;
+                    if new_action == PathAction::None {
+                        return Ok(PathAction::Override(link));
+                    } else {
+                        return Ok(new_action);
+                    }
                 }
             }
         }
