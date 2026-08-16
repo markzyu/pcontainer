@@ -283,6 +283,17 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 return Ok(Err(false));
             }
         }
+
+        if let Ok(real_path_str) = real_path.clone().into_os_string().into_string() {
+            if real_path_str.contains("/proc/self") {
+                let new_part = format!("/proc/{}", self.pid);
+                let new_path_str = real_path_str.replace("/proc/self", &new_part);
+                let new_path_buf = PathBuf::from(new_path_str);
+                return Box::pin(self.calc_follow_symlink(&new_path_buf, syscall, visited, args))
+                    .await;
+            }
+        }
+
         if let Ok(metadata) = std::fs::symlink_metadata(real_path) {
             if !metadata.file_type().is_symlink() {
                 return Ok(Err(false));
