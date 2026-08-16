@@ -115,7 +115,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         // Handle getdents (make the buffer seem smaller)
         if syscall.getdents_bits.is_some() {
-            orig_regs.arg2 /= 2;
+            *write_args[2] /= 2;
             need_write_regs = true;
         }
 
@@ -137,7 +137,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         //   {count: 2, paths: ["/a", "/b"]}
         //
         // Upon deletion of /a, we RENAME "a" to "b" based on the path list. If no path is left, we delete it.
-        
+
         if syscall.sets_file_perms.is_some() {
             let position = &syscall
                 .file_perms_position
@@ -153,7 +153,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
         }
 
-        let regs = self.do_resume_syscall().await?
+        let regs = self.do_resume_syscall().await?;
         let retval = regs.syscall_retval() as isize;
 
         if let Some(PermType::Chmod) = &syscall.sets_file_perms {
@@ -169,22 +169,23 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
         }
         if let Some(PermType::ChmodOnCreation) = &syscall.sets_file_perms {
-            let flags_position = &syscall
-                .flags
-                .ok_or(SysAugError::SyscallMissingField(
-                    "ChmodOnCreation syscall doesn't have flags",
-                ))?;
-            let perms_position = &syscall
-                .file_perms_position
-                .ok_or(SysAugError::SyscallMissingField(
-                    "ChmodOnCreation syscall doesn't have sets_file_perms",
-                ))?;
-            let flags = read_args[flags_position];
-            if flags & libc::O_CREAT != 0 {
+            let flags_position = &syscall.flags.ok_or(SysAugError::SyscallMissingField(
+                "ChmodOnCreation syscall doesn't have flags",
+            ))?;
+            let perms_position =
+                &syscall
+                    .file_perms_position
+                    .ok_or(SysAugError::SyscallMissingField(
+                        "ChmodOnCreation syscall doesn't have sets_file_perms",
+                    ))?;
+            let flags = read_args[*flags_position];
+            if flags & (libc::O_CREAT as usize) != 0 {
                 let new_mod = read_args[*perms_position as usize];
                 for path in save_paths.iter().flatten() {
                     event!(Level::INFO, "Handling chmod: {:?}, {:b}", &path, new_mod);
-                    self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
+                    self.save_metadata_for_file(path, |x| {
+                        x.chmod = Some(new_mod & FILE_PERMS_MASK)
+                    })?;
                 }
             }
         }
