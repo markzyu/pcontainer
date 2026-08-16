@@ -8,5 +8,4 @@ for cfile in tests/fixtures/*.c; do
 	gcc -O3 -o "$dir/${base}.out" "$dir/${base}.c"
 done
 
-umask 0077
 python3 -m unittest discover -s tests/ "$@"

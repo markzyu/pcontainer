@@ -62,7 +62,7 @@ class TestRootFs(t.TestCase):
         ans = c.run_script(
             f"""
             echo "[PCONTAINER] [CREATING TAR]" >&2
-            umask 0077 && cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
+            cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
             if [ $? -ne 0 ]; then
                 echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
                 exit $?
@@ -77,8 +77,6 @@ class TestRootFs(t.TestCase):
     def _create_tar_from_host_os(self, dir, tar_name):
         cmd = f"""
         echo "[ASSERT] [TARRING DIR FOR COMPARISON] {dir}" >&2
-        ls -l {STAGING}
-        ls -l {METADATA}
         cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
         if [ $? -ne 0 ]; then
             echo "[ASSERT] [ERROR TARRING DIR FOR COMPARISON]" >&2
