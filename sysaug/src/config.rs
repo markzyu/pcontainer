@@ -41,6 +41,9 @@ pub(crate) struct RootfsConfig {
     #[serde(default = "default_passthroughs")]
     pub(crate) passthroughs: Vec<String>,
 
+    #[serde(default = "default_file_perms")]
+    pub(crate) default_file_perms: usize,
+
     /// The key (original path) is a regex string with named captures. The value (new path) is a template string.
     #[serde(default = "default_rename_configs")]
     pub(crate) rename_guest_paths: Vec<RenameConfig>,
@@ -61,6 +64,10 @@ fn default_passthroughs() -> Vec<String> {
     ]
 }
 
+fn default_file_perms() -> usize {
+    0o600
+}
+
 pub(crate) fn init_passthroughs_from_config(
     passthroughs: &mut Vec<PathBuf>,
     config: &RootfsConfig,
@@ -79,6 +86,7 @@ impl Default for RootfsConfig {
     fn default() -> Self {
         Self {
             passthroughs: default_passthroughs(),
+            default_file_perms: default_file_perms(),
             rename_guest_paths: default_rename_configs(),
             rename_host_paths: default_rename_configs(),
         }
