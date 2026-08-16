@@ -77,7 +77,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 .await?;
             match path_action {
                 PathAction::Override(new_path_val) => {
-                    save_paths[i] = Some(dirfd_path.join(&new_path_val));
+                    // In case of AT_EMPTY_PATH/empty relative path, just pass dirfd_path only
+                    let input_path = if new_path_val.as_os_str().is_empty() {
+                        dirfd_path.to_path_buf()
+                    } else {
+                        dirfd_path.join(&new_path_val)
+                    };
+                    save_paths[i] = Some(input_path);
                     **ref_arg_i = self.tracee_stack_append_path(new_path_val)?;
                     need_write_regs = true;
                 }
@@ -86,7 +92,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     return Ok(());
                 }
                 _ => {
-                    save_paths[i] = Some(dirfd_path.join(orig_path_buf));
+                    // In case of AT_EMPTY_PATH/empty relative path, just pass dirfd_path only
+                    let input_path = if orig_path_buf.as_os_str().is_empty() {
+                        dirfd_path.to_path_buf()
+                    } else {
+                        dirfd_path.join(orig_path_buf)
+                    };
+                    save_paths[i] = Some(input_path);
                 }
             }
         }
