@@ -109,7 +109,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 procfs::getfd_path(pid, read_args[position as usize] as isize)?
                     .unwrap_or("".into()),
             );
-
+            event!(Level::INFO, "filefd path {:?}", &save_paths[0]);
             // There is no need to calc_real_path, because pcontainer cannot override real fds
         }
 
