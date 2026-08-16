@@ -168,6 +168,26 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
             }
         }
+        if let Some(PermType::ChmodOnCreation) = &syscall.sets_file_perms {
+            let flags_position = &syscall
+                .flags
+                .ok_or(SysAugError::SyscallMissingField(
+                    "ChmodOnCreation syscall doesn't have flags",
+                ))?;
+            let perms_position = &syscall
+                .file_perms_position
+                .ok_or(SysAugError::SyscallMissingField(
+                    "ChmodOnCreation syscall doesn't have sets_file_perms",
+                ))?;
+            let flags = read_args[flags_position];
+            if flags & libc::O_CREAT != 0 {
+                let new_mod = read_args[*perms_position as usize];
+                for path in save_paths.iter().flatten() {
+                    event!(Level::INFO, "Handling chmod: {:?}, {:b}", &path, new_mod);
+                    self.save_metadata_for_file(path, |x| x.chmod = Some(new_mod & FILE_PERMS_MASK))?;
+                }
+            }
+        }
         if let Some(PermType::Chown) = &syscall.sets_file_perms {
             let position = &syscall
                 .file_perms_position

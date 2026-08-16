@@ -350,14 +350,20 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
     define_paths_syscall!(libc::SYS_umount2, 1, iter, next);
     define_syscall!(libc::SYS_execve, Augments::Exec, iter, next);
 
-    define_dirfd_syscall!(libc::SYS_openat, 2, 0, iter, next);
     define_dirfd_syscall!(libc::SYS_name_to_handle_at, 2, 0, iter, next);
     define_dirfd_syscall!(libc::SYS_faccessat, 2, 0, iter, next);
+    define_dirfd2_syscall!(libc::SYS_linkat, 10, iter, next);
     define_dirfd_fileperms_syscall!(libc::SYS_fchmodat, 2, 0, PermType::Chmod, 2, iter, next);
     define_dirfd_fileperms_syscall!(libc::SYS_fchownat, 2, 0, PermType::Chown, 2, iter, next);
-    define_dirfd2_syscall!(libc::SYS_linkat, 10, iter, next);
-    define_dirfd_syscall!(libc::SYS_mkdirat, 2, 0, iter, next);
-    define_dirfd_syscall!(libc::SYS_mknodat, 2, 0, iter, next);
+    define_dirfd_fileperms_syscall!(libc::SYS_mkdirat, 2, 0, PermType::Chmod, 2, iter, next);
+    define_dirfd_fileperms_syscall!(libc::SYS_mknodat, 2, 0, PermType::Chmod, 2, iter, next);
+
+    define_dirfd_syscall!(libc::SYS_openat, 2, 0, iter, next);
+    if let Some(val) = iter[next].as_mut() {
+        val.sets_file_perms = Some(PermType::ChmodOnCreation);
+        val.file_perms_position = Some(3);
+        val.flags = Some(2);
+    }
 
     define_dirfd_syscall!(libc::SYS_readlinkat, 2, 0, iter, next);
     if let Some(val) = iter[next].as_mut() {
@@ -503,13 +509,19 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         define_paths_syscall!(libc::SYS_access, 1, iter, next);
         define_paths_fileperms_syscall!(libc::SYS_chmod, 1, PermType::Chmod, 1, iter, next);
         define_paths_fileperms_syscall!(libc::SYS_chown, 1, PermType::Chown, 1, iter, next);
-        define_paths_syscall!(libc::SYS_mknod, 1, iter, next);
-        define_paths_syscall!(libc::SYS_creat, 1, iter, next);
+        define_paths_fileperms_syscall!(libc::SYS_mknod, 1, PermType::Chown, 1, iter, next);
+        define_paths_fileperms_syscall!(libc::SYS_creat, 1, PermType::Chown, 1, iter, next);
         define_paths_syscall!(libc::SYS_uselib, 1, iter, next);
         define_paths_syscall!(libc::SYS_utimes, 1, iter, next);
         define_dirfd_syscall!(libc::SYS_futimesat, 2, 0, iter, next);
-        define_paths_syscall!(libc::SYS_open, 1, iter, next);
         define_paths_syscall!(libc::SYS_link, 3, iter, next);
+
+        define_paths_syscall!(libc::SYS_open, 1, iter, next);
+        if let Some(val) = iter[next].as_mut() {
+            val.sets_file_perms = Some(PermType::ChmodOnCreation);
+            val.file_perms_position = Some(2);
+            val.flags = Some(1);
+        }
 
         define_paths_syscall!(libc::SYS_readlink, 1, iter, next);
         if let Some(val) = iter[next].as_mut() {
@@ -544,8 +556,7 @@ pub const RAW_SYSCALL_INFOS: [Option<SyscallInfo>; MAX_RAW_SYSCALL_INFOS] = {
         }
 
         define_paths_deletion_syscall!(libc::SYS_rmdir, 1, DelType::Dir, iter, next);
-
-        define_paths_syscall!(libc::SYS_mkdir, 1, iter, next);
+        define_paths_fileperms_syscall!(libc::SYS_mkdir, 1, PermType::Chmod, 1, iter, next);
     }
     iter
 };
