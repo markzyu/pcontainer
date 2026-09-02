@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 backtrace = "0.3"
 lazy_static = "1.4.0"
-libc = "0.2.81"
+libc = "0.2.189"
 lru = "0.16.1"
 nix = { version = "0.31.3", features = ["mman", "process", "ptrace", "signal", "fs"] }
 thiserror = "1.0.25"
