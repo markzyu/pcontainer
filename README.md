@@ -8,17 +8,19 @@ My project is still in its early stage. And it barely works right now. Basic she
 
 Eventually, my goal is to be able to run Docker container on any mobile device, without needing root, by creating a configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
 
-## Multithreading model 
+## Multi-threading mode 
 
 By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
 
+![Multi-threading mode](MultiThreadingMode.png)
+
 But this requires the permission for PTRACE_ATTACH. And on some systems, this permission is blocked, and tracer can only attach to their direct children from main threads.
 
-## Fallback model
+## Fallback mode
 
 If the host OS does not permit PTRACE_ATTACH, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
 
-![Fallback threading model](FallbackThreadingModel.png)
+![Fallback threading mode](FallbackThreadingMode.png)
 
 ## Project structure
 
