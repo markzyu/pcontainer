@@ -11,6 +11,7 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+krsm = {path = "../krsm"}
 ptrace = {path = "../ptrace"}
 futures-lite = "2.6.1"
 lazy_static = "1.4.0"

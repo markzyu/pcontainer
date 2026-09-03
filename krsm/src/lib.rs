@@ -9,22 +9,8 @@
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-use nix::sys::wait::WaitStatus;
+#![no_std]
 
-// TODO: Move this to sysaug crate (keep async runtime stuff in krsm only)
+mod futures;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum PtraceFutureTypes {
-    WaitForPtraceSeccomp,
-    /// Warning: This can happen at both syscall-exit-stop and syscall-entry-stop
-    WaitForPtraceSyscall,
-    WaitForPtraceEvent,
-    WaitForSignal,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PtraceStatus {
-    pub wait_status: WaitStatus,
-}
-
-pub type PtraceAsyncRuntime = krsm::AsyncRuntime<PtraceFutureTypes, PtraceStatus>;
+pub use crate::futures::{AsyncRuntime, AsyncYielder};

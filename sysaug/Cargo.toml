@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 executor = {path = "../executor"}
+krsm = {path = "../krsm"}
 procfs = {path = "../procfs"}
 ptrace = {path = "../ptrace"}
 lazy_static = "1.4.0"

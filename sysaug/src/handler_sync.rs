@@ -13,7 +13,8 @@
 use crate::common::{PTRACE_EVENT_SECCOMP, SysAugArgs, SysAugError, display_err, rwlock_read};
 use crate::config::{SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config};
 use crate::handler_async::{AsyncNotifications, AsyncTraceeHandler};
-use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
+use executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
+use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::utsname::uname;
 use nix::sys::wait::WaitStatus;
@@ -193,7 +194,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             ptrace_client: self.ptrace_client.clone(),
             ignore_sigstops: self.ignore_sigstops.clone(),
 
-            yielder_syscall: PtraceAsyncYielder::default(),
+            yielder_syscall: AsyncYielder::default(),
             notifiers: AsyncNotifications::default(),
 
             perms_ids: RefCell::default(),
@@ -238,7 +239,12 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
         loop {
             // Drive async logic until it is pending on a future by resuming from where we left off
-            if let Some(exit_code) = async_runtime.run_async_step(&mut main_loop_future)? {
+            let async_step_result = unsafe {
+                async_runtime
+                    .run_async_step(&mut main_loop_future)
+                    .map_err(|_| SysAugError::AsyncRuntime)
+            };
+            if let Some(exit_code) = async_step_result? {
                 // Handle signals, special gdb exit, etc
                 if *async_handlers.notifiers.transfer_to_gdb.borrow() {
                     return Ok(self.transfer_to_gdb()?);

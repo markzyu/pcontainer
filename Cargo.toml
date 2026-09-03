@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
   "executor",
+  "krsm",
   "main",
   "procfs",
   "ptrace",
