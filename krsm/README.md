@@ -33,4 +33,4 @@ And the downstream can use the KRSM runtime to drive the state machine, no matte
 
 Copyright (c) 2026 Zhongzhi Yu
 
-This KRSM crate is dual licensed, under the MIT License, as well as the parent project's License.
+This KRSM crate is dual licensed, under both the MIT License, and the GPLv3 License.

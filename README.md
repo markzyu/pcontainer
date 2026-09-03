@@ -92,3 +92,6 @@ Copyright (c) 2026 Zhongzhi Yu
 
 This project is licensed under the GNU General Public License v3.0 (GPLv3) - 
 see [COPYING](COPYING) for details
+
+Additionally, for this krsm crate, and that crate only, you can choose to use
+the [MIT License](krsm/LICENSE) instead
