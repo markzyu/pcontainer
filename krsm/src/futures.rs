@@ -176,15 +176,16 @@ impl AsyncYielder {
 #[cfg(test)]
 mod tests {
     use crate::futures;
+    use core::fmt::Debug;
 
     /// This is just an example YieldReason.
-    #[derive(Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq)]
     enum PtraceFutureTypes {
         WaitForPtraceSyscall,
         WaitForSignal,
     }
 
-    #[derive(Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     /// This is just an example YieldResponse
     struct PtraceStatus {}
 
