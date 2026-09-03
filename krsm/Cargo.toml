@@ -2,6 +2,7 @@
 name = "krsm"
 version = "0.2.0"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
+description = "This crate is a simple, single threaded, pinned async runtime for futures"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/markzyu/pcontainer/edit/master/krsm/"
 edition = "2024"
