@@ -11,6 +11,7 @@
 // GNU General Public License for more details.
 
 use core::cell::RefCell;
+use core::fmt::Debug;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -29,12 +30,14 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 /// Usage of unsupported external async utilities will cause an Err()
 ///
 /// The use of `async` is purely to avoid writing a state machine switch-case.
-pub struct AsyncRuntime<YieldReason: Eq, YieldResponse: PartialEq> {
+#[derive(Debug)]
+pub struct AsyncRuntime<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> {
     has_unblock: RefCell<Option<(YieldReason, YieldResponse)>>,
     has_new_future: AtomicBool,
 }
 
-/// This error type is for future proofing only.
+/// This error type is for future proofing only. It will always implement Debug.
+#[derive(Debug)]
 pub struct AsyncRuntimeError();
 
 /// AsyncYield is a helper for KRSM async loops.
@@ -77,7 +80,9 @@ const RAW_WAKER_WITH_ASSERTIONS: RawWaker = {
     RawWaker::new(core::ptr::null(), &VTABLE)
 };
 
-impl<YieldReason: Eq, YieldResponse: PartialEq> AsyncRuntime<YieldReason, YieldResponse> {
+impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
+    AsyncRuntime<YieldReason, YieldResponse>
+{
     /// Resolve currently pending Futures. Must call this at least once between run_async_step calls
     pub fn unblock_futures(&self, future_type: YieldReason, status: YieldResponse) {
         self.has_unblock.borrow_mut().replace((future_type, status));
@@ -106,7 +111,7 @@ impl<YieldReason: Eq, YieldResponse: PartialEq> AsyncRuntime<YieldReason, YieldR
     /// pinned across all of your `run_async_step` calls.
     ///
     /// This function returns a Result but currently has no error case.
-    /// This return type is for future proofing only.
+    /// This return type is for future proofing only. (The Err type will always implement Debug.)
     ///
     /// Returns: Ok(None) if the future is still incomplete, and has yielded.
     ///          Ok(Some(async result)) if the future has finished running.
@@ -137,7 +142,7 @@ impl<YieldReason: Eq, YieldResponse: PartialEq> AsyncRuntime<YieldReason, YieldR
     }
 }
 
-impl<YieldReason: Eq, YieldResponse: PartialEq> Default
+impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> Default
     for AsyncRuntime<YieldReason, YieldResponse>
 {
     fn default() -> Self {
@@ -165,13 +170,6 @@ impl AsyncYielder {
 
     pub fn unblock(&self) {
         *self.num_polls.borrow_mut() += 1;
-    }
-}
-
-impl AsyncRuntimeError {
-    #[allow(dead_code)]
-    fn error_message(&self) -> &'static str {
-        ""
     }
 }
 
