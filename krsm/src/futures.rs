@@ -27,7 +27,9 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 ///
 /// > `zip()`, `or()`, `poll_fn()`.
 ///
-/// Usage of unsupported external async utilities will cause an Err()
+/// We especially do not support any invocation of the Waker. If you await on
+/// an external async function which tries to access the Waker, the runtime
+/// **will panic**.
 ///
 /// The use of `async` is purely to avoid writing a state machine switch-case.
 #[derive(Debug)]
@@ -88,8 +90,8 @@ impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
         self.has_unblock.borrow_mut().replace((future_type, status));
     }
 
-    /// Helper function to create a new Future, within async code, and await for its completion
-    pub async fn new_ptrace_future(&self, future_type: YieldReason) -> YieldResponse {
+    /// Async helper function to wait for a new instance of pending future to complete
+    pub async fn new_pending_future(&self, future_type: YieldReason) -> YieldResponse {
         self.has_new_future.store(true, Ordering::Relaxed);
         futures_lite::future::poll_fn(|_| {
             let matches = if let Some((curr_type, _)) = self.has_unblock.borrow().as_ref() {
@@ -204,7 +206,7 @@ mod tests {
     #[test]
     fn test_basic_blocking_on_ptrace_future() {
         let runtime = PtraceAsyncRuntime::default();
-        let mut test_future = runtime.new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall);
+        let mut test_future = runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall);
         assert!(matches!(
             unsafe { runtime.run_async_step(&mut test_future) },
             Ok(None)
@@ -233,10 +235,10 @@ mod tests {
         let runtime = PtraceAsyncRuntime::default();
         let mut test_future = async {
             runtime
-                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                 .await;
             runtime
-                .new_ptrace_future(PtraceFutureTypes::WaitForSignal)
+                .new_pending_future(PtraceFutureTypes::WaitForSignal)
                 .await;
             42
         };
@@ -276,8 +278,8 @@ mod tests {
     fn test_compatible_with_futures_lite_zip_in_order() {
         let runtime = PtraceAsyncRuntime::default();
         let mut test_future = futures_lite::future::zip(
-            runtime.new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall),
-            runtime.new_ptrace_future(PtraceFutureTypes::WaitForSignal),
+            runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall),
+            runtime.new_pending_future(PtraceFutureTypes::WaitForSignal),
         );
         assert!(matches!(
             unsafe { runtime.run_async_step(&mut test_future) },
@@ -308,8 +310,8 @@ mod tests {
     fn test_compatible_with_futures_lite_zip_in_reversed_order() {
         let runtime = PtraceAsyncRuntime::default();
         let mut test_future = futures_lite::future::zip(
-            runtime.new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall),
-            runtime.new_ptrace_future(PtraceFutureTypes::WaitForSignal),
+            runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall),
+            runtime.new_pending_future(PtraceFutureTypes::WaitForSignal),
         );
         assert!(matches!(
             unsafe { runtime.run_async_step(&mut test_future) },
@@ -342,13 +344,13 @@ mod tests {
         let mut test_future = futures_lite::future::or(
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                     .await;
                 234
             },
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForSignal)
+                    .new_pending_future(PtraceFutureTypes::WaitForSignal)
                     .await;
                 456
             },
@@ -373,13 +375,13 @@ mod tests {
         let mut test_future = futures_lite::future::or(
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                     .await;
                 234
             },
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForSignal)
+                    .new_pending_future(PtraceFutureTypes::WaitForSignal)
                     .await;
                 456
             },
@@ -402,14 +404,14 @@ mod tests {
         futures_lite::future::or(
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                     .await;
                 futures_lite::future::yield_now().await;
                 234
             },
             async {
                 runtime
-                    .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                     .await;
                 456
             },

@@ -136,7 +136,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     async fn wait_for_any_signal(&self) -> Result<Signal, SysAugError> {
         let status = self
             .async_runtime
-            .new_ptrace_future(PtraceFutureTypes::WaitForSignal)
+            .new_pending_future(PtraceFutureTypes::WaitForSignal)
             .await;
         if let WaitStatus::Stopped(_, signal) = status.wait_status {
             return Ok(signal);
@@ -186,7 +186,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         } else {
             PtraceFutureTypes::WaitForPtraceSeccomp
         };
-        let mut status = self.async_runtime.new_ptrace_future(future_type).await;
+        let mut status = self.async_runtime.new_pending_future(future_type).await;
 
         if !is_seccomp_ready {
             if !ptrace::is_syscall_stop(&status.wait_status) {
@@ -218,7 +218,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             self.notifiers.resume_through_syscall.replace(true);
             status = self
                 .async_runtime
-                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
                 .await;
 
             if ptrace::is_syscall_stop(&status.wait_status) {
@@ -350,7 +350,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         loop {
             let status = self
                 .async_runtime
-                .new_ptrace_future(PtraceFutureTypes::WaitForPtraceEvent)
+                .new_pending_future(PtraceFutureTypes::WaitForPtraceEvent)
                 .await;
 
             // Tracee is being cloned or forked
