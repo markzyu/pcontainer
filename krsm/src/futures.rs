@@ -15,7 +15,6 @@ use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-use std::fmt::Debug;
 
 /// The KRSM async runtime
 ///
@@ -30,14 +29,12 @@ use std::fmt::Debug;
 /// Usage of unsupported external async utilities will cause an Err()
 ///
 /// The use of `async` is purely to avoid writing a state machine switch-case.
-#[derive(Debug)]
-pub struct AsyncRuntime<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> {
+pub struct AsyncRuntime<YieldReason: Eq, YieldResponse: PartialEq> {
     has_unblock: RefCell<Option<(YieldReason, YieldResponse)>>,
     has_new_future: AtomicBool,
 }
 
-/// This error type is for future proofing only. It will always implement Debug.
-#[derive(Debug)]
+/// This error type is for future proofing only.
 pub struct AsyncRuntimeError();
 
 /// AsyncYield is a helper for KRSM async loops.
@@ -80,9 +77,7 @@ const RAW_WAKER_WITH_ASSERTIONS: RawWaker = {
     RawWaker::new(core::ptr::null(), &VTABLE)
 };
 
-impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
-    AsyncRuntime<YieldReason, YieldResponse>
-{
+impl<YieldReason: Eq, YieldResponse: PartialEq> AsyncRuntime<YieldReason, YieldResponse> {
     /// Resolve currently pending Futures. Must call this at least once between run_async_step calls
     pub fn unblock_futures(&self, future_type: YieldReason, status: YieldResponse) {
         self.has_unblock.borrow_mut().replace((future_type, status));
@@ -111,7 +106,7 @@ impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
     /// pinned across all of your `run_async_step` calls.
     ///
     /// This function returns a Result but currently has no error case.
-    /// This return type is for future proofing only. (The Err type will always implement Debug.)
+    /// This return type is for future proofing only.
     ///
     /// Returns: Ok(None) if the future is still incomplete, and has yielded.
     ///          Ok(Some(async result)) if the future has finished running.
@@ -142,7 +137,7 @@ impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
     }
 }
 
-impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> Default
+impl<YieldReason: Eq, YieldResponse: PartialEq> Default
     for AsyncRuntime<YieldReason, YieldResponse>
 {
     fn default() -> Self {
@@ -173,18 +168,25 @@ impl AsyncYielder {
     }
 }
 
+impl AsyncRuntimeError {
+    #[allow(dead_code)]
+    fn error_message(&self) -> &'static str {
+        ""
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::futures;
 
     /// This is just an example YieldReason.
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Eq, PartialEq)]
     enum PtraceFutureTypes {
         WaitForPtraceSyscall,
         WaitForSignal,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, PartialEq)]
     /// This is just an example YieldResponse
     struct PtraceStatus {}
 
