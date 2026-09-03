@@ -240,7 +240,9 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         loop {
             // Drive async logic until it is pending on a future by resuming from where we left off
             let async_step_result = unsafe {
-                async_runtime.run_async_step(&mut main_loop_future).map_err(|_| SysAugError::AsyncRuntime)
+                async_runtime
+                    .run_async_step(&mut main_loop_future)
+                    .map_err(|_| SysAugError::AsyncRuntime)
             };
             if let Some(exit_code) = async_step_result? {
                 // Handle signals, special gdb exit, etc

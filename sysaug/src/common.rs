@@ -130,9 +130,7 @@ pub enum SysAugError {
     )]
     AsyncMisMatchSyscall(&'static str, PtraceStatus),
 
-    #[error(
-        "Internal error, unexpected error from KRSM async runtime"
-    )]
+    #[error("Internal error, unexpected error from KRSM async runtime")]
     AsyncRuntime,
 
     #[error("Internal error, weak reference is no longer valid")]
