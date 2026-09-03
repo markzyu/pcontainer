@@ -18,7 +18,8 @@ use crate::common::{
 use crate::config::PERMS_IDS_SIZE;
 use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};
 use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
-use executor::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
+use executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
+use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
@@ -79,7 +80,7 @@ pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
     pub ignore_sigstops: Arc<RwLock<HashSet<Pid>>>,
 
     /// Yield until the next syscall poll has happened
-    pub yielder_syscall: PtraceAsyncYielder,
+    pub yielder_syscall: AsyncYielder,
     /// Notify the outside, synchronous event loop about states from async
     pub notifiers: AsyncNotifications,
 
@@ -142,7 +143,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         }
         Err(SysAugError::AsyncMismatch(
             PtraceFutureTypes::WaitForSignal,
-            (*status).clone(),
+            status.clone(),
         ))
     }
 
@@ -191,25 +192,25 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             if !ptrace::is_syscall_stop(&status.wait_status) {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "non-syscall stop while initializing seccomp",
-                    (*status).clone(),
+                    status.clone(),
                 ));
             }
-            return Ok((*status).clone());
+            return Ok(status.clone());
         }
 
         if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &status.wait_status {
             if expects_syscall_exit {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "seccomp stop right after seccomp stop",
-                    (*status).clone(),
+                    status.clone(),
                 ));
             }
             self.is_after_syscall_entry.replace(true);
-            return Ok((*status).clone());
+            return Ok(status.clone());
         } else if ptrace::is_syscall_stop(&status.wait_status) && expects_syscall_exit {
             if !is_legacy {
                 self.is_after_syscall_entry.replace(false);
-                return Ok((*status).clone());
+                return Ok(status.clone());
             }
 
             // We are in kernel version < 4.8 and need to do an extra round of ptrace_syscall (through async)
@@ -222,12 +223,12 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             if ptrace::is_syscall_stop(&status.wait_status) {
                 self.is_after_syscall_entry.replace(false);
-                return Ok((*status).clone());
+                return Ok(status.clone());
             }
         }
         Err(SysAugError::AsyncMismatch(
             PtraceFutureTypes::WaitForPtraceSyscall,
-            (*status).clone(),
+            status.clone(),
         ))
     }
 

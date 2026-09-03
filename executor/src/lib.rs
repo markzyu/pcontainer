@@ -14,7 +14,7 @@ mod common;
 mod futures;
 
 pub use crate::common::{PtraceExecutorError, PtraceRequest, SharedBool};
-pub use crate::futures::{PtraceAsyncRuntime, PtraceAsyncYielder, PtraceFutureTypes, PtraceStatus};
+pub use crate::futures::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 
 use nix::{sys, unistd};
 use std::collections::HashSet;
