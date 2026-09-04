@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use strum::EnumCount;
@@ -23,7 +24,6 @@ enum JsonParserYieldReason {
   LiteralBackwardsSlash,
   LiteralHexEscapeChar,
   RegexCharAnyExceptQuoteOrSlash,
-  RegexCharAfterSlash,
   RegexEscapedCharAfterSlash,
   RegexCharExponent,
   RegexCharInHex,
@@ -51,6 +51,10 @@ enum Json {
 /// This is a state machine that is written in the exact same way as a BNF grammar.
 struct JsonParser<'a> {
   runtime: &'a AsyncRuntime,
+  
+
+  /// This prevents the parser from quitting too early
+  level: RefCell<usize>,
 }
 
 impl<'a> JsonParser<'a> {
@@ -328,7 +332,7 @@ impl<'a> JsonParser<'a> {
 
 fn run_parser(full_str: &str) -> Result<Json, String> {
   let runtime = AsyncRuntime::new().map_err(|e| format!("{:?}", e))?;
-  let parser = JsonParser { runtime: &runtime };
+  let parser = JsonParser { runtime: &runtime, level: RefCell::new(0) };
   let mut future = parser.parse();
   let mut index = 0;
   loop {
@@ -340,16 +344,83 @@ fn run_parser(full_str: &str) -> Result<Json, String> {
     // Async step yielded. Handle the yield reason by checking the type of the next character.
     // And, if there is no more input, return an error.
     if index >= full_str.len() {
+      loop {
+        let unblock_reason = runtime.check_pending_reasons(|reason| match reason {
+          Some(JsonParserYieldReason::EmptyString) => true,
+          _ => false
+        });
+        if unblock_reason.is_none() {
+          break;
+        } else {
+          runtime.unblock_futures(JsonParserYieldReason::EmptyString, "".to_string());
+          let result = unsafe { runtime.run_async_step(&mut future).unwrap() };
+          if let Some(json) = result {
+            return Ok(json);
+          }
+        }
+      }
       return Err("Unexpected end of input".to_string());
     }
 
-    //...
+    let single_char = &full_str[index..index+1];
+
+    let unblock_reason = runtime.check_pending_reasons(|reason| match reason {
+      Some(JsonParserYieldReason::LiteralArrayStart) => single_char == "[",
+      Some(JsonParserYieldReason::LiteralArrayEnd) => single_char == "]",
+      Some(JsonParserYieldReason::LiteralObjectStart) => single_char == "{",
+      Some(JsonParserYieldReason::LiteralObjectEnd) => single_char == "}",
+      Some(JsonParserYieldReason::LiteralStringStart) => &full_str[index..index+1] == "\"",
+      Some(JsonParserYieldReason::LiteralStringEnd) => single_char == "\"",
+      Some(JsonParserYieldReason::LiteralColon) => single_char == ":",
+      Some(JsonParserYieldReason::LiteralComma) => single_char == ",",
+      Some(JsonParserYieldReason::LiteralPeriod) => single_char == ".",
+      Some(JsonParserYieldReason::LiteralTrue) => full_str[index..].starts_with("true"),
+      Some(JsonParserYieldReason::LiteralFalse) => full_str[index..].starts_with("false"),
+      Some(JsonParserYieldReason::LiteralNull) => full_str[index..].starts_with("null"),
+      Some(JsonParserYieldReason::LiteralSlash) => single_char == "/",
+      Some(JsonParserYieldReason::LiteralBackwardsSlash) => single_char == "\\",
+      Some(JsonParserYieldReason::LiteralHexEscapeChar) => single_char == "u",
+      Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash) => single_char != "\"" && single_char != "\\",
+      Some(JsonParserYieldReason::RegexEscapedCharAfterSlash) => "\"\\/bfnrtu".contains(single_char),
+      Some(JsonParserYieldReason::RegexCharExponent) => single_char == "e" || single_char == "E",
+      Some(JsonParserYieldReason::RegexCharInHex) => "0123456789abcdefABCDEF".contains(single_char),
+      Some(JsonParserYieldReason::RegexCharInDigit) => "0123456789".contains(single_char),
+      Some(JsonParserYieldReason::RegexCharNumberSign) => "+-".contains(single_char),
+      Some(JsonParserYieldReason::RegexCharOneToNine) => "123456789".contains(single_char),
+      Some(JsonParserYieldReason::RegexCharWhitespace) => " \t\n\r".contains(single_char),
+      Some(JsonParserYieldReason::EmptyString) => true,
+      _ => false,
+    });
+
+    let Some(unblock_reason) = unblock_reason else {
+      return Err(format!("Unexpected character: {}", single_char));
+    };
+
+    let mut response = "".to_string();
+    if unblock_reason == JsonParserYieldReason::LiteralTrue {
+      response = "true".to_string();
+      index += 4;
+    } else if unblock_reason == JsonParserYieldReason::LiteralFalse {
+      response = "false".to_string();
+      index += 5;
+    } else if unblock_reason == JsonParserYieldReason::LiteralNull {
+      response = "null".to_string();
+      index += 4;
+    } else if unblock_reason != JsonParserYieldReason::EmptyString {
+      response = single_char.to_string();
+      index += 1;
+    }
+
+    // Note: This is technically wrong for LiteralTrue, LiteralFalse, LiteralNull. But it's enough for this example.
+    println!("Debug, unblocking {:?}, str {}", unblock_reason, response);
+    runtime.unblock_futures(unblock_reason, response);
   }
 }
 
 fn main() -> std::io::Result<()> {
   let mut input = String::new();
   std::io::stdin().read_line(&mut input)?;
-  run_parser(&input).unwrap();
+  let result = run_parser(&input).unwrap();
+  println!("Parsed result: {:?}", result);
   Ok(())
 }

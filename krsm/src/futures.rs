@@ -12,6 +12,7 @@
 
 use core::cell::RefCell;
 use core::future::Future;
+use core::ops::Index;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -45,7 +46,7 @@ pub struct AsyncRuntime<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse:
     has_unblock: RefCell<Option<(YieldReason, YieldResponse)>>,
     has_new_future: AtomicBool,
     num_yield_reasons: usize,
-    pending_futures: RefCell<[Option<YieldReason>; MAX_ENUM_SIZE]>,
+    pending_futures: RefCell<[Option<(YieldReason, usize)>; MAX_ENUM_SIZE]>,
 }
 
 /// This error type is for future proofing only. It will always implement Debug.
@@ -101,8 +102,13 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
     /// Resolve currently pending Futures. Must call this at least once between run_async_step calls
     pub fn unblock_futures(&self, future_type: YieldReason, status: YieldResponse) {
         let mut pending_futures = self.pending_futures.borrow_mut();
-        if let Ok(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(x)) {
-            pending_futures.copy_within((index + 1)..self.num_yield_reasons, index);
+        if let Ok(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0))) {
+            let count = pending_futures[index].unwrap().1;
+            if count > 1 {
+                pending_futures[index] = Some((future_type, count - 1));
+            } else {
+                pending_futures.copy_within((index + 1)..self.num_yield_reasons, index);
+            }
         };
         self.has_unblock.borrow_mut().replace((future_type, status));
     }
@@ -112,10 +118,17 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
         self.has_new_future.store(true, Ordering::Relaxed);
         {
             let mut pending_futures = self.pending_futures.borrow_mut();
-            if let Err(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(x)) {
-                pending_futures.copy_within(index..self.num_yield_reasons, index + 1);
-                pending_futures[index] = Some(future_type);
-            };
+            let search_result = pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0)));
+            match search_result {
+                Err(index) => {
+                    pending_futures.copy_within(index..self.num_yield_reasons, index + 1);
+                    pending_futures[index] = Some((future_type, 1));
+                },
+                Ok(index) => {
+                    let count = pending_futures[index].unwrap().1;
+                    pending_futures[index] = Some((future_type, count + 1));
+                },
+            }
         }
 
         futures_lite::future::poll_fn(|_| {
@@ -183,10 +196,19 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
 
     /// This method is not meant to be called from async. 
     /// It's meant to help the caller of async runtime find out how to unblock the futures
-    pub fn check_pending_reasons<F>(&self, func: F)
-        where F: FnMut(&Option<YieldReason>) -> ()
+    /// 
+    /// The func callback can short circuit and end iteration early by returning true.
+    /// 
+    /// Returns: The item that `func` returned true for. (None otherwise)
+    pub fn check_pending_reasons<F>(&self, mut func: F) -> Option<YieldReason>
+        where F: FnMut(Option<YieldReason>) -> bool
     {
-        self.pending_futures.borrow().iter().for_each(func);
+        let pending_futures = self.pending_futures.borrow();
+        let end_idx = pending_futures.binary_search_by(|x| None.cmp(x)).unwrap_or(MAX_ENUM_SIZE);
+        let Some(Some(reason)) = pending_futures[..end_idx].iter().find(|x| func(x.map(|v| v.0))) else {
+            return None;
+        };
+        Some(reason.0)
     }
 }
 
