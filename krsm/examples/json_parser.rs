@@ -1,6 +1,6 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::future::Future;
 use strum::EnumCount;
 
 #[allow(dead_code)]
@@ -38,7 +38,7 @@ type JsonParserYieldResponse = String;
 type AsyncRuntime = krsm::AsyncRuntime<JsonParserYieldReason, JsonParserYieldResponse>;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum Json {
   Object(HashMap<String, Json>),
   Array(Vec<Json>),
@@ -49,12 +49,11 @@ enum Json {
 }
 
 /// This is a state machine that is written in the exact same way as a BNF grammar.
+/// 
+/// Use futures_lite::future::or with caution about the order of futures. It short circuits.
+/// Use EmptyString as an escape hatch out of greedy matchers.
 struct JsonParser<'a> {
   runtime: &'a AsyncRuntime,
-  
-
-  /// This prevents the parser from quitting too early
-  level: RefCell<usize>,
 }
 
 impl<'a> JsonParser<'a> {
@@ -247,27 +246,26 @@ impl<'a> JsonParser<'a> {
 
   /// <integer> ::= <sign> <digits> | <digits>
   async fn parse_integer(&self) -> String {
-    futures_lite::future::or(
-      async {
-        let sign = futures_lite::future::or(
-          self.runtime.new_pending_future(JsonParserYieldReason::RegexCharNumberSign),
-          self.runtime.new_pending_future(JsonParserYieldReason::EmptyString),
-        ).await;
-        let digits = self.parse_digits().await;
-        format!("{}{}", sign, digits)
-      },
-      self.parse_digits(),
-    ).await
+    let sign = futures_lite::future::or(
+      self.runtime.new_pending_future(JsonParserYieldReason::RegexCharNumberSign),
+      self.runtime.new_pending_future(JsonParserYieldReason::EmptyString),
+    ).await;
+    let digits = self.parse_digits().await;
+    format!("{}{}", sign, digits)
   }
 
   /// <digits> ::= <digit> | <digit> <digits>
   async fn parse_digits(&self) -> String {
+    let digit = self.runtime.new_pending_future(JsonParserYieldReason::RegexCharInDigit).await;
     futures_lite::future::or(
-      self.runtime.new_pending_future(JsonParserYieldReason::RegexCharInDigit),
       async {
-        let digit = self.runtime.new_pending_future(JsonParserYieldReason::RegexCharInDigit).await;
         let digits = Box::pin(self.parse_digits()).await;
-        format!("{}{}", digit, digits)
+        let result = format!("{}{}", digit, digits);
+        result
+      },
+      async {
+        self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
+        digit.clone()
       },
     ).await
   }
@@ -330,13 +328,14 @@ impl<'a> JsonParser<'a> {
   }
 }
 
-fn run_parser(full_str: &str) -> Result<Json, String> {
-  let runtime = AsyncRuntime::new().map_err(|e| format!("{:?}", e))?;
-  let parser = JsonParser { runtime: &runtime, level: RefCell::new(0) };
-  let mut future = parser.parse();
+fn run_parser<T, Fut>(full_str: &str, runtime: &AsyncRuntime, mut future: Fut) -> Result<T, String>
+where
+  T: Debug,
+  Fut: Future<Output = T>,
+{
   let mut index = 0;
   loop {
-    let result = unsafe { runtime.run_async_step(&mut future).unwrap() };
+    let result = unsafe { runtime.run_async_step(&mut future) }.unwrap();
     if let Some(json) = result {
       return Ok(json);
     }
@@ -352,8 +351,10 @@ fn run_parser(full_str: &str) -> Result<Json, String> {
         if unblock_reason.is_none() {
           break;
         } else {
+          println!("Debug, unblocking EmptyString (exit loop)");
           runtime.unblock_futures(JsonParserYieldReason::EmptyString, "".to_string());
           let result = unsafe { runtime.run_async_step(&mut future).unwrap() };
+          println!("EXITLOOP {:?}", &result);
           if let Some(json) = result {
             return Ok(json);
           }
@@ -420,7 +421,32 @@ fn run_parser(full_str: &str) -> Result<Json, String> {
 fn main() -> std::io::Result<()> {
   let mut input = String::new();
   std::io::stdin().read_line(&mut input)?;
-  let result = run_parser(&input).unwrap();
+  let runtime = AsyncRuntime::new().unwrap();
+  let parser = JsonParser { runtime: &runtime };
+  let future = parser.parse();
+  let result = run_parser(&input, &runtime, future).unwrap();
   println!("Parsed result: {:?}", result);
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_number_parsing() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser { runtime: &runtime };
+    let future = parser.parse_digits();
+    let result = run_parser("123", &runtime, future).unwrap();
+    assert_eq!(result, "123");
+  }
+
+  fn test_object_parsing() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser { runtime: &runtime };
+    let future = parser.parse_object();
+    let result = run_parser("{\"name\":\"John\",\"age\":30}", &runtime, future).unwrap();
+    assert_eq!(result, Json::Object(HashMap::from([("name".to_string(), Json::String("John".to_string())), ("age".to_string(), Json::Number("30".to_string()))])));
+  }
 }
