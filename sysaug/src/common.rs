@@ -11,6 +11,7 @@
 // GNU General Public License for more details.
 
 use executor::{PtraceFutureTypes, PtraceStatus};
+use krsm::AsyncRuntimeError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -130,8 +131,8 @@ pub enum SysAugError {
     )]
     AsyncMisMatchSyscall(&'static str, PtraceStatus),
 
-    #[error("Internal error, unexpected error from KRSM async runtime")]
-    AsyncRuntime,
+    #[error("Internal error, unexpected error from KRSM async runtime: {0}")]
+    AsyncRuntime(AsyncRuntimeError),
 
     #[error("Internal error, weak reference is no longer valid")]
     WeakReference,

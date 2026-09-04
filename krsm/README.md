@@ -19,7 +19,7 @@ And the downstream can define a state machine using asynchronous syntax:
 
 * The async code can directly describe business logics using awaits
 * The async code can create temporary states across awaits and reuse them within the scope of an async function
-* The async code can define helper function and even recursive ones
+* The async code can define helper function and even recursive ones (if you can afford `Box::pin`)
 * The async code can call basic `futures_lite` helpers such as `zip()` and `or()`, as long as they don't use the `std` feature.
 * The async code must not make use of wakers, and thus, must not call real libraries with async I/O (such as `async_std` and `tokio`)
 

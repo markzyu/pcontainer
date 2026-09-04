@@ -11,36 +11,49 @@
 // GNU General Public License for more details.
 
 use core::cell::RefCell;
-use core::fmt::Debug;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use strum::EnumCount;
+use thiserror::Error;
+
+const MAX_ENUM_SIZE: usize = 4096;
 
 /// The KRSM async runtime
+/// 
+/// Type Parameters:
+/// 
+/// * YieldReason: This must be a fieldless enum that derives the following macros
+///   * Copy, Eq, PartialEq, Ord, PartialOrd
+///   * EnumCount (from strum crate)
+/// * YieldResponse: This can be any Rust struct that derives PartialEq
 ///
-/// Note: Important Caveat:
+/// This runtime does not support tokio, async I/O, or external async utilities.
 ///
-/// We do not support tokio, async I/O, or external async utilities.
-///
-/// We only support parts of futures_lite, these three helper functions:
+/// It only supports parts of futures_lite, these three helper functions:
 ///
 /// > `zip()`, `or()`, `poll_fn()`.
 ///
-/// We especially do not support any invocation of the Waker. If you await on
+/// It especially does not support any invocation of the Waker. If you await on
 /// an external async function which tries to access the Waker, the runtime
 /// **will panic**.
 ///
 /// The use of `async` is purely to avoid writing a state machine switch-case.
 #[derive(Debug)]
-pub struct AsyncRuntime<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> {
+pub struct AsyncRuntime<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq> {
     has_unblock: RefCell<Option<(YieldReason, YieldResponse)>>,
     has_new_future: AtomicBool,
+    num_yield_reasons: usize,
+    pending_futures: RefCell<[Option<YieldReason>; MAX_ENUM_SIZE]>,
 }
 
 /// This error type is for future proofing only. It will always implement Debug.
-#[derive(Debug)]
-pub struct AsyncRuntimeError();
+#[derive(Debug, Error)]
+pub enum AsyncRuntimeError {
+    #[error("Cannot initialize AsyncRuntime: There are too many variants of YieldReason.")]
+    TooManyReasonVariants,
+}
 
 /// AsyncYield is a helper for KRSM async loops.
 ///
@@ -82,17 +95,29 @@ const RAW_WAKER_WITH_ASSERTIONS: RawWaker = {
     RawWaker::new(core::ptr::null(), &VTABLE)
 };
 
-impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
+impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
     AsyncRuntime<YieldReason, YieldResponse>
 {
     /// Resolve currently pending Futures. Must call this at least once between run_async_step calls
     pub fn unblock_futures(&self, future_type: YieldReason, status: YieldResponse) {
+        let mut pending_futures = self.pending_futures.borrow_mut();
+        if let Ok(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(x)) {
+            pending_futures.copy_within((index + 1)..self.num_yield_reasons, index);
+        };
         self.has_unblock.borrow_mut().replace((future_type, status));
     }
 
     /// Async helper function to wait for a new instance of pending future to complete
     pub async fn new_pending_future(&self, future_type: YieldReason) -> YieldResponse {
         self.has_new_future.store(true, Ordering::Relaxed);
+        {
+            let mut pending_futures = self.pending_futures.borrow_mut();
+            if let Err(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(x)) {
+                pending_futures.copy_within(index..self.num_yield_reasons, index + 1);
+                pending_futures[index] = Some(future_type);
+            };
+        }
+
         futures_lite::future::poll_fn(|_| {
             let matches = if let Some((curr_type, _)) = self.has_unblock.borrow().as_ref() {
                 curr_type == &future_type
@@ -142,16 +167,26 @@ impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug>
     pub fn _has_new_blockage(&self) -> bool {
         self.has_new_future.load(Ordering::Relaxed)
     }
-}
 
-impl<YieldReason: Eq + Debug, YieldResponse: PartialEq + Debug> Default
-    for AsyncRuntime<YieldReason, YieldResponse>
-{
-    fn default() -> Self {
-        Self {
+    pub fn new() -> Result<Self, AsyncRuntimeError> {
+        if MAX_ENUM_SIZE < YieldReason::COUNT {
+            return Err(AsyncRuntimeError::TooManyReasonVariants);
+        }
+
+        Ok(Self {
             has_unblock: RefCell::new(None),
             has_new_future: AtomicBool::default(),
-        }
+            num_yield_reasons: YieldReason::COUNT,
+            pending_futures: RefCell::new([const { None }; MAX_ENUM_SIZE])
+        })
+    }
+
+    /// This method is not meant to be called from async. 
+    /// It's meant to help the caller of async runtime find out how to unblock the futures
+    pub fn check_pending_reasons<F>(&self, func: F)
+        where F: FnMut(&Option<YieldReason>) -> ()
+    {
+        self.pending_futures.borrow().iter().for_each(func);
     }
 }
 
@@ -178,16 +213,17 @@ impl AsyncYielder {
 #[cfg(test)]
 mod tests {
     use crate::futures;
-    use core::fmt::Debug;
+    use strum::EnumCount;
 
     /// This is just an example YieldReason.
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Copy, Clone, EnumCount, PartialEq, Eq, PartialOrd, Ord)]
+    #[repr(usize)]
     enum PtraceFutureTypes {
         WaitForPtraceSyscall,
         WaitForSignal,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, PartialEq)]
     /// This is just an example YieldResponse
     struct PtraceStatus {}
 
@@ -195,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_basic_async_function() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::ready(123);
         assert!(matches!(
             unsafe { runtime.run_async_step(&mut test_future) },
@@ -205,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_basic_blocking_on_ptrace_future() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall);
         assert!(matches!(
             unsafe { runtime.run_async_step(&mut test_future) },
@@ -232,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_blocking_on_two_ptrace_futures() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = async {
             runtime
                 .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
@@ -276,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_compatible_with_futures_lite_zip_in_order() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::zip(
             runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall),
             runtime.new_pending_future(PtraceFutureTypes::WaitForSignal),
@@ -308,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_compatible_with_futures_lite_zip_in_reversed_order() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::zip(
             runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall),
             runtime.new_pending_future(PtraceFutureTypes::WaitForSignal),
@@ -340,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_compatible_with_futures_lite_or_resolves_first() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::or(
             async {
                 runtime
@@ -371,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_compatible_with_futures_lite_or_resolves_second() {
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::or(
             async {
                 runtime
@@ -422,7 +458,7 @@ mod tests {
     #[test]
     fn test_incompatible_with_waker_such_as_futures_lite_yield_now_step1() {
         // futures_lite::future::yield_now() uses a Waker.
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = _future_with_waker(&runtime);
 
         // Run the first async step, which should not panic
@@ -443,7 +479,7 @@ mod tests {
     )]
     fn test_incompatible_with_waker_such_as_futures_lite_yield_now_step2() {
         // futures_lite::future::yield_now() uses a Waker.
-        let runtime = PtraceAsyncRuntime::default();
+        let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = _future_with_waker(&runtime);
 
         // Run the first async step, which should not panic

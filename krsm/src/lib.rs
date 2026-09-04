@@ -14,4 +14,4 @@
 
 mod futures;
 
-pub use crate::futures::{AsyncRuntime, AsyncYielder};
+pub use crate::futures::{AsyncRuntime, AsyncRuntimeError, AsyncYielder};

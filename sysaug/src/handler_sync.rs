@@ -181,7 +181,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let pid = self.pid;
 
         // Initialize and store async loops and futures
-        let async_runtime = PtraceAsyncRuntime::default();
+        let async_runtime = PtraceAsyncRuntime::new().map_err(SysAugError::AsyncRuntime)?;
         let async_handlers = AsyncTraceeHandler {
             async_runtime: &async_runtime,
             pid: pid.clone(),
@@ -242,7 +242,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let async_step_result = unsafe {
                 async_runtime
                     .run_async_step(&mut main_loop_future)
-                    .map_err(|_| SysAugError::AsyncRuntime)
+                    .map_err(SysAugError::AsyncRuntime)
             };
             if let Some(exit_code) = async_step_result? {
                 // Handle signals, special gdb exit, etc
