@@ -21,7 +21,6 @@ enum JsonParserYieldReason {
   LiteralFalse,
   LiteralNull,
   LiteralSlash,
-  LiteralBackwardsSlash,
   LiteralHexEscapeChar,
   RegexCharAnyExceptQuoteOrSlash,
   RegexEscapedCharAfterSlash,
@@ -191,14 +190,14 @@ impl<'a> JsonParser<'a> {
   async fn parse_characters_reversed(&self) -> Vec<char> {
     futures_lite::future::or(
       async {
-        self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
-        vec![]
-      },
-      async {
         let char = self.parse_character().await;
         let mut list = Box::pin(self.parse_characters_reversed()).await;
         list.push(char);
         list
+      },
+      async {
+        self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
+        vec![]
       }
     ).await
   }
@@ -219,7 +218,15 @@ impl<'a> JsonParser<'a> {
         async {
           self.runtime.new_pending_future(JsonParserYieldReason::LiteralSlash).await;
           let str = self.runtime.new_pending_future(JsonParserYieldReason::RegexEscapedCharAfterSlash).await;
-          self.str_to_char(&str)
+          let result_str = match str.as_str() {
+            "b" => "\x08".to_string(),
+            "f" => "\x0c".to_string(),
+            "n" => "\n".to_string(),
+            "r" => "\r".to_string(),
+            "t" => "t".to_string(),
+            _ => str
+          };
+          self.str_to_char(&result_str)
         },
         async {
           self.runtime.new_pending_future(JsonParserYieldReason::LiteralSlash).await;
@@ -266,31 +273,31 @@ impl<'a> JsonParser<'a> {
       async {
         self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
         digit.clone()
-      },
+      }
     ).await
   }
 
   /// <fraction> ::= "." <digits> | ""
   async fn parse_fraction(&self) -> String {
     futures_lite::future::or(
-      self.runtime.new_pending_future(JsonParserYieldReason::EmptyString),
       async {
         self.runtime.new_pending_future(JsonParserYieldReason::LiteralPeriod).await;
         let digits = self.parse_digits().await;
         format!("{}{}", ".", digits)
-      }
+      },
+      self.runtime.new_pending_future(JsonParserYieldReason::EmptyString)
     ).await
   }
 
   /// <exponent> ::= "e" <digits> | "E" <digits> | ""
   async fn parse_exponent(&self) -> String {
     futures_lite::future::or(
-      self.runtime.new_pending_future(JsonParserYieldReason::EmptyString),
       async {
         let exp = self.runtime.new_pending_future(JsonParserYieldReason::RegexCharExponent).await;
         let digits = self.parse_digits().await;
         format!("{}{}", exp, digits)
-      }
+      },
+      self.runtime.new_pending_future(JsonParserYieldReason::EmptyString)
     ).await
   }
 
@@ -298,11 +305,11 @@ impl<'a> JsonParser<'a> {
   async fn parse_whitespaces(&self) {
     futures_lite::future::or(
       async {
-        self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
-      },
-      async {
         self.runtime.new_pending_future(JsonParserYieldReason::RegexCharWhitespace).await;
         Box::pin(self.parse_whitespaces()).await;
+      },
+      async {
+        self.runtime.new_pending_future(JsonParserYieldReason::EmptyString).await;
       }
     ).await;
   }
@@ -378,11 +385,10 @@ where
       Some(JsonParserYieldReason::LiteralTrue) => full_str[index..].starts_with("true"),
       Some(JsonParserYieldReason::LiteralFalse) => full_str[index..].starts_with("false"),
       Some(JsonParserYieldReason::LiteralNull) => full_str[index..].starts_with("null"),
-      Some(JsonParserYieldReason::LiteralSlash) => single_char == "/",
-      Some(JsonParserYieldReason::LiteralBackwardsSlash) => single_char == "\\",
+      Some(JsonParserYieldReason::LiteralSlash) => single_char == "\\",
       Some(JsonParserYieldReason::LiteralHexEscapeChar) => single_char == "u",
       Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash) => single_char != "\"" && single_char != "\\",
-      Some(JsonParserYieldReason::RegexEscapedCharAfterSlash) => "\"\\/bfnrtu".contains(single_char),
+      Some(JsonParserYieldReason::RegexEscapedCharAfterSlash) => "\"\\/bfnrt".contains(single_char),
       Some(JsonParserYieldReason::RegexCharExponent) => single_char == "e" || single_char == "E",
       Some(JsonParserYieldReason::RegexCharInHex) => "0123456789abcdefABCDEF".contains(single_char),
       Some(JsonParserYieldReason::RegexCharInDigit) => "0123456789".contains(single_char),
@@ -442,6 +448,16 @@ mod tests {
     assert_eq!(result, "123");
   }
 
+  #[test]
+  fn test_string_parsing() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser { runtime: &runtime };
+    let future = parser.parse_string();
+    let result = run_parser("\"ab\\nc\"", &runtime, future).unwrap();
+    assert_eq!(result, "ab\nc");
+  }
+
+  #[test]
   fn test_object_parsing() {
     let runtime = AsyncRuntime::new().unwrap();
     let parser = JsonParser { runtime: &runtime };
