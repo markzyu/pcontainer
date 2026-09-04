@@ -496,6 +496,7 @@ mod tests {
 
   #[test]
   fn test_string_parsing_confused_with_number() {
+    // this test case might fail with parser returning String("123.") instead.
     let runtime = AsyncRuntime::new().unwrap();
     let parser = JsonParser { runtime: &runtime };
     let future = parser.parse();
