@@ -495,6 +495,24 @@ mod tests {
   }
 
   #[test]
+  fn test_string_parsing_confused_with_number() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser { runtime: &runtime };
+    let future = parser.parse();
+    let result = run_parser("\"123.+917\"", &runtime, future).unwrap();
+    assert_eq!(result, Json::String("123.+917".to_string()));
+  }
+
+  #[test]
+  fn test_fraction_parsing() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser { runtime: &runtime };
+    let future = parser.parse();
+    let result = run_parser("-123.917", &runtime, future).unwrap();
+    assert_eq!(result, Json::Number("-123.917".to_string()));
+  }
+
+  #[test]
   fn test_member_parsing() {
     let runtime = AsyncRuntime::new().unwrap();
     let parser = JsonParser { runtime: &runtime };
