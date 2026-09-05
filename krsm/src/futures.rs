@@ -21,9 +21,9 @@ use thiserror::Error;
 const MAX_ENUM_SIZE: usize = 4096;
 
 /// The KRSM async runtime
-/// 
+///
 /// Type Parameters:
-/// 
+///
 /// * YieldReason: This must be a fieldless enum that derives the following macros
 ///   * Copy, Eq, PartialEq, Ord, PartialOrd
 ///   * EnumCount (from strum crate)
@@ -112,7 +112,9 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
 
     fn _remove_pending_future(&self, future_type: YieldReason) {
         let mut pending_futures = self.pending_futures.borrow_mut();
-        if let Ok(index) = pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0))) {
+        if let Ok(index) =
+            pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0)))
+        {
             let count = pending_futures[index].unwrap().1;
             if count > 1 {
                 pending_futures[index] = Some((future_type, count - 1));
@@ -123,11 +125,10 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
     }
 
     /// Create a new instance of pending future
-    pub async fn new_pending_future<'a>(&'a self, future_type: YieldReason) -> YieldResponse
-    {
+    pub async fn new_pending_future<'a>(&'a self, future_type: YieldReason) -> YieldResponse {
         let guard = FutureDropGuard {
             future_type,
-            runtime: &self
+            runtime: &self,
         };
         guard.build().await
     }
@@ -177,37 +178,46 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
             has_unblock: RefCell::new(None),
             has_new_future: AtomicBool::default(),
             num_yield_reasons: YieldReason::COUNT,
-            pending_futures: RefCell::new([const { None }; MAX_ENUM_SIZE])
+            pending_futures: RefCell::new([const { None }; MAX_ENUM_SIZE]),
         })
     }
 
-    /// This method is not meant to be called from within async. 
+    /// This method is not meant to be called from within async.
     /// It's meant to help the caller of async runtime find out how to unblock the futures
-    /// 
+    ///
     /// The func callback can short circuit and end iteration early by returning true.
-    /// 
+    ///
     /// Returns: The item that `func` returned true for. (None otherwise)
     pub fn check_pending_reasons<F>(&self, mut func: F) -> Option<YieldReason>
-        where F: FnMut(Option<YieldReason>) -> bool
+    where
+        F: FnMut(Option<YieldReason>) -> bool,
     {
         let pending_futures = self.pending_futures.borrow();
-        let end_idx = pending_futures.binary_search_by(|x| None.cmp(x)).unwrap_or(MAX_ENUM_SIZE);
-        let Some(Some(reason)) = pending_futures[..end_idx].iter().find(|x| func(x.map(|v| v.0))) else {
+        let end_idx = pending_futures
+            .binary_search_by(|x| None.cmp(x))
+            .unwrap_or(MAX_ENUM_SIZE);
+        let Some(Some(reason)) = pending_futures[..end_idx]
+            .iter()
+            .find(|x| func(x.map(|v| v.0)))
+        else {
             return None;
         };
         Some(reason.0)
     }
 
-    /// This method is not meant to be called from within async. 
+    /// This method is not meant to be called from within async.
     /// It's meant to help the caller of async runtime remove futures that must never
     /// be unblocked.
-    /// 
+    ///
     /// The func callback must return `false` for any future they want to remove.
     pub fn filter_valid_futures<F>(&self, mut func: F)
-        where F: FnMut(Option<YieldReason>) -> bool
+    where
+        F: FnMut(Option<YieldReason>) -> bool,
     {
         let mut pending_futures = self.pending_futures.borrow_mut();
-        let end_idx = pending_futures.binary_search_by(|x| None.cmp(x)).unwrap_or(MAX_ENUM_SIZE);
+        let end_idx = pending_futures
+            .binary_search_by(|x| None.cmp(x))
+            .unwrap_or(MAX_ENUM_SIZE);
         let mut write_idx = 0;
         for i in 0..end_idx {
             if !func(pending_futures[i].map(|v| v.0)) {
@@ -236,16 +246,17 @@ impl<'a, YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
         self.runtime.has_new_future.store(true, Ordering::Relaxed);
         {
             let mut pending_futures = self.runtime.pending_futures.borrow_mut();
-            let search_result = pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0)));
+            let search_result =
+                pending_futures.binary_search_by(|x| Some(future_type).cmp(&x.map(|v| v.0)));
             match search_result {
                 Err(index) => {
                     pending_futures.copy_within(index..num_yield_reasons, index + 1);
                     pending_futures[index] = Some((future_type, 1));
-                },
+                }
                 Ok(index) => {
                     let count = pending_futures[index].unwrap().1;
                     pending_futures[index] = Some((future_type, count + 1));
-                },
+                }
             }
         }
 
@@ -264,8 +275,8 @@ impl<'a, YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
     }
 }
 
-impl<'a, YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
-    Drop for FutureDropGuard<'a, YieldReason, YieldResponse>
+impl<'a, YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq> Drop
+    for FutureDropGuard<'a, YieldReason, YieldResponse>
 {
     fn drop(&mut self) {
         self.runtime._remove_pending_future(self.future_type);
@@ -352,8 +363,12 @@ mod tests {
     fn test_blocking_on_two_built_futures() {
         let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = async {
-            runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall).await;
-            runtime.new_pending_future(PtraceFutureTypes::WaitForSignal).await;
+            runtime
+                .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                .await;
+            runtime
+                .new_pending_future(PtraceFutureTypes::WaitForSignal)
+                .await;
             42
         };
         assert!(matches!(
@@ -457,11 +472,15 @@ mod tests {
         let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::or(
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .await;
                 234
             },
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForSignal).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForSignal)
+                    .await;
                 456
             },
         );
@@ -484,11 +503,15 @@ mod tests {
         let runtime = PtraceAsyncRuntime::new().unwrap();
         let mut test_future = futures_lite::future::or(
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .await;
                 234
             },
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForSignal).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForSignal)
+                    .await;
                 456
             },
         );
@@ -509,12 +532,16 @@ mod tests {
     async fn _future_with_waker(runtime: &PtraceAsyncRuntime) {
         futures_lite::future::or(
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForPtraceSyscall)
+                    .await;
                 futures_lite::future::yield_now().await;
                 234
             },
             async {
-                runtime.new_pending_future(PtraceFutureTypes::WaitForSignal).await;
+                runtime
+                    .new_pending_future(PtraceFutureTypes::WaitForSignal)
+                    .await;
                 456
             },
         )
