@@ -19,9 +19,10 @@ Please check out the example state machines in `krsm/examples`.
 
 ## Caveat 1: Extra constraints on `async` syntax
 
-Async code must be written as if it is a non-determinstics state machine (as if it's waiting on all "concurrent" branches of `futures_lite::future::or`).
+Your async code must satisfy both of the following conditions:
 
-But in reality, this async runtime is meant to **only execute one of those** possible transitions per turn.
+1. It is written as if everything runs concurrently, like a non-determinstic state machine (through `futures_lite::future::or`)
+2. And yet, it is executed deterministically: only one of those possible transitions can be taken, per async turn.
 
 As a result:
 
