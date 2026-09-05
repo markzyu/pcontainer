@@ -181,7 +181,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
         let pid = self.pid;
 
         // Initialize and store async loops and futures
-        let async_runtime = PtraceAsyncRuntime::default();
+        let async_runtime = PtraceAsyncRuntime::new().map_err(SysAugError::AsyncRuntime)?;
         let async_handlers = AsyncTraceeHandler {
             async_runtime: &async_runtime,
             pid: pid.clone(),
@@ -242,7 +242,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
             let async_step_result = unsafe {
                 async_runtime
                     .run_async_step(&mut main_loop_future)
-                    .map_err(|_| SysAugError::AsyncRuntime)
+                    .map_err(SysAugError::AsyncRuntime)
             };
             if let Some(exit_code) = async_step_result? {
                 // Handle signals, special gdb exit, etc
@@ -277,16 +277,24 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
                 // Unblock different futures in the proper order
                 if let Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForSignal, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSeccomp, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceSeccomp, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceEvent(..) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceSyscall(..) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else {
                     event!(Level::INFO, "Unknown ptrace event: {:?}", &wait_status);

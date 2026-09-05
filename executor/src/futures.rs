@@ -13,7 +13,7 @@ use nix::sys::wait::WaitStatus;
 
 // TODO: Move this to sysaug crate (keep async runtime stuff in krsm only)
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PtraceFutureTypes {
     WaitForPtraceSeccomp,
     /// Warning: This can happen at both syscall-exit-stop and syscall-entry-stop
