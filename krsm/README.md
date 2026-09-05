@@ -41,9 +41,7 @@ However, if your YieldReason is a complex enum, then:
 * At any moment of an async future's execution, there is a limit on the maximum number of pending futures that can be tracked by the runtime.
 * This number is `MAX_PENDING` and can be controlled at compile time, through Rust const generics.
 
-Upon hitting this limit, all further async calls will fail due to `AsyncRuntimeError::TooManyPending`
-
-To avoid this scenario, it's recommended to
+Upon hitting this limit, all further async calls will fail due to `AsyncRuntimeError::TooManyPending`. To avoid this scenario, it's recommended to
 
 * Use a simple C-like Enum as `YieldReason` if possible.
 
