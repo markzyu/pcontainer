@@ -24,7 +24,7 @@ pub(crate) struct RenameConfig {
     #[serde(with = "serde_regex")]
     pub(crate) regex: Regex,
 
-    /// If None, pcontainer will hide the file at this path.
+    /// If None, pocker will hide the file at this path.
     pub(crate) replacement: Option<String>,
 
     /// If false, replace only the earliest match.

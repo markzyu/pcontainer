@@ -110,7 +110,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     .unwrap_or("".into()),
             );
             event!(Level::INFO, "filefd path {:?}", &save_paths[0]);
-            // There is no need to calc_real_path, because pcontainer cannot override real fds
+            // There is no need to calc_real_path, because pocker cannot override real fds
         }
 
         // Handle getdents (make the buffer seem smaller)

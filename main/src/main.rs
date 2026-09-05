@@ -56,7 +56,7 @@ pub struct CLIArgs {
     #[arg(long)]
     pub sudo: bool,
 
-    /// Do not start a pcontainer. Instead, print the list of known syscalls
+    /// Do not start a pocker container. Instead, print the list of known syscalls
     #[arg(long)]
     pub show_syscalls: bool,
 

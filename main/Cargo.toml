@@ -1,5 +1,6 @@
 [package]
-name = "dockify"
+name = "pocker"
+description = "A multithreaded incomplete rewrite of proot, from scratch, just for fun. (The p stands for ptrace)"
 version = "0.2.0"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
 license = "GPL-3.0-or-later"

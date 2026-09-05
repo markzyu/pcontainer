@@ -155,7 +155,7 @@ fn on_tracee_init_syscalls(&self, s: &WaitStatus, exit: &mut Option<u8>) -> Bool
 }
 ```
 
-Here is a link to the actual code: https://github.com/markzyu/pcontainer/commit/5a95bbc18a62ac691ad3ffa4594e01a990b08306#diff-ba3485e82dd442c512db671a5fe0b0c367b00667537f2d7a44b71df6f4d89927
+Here is a link to the actual code: https://github.com/markzyu/pocker/commit/5a95bbc18a62ac691ad3ffa4594e01a990b08306#diff-ba3485e82dd442c512db671a5fe0b0c367b00667537f2d7a44b71df6f4d89927
 
 Side Note:
 
@@ -400,7 +400,7 @@ Whenever synchronous logic is involved, we introduce a global state and must hav
 
 And yet, with a async and an local thread executor, you immediately get RefCell for free: 
 
-If you look at the [async version](https://github.com/markzyu/pcontainer/blob/817f6b8e492fd177a51957e0c142d0b52ef01cf9/sysaug/src/handler.rs#L158) of `tracee_stack_offset` today, it's a `RefCell`.
+If you look at the [async version](https://github.com/markzyu/pocker/blob/817f6b8e492fd177a51957e0c142d0b52ef01cf9/sysaug/src/handler.rs#L158) of `tracee_stack_offset` today, it's a `RefCell`.
 
 
 ## Implementing our own Lightweight Async Runtime
