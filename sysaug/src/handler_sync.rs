@@ -277,16 +277,24 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
                 // Unblock different futures in the proper order
                 if let Some(..) = self.get_tracee_maybe_signal(&wait_status)? {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForSignal, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForSignal, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceEvent(_, _, PTRACE_EVENT_SECCOMP) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSeccomp, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceSeccomp, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceEvent(..) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceEvent, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else if let WaitStatus::PtraceSyscall(..) = &wait_status {
-                    async_runtime.unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status);
+                    async_runtime
+                        .unblock_futures(PtraceFutureTypes::WaitForPtraceSyscall, status)
+                        .map_err(SysAugError::AsyncRuntime)?;
                     break;
                 } else {
                     event!(Level::INFO, "Unknown ptrace event: {:?}", &wait_status);
