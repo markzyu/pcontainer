@@ -159,12 +159,14 @@ impl<'a> JsonParser<'a> {
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralArrayStart(curr_offset))
             .await?;
-        let result =
-            futures_lite::future::or(async { Ok(Json::Array(self.parse_elements().await?)) }, async {
+        let result = futures_lite::future::or(
+            async { Ok(Json::Array(self.parse_elements().await?)) },
+            async {
                 self.parse_whitespaces().await?;
                 Ok(Json::Array(Vec::default()))
-            })
-            .await?;
+            },
+        )
+        .await?;
 
         let curr_offset2 = *self.offset.borrow();
         self.runtime
@@ -481,15 +483,19 @@ where
         // And, if there is no more input, return an error.
         if index >= full_str.len() {
             loop {
-                let unblock_reason = runtime.check_pending_reasons(|reason| match reason {
-                    Some(JsonParserYieldReason::EmptyString) => true,
-                    _ => false,
-                }).map_err(|e| format!("Internal error: {:?}", e))?;
+                let unblock_reason = runtime
+                    .check_pending_reasons(|reason| match reason {
+                        Some(JsonParserYieldReason::EmptyString) => true,
+                        _ => false,
+                    })
+                    .map_err(|e| format!("Internal error: {:?}", e))?;
                 if unblock_reason.is_none() {
                     break;
                 } else {
                     println!("Debug, unblocking EmptyString (exit loop)");
-                    runtime.unblock_futures(JsonParserYieldReason::EmptyString, "".to_string()).map_err(|e| format!("Internal error: {:?}", e))?;
+                    runtime
+                        .unblock_futures(JsonParserYieldReason::EmptyString, "".to_string())
+                        .map_err(|e| format!("Internal error: {:?}", e))?;
                     let result = unsafe { runtime.run_async_step(&mut future).unwrap() };
                     println!("EXITLOOP {:?}", &result);
                     if let Some(result) = result {
@@ -503,70 +509,86 @@ where
         let single_char = &full_str[index..index + 1];
 
         // First, deprecate futures waiting for old indices we already processed
-        runtime.filter_valid_futures(|reason| match reason {
-            Some(JsonParserYieldReason::LiteralArrayStart(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralArrayEnd(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralObjectStart(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralObjectEnd(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralStringStart(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralStringEnd(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralColon(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralComma(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralPeriod(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralTrue(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralFalse(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralNull(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralSlash(j)) => j == index,
-            Some(JsonParserYieldReason::LiteralHexEscapeChar(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash(j)) => j == index,
-            Some(JsonParserYieldReason::RegexEscapedCharAfterSlash(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharExponent(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharInHex(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharInDigit(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharNumberSign(j)) => j == index,
-            Some(JsonParserYieldReason::RegexCharWhitespace(j)) => j == index,
-            _ => true,
-        }).map_err(|e| format!("Internal error: {:?}", e))?;
+        runtime
+            .filter_valid_futures(|reason| match reason {
+                Some(JsonParserYieldReason::LiteralArrayStart(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralArrayEnd(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralObjectStart(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralObjectEnd(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralStringStart(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralStringEnd(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralColon(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralComma(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralPeriod(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralTrue(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralFalse(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralNull(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralSlash(j)) => j == index,
+                Some(JsonParserYieldReason::LiteralHexEscapeChar(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash(j)) => j == index,
+                Some(JsonParserYieldReason::RegexEscapedCharAfterSlash(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharExponent(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharInHex(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharInDigit(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharNumberSign(j)) => j == index,
+                Some(JsonParserYieldReason::RegexCharWhitespace(j)) => j == index,
+                _ => true,
+            })
+            .map_err(|e| format!("Internal error: {:?}", e))?;
 
         // Then, decide which future to unblock (normal > lowpri)
-        let unblock_reason_normal = runtime.check_pending_reasons(|reason| match reason {
-            Some(JsonParserYieldReason::LiteralArrayStart(_)) => single_char == "[",
-            Some(JsonParserYieldReason::LiteralArrayEnd(_)) => single_char == "]",
-            Some(JsonParserYieldReason::LiteralObjectStart(_)) => single_char == "{",
-            Some(JsonParserYieldReason::LiteralObjectEnd(_)) => single_char == "}",
-            Some(JsonParserYieldReason::LiteralStringStart(_)) => {
-                &full_str[index..index + 1] == "\""
-            }
-            Some(JsonParserYieldReason::LiteralStringEnd(_)) => single_char == "\"",
-            Some(JsonParserYieldReason::LiteralColon(_)) => single_char == ":",
-            Some(JsonParserYieldReason::LiteralComma(_)) => single_char == ",",
-            Some(JsonParserYieldReason::LiteralPeriod(_)) => single_char == ".",
-            Some(JsonParserYieldReason::LiteralTrue(_)) => full_str[index..].starts_with("true"),
-            Some(JsonParserYieldReason::LiteralFalse(_)) => full_str[index..].starts_with("false"),
-            Some(JsonParserYieldReason::LiteralNull(_)) => full_str[index..].starts_with("null"),
-            Some(JsonParserYieldReason::LiteralSlash(_)) => single_char == "\\",
-            Some(JsonParserYieldReason::LiteralHexEscapeChar(_)) => single_char == "u",
-            Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash(_)) => {
-                single_char != "\"" && single_char != "\\"
-            }
-            Some(JsonParserYieldReason::RegexEscapedCharAfterSlash(_)) => {
-                "\"\\/bfnrt".contains(single_char)
-            }
-            Some(JsonParserYieldReason::RegexCharExponent(_)) => {
-                single_char == "e" || single_char == "E"
-            }
-            Some(JsonParserYieldReason::RegexCharInHex(_)) => {
-                "0123456789abcdefABCDEF".contains(single_char)
-            }
-            Some(JsonParserYieldReason::RegexCharInDigit(_)) => "0123456789".contains(single_char),
-            Some(JsonParserYieldReason::RegexCharNumberSign(_)) => "+-".contains(single_char),
-            Some(JsonParserYieldReason::RegexCharWhitespace(_)) => " \t\n\r".contains(single_char),
-            _ => false,
-        }).map_err(|e| format!("Internal error: {:?}", e))?;
-        let unblock_reason_lowpri = runtime.check_pending_reasons(|reason| match reason {
-            Some(JsonParserYieldReason::EmptyString) => true,
-            _ => false,
-        }).map_err(|e| format!("Internal error: {:?}", e))?;
+        let unblock_reason_normal = runtime
+            .check_pending_reasons(|reason| match reason {
+                Some(JsonParserYieldReason::LiteralArrayStart(_)) => single_char == "[",
+                Some(JsonParserYieldReason::LiteralArrayEnd(_)) => single_char == "]",
+                Some(JsonParserYieldReason::LiteralObjectStart(_)) => single_char == "{",
+                Some(JsonParserYieldReason::LiteralObjectEnd(_)) => single_char == "}",
+                Some(JsonParserYieldReason::LiteralStringStart(_)) => {
+                    &full_str[index..index + 1] == "\""
+                }
+                Some(JsonParserYieldReason::LiteralStringEnd(_)) => single_char == "\"",
+                Some(JsonParserYieldReason::LiteralColon(_)) => single_char == ":",
+                Some(JsonParserYieldReason::LiteralComma(_)) => single_char == ",",
+                Some(JsonParserYieldReason::LiteralPeriod(_)) => single_char == ".",
+                Some(JsonParserYieldReason::LiteralTrue(_)) => {
+                    full_str[index..].starts_with("true")
+                }
+                Some(JsonParserYieldReason::LiteralFalse(_)) => {
+                    full_str[index..].starts_with("false")
+                }
+                Some(JsonParserYieldReason::LiteralNull(_)) => {
+                    full_str[index..].starts_with("null")
+                }
+                Some(JsonParserYieldReason::LiteralSlash(_)) => single_char == "\\",
+                Some(JsonParserYieldReason::LiteralHexEscapeChar(_)) => single_char == "u",
+                Some(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash(_)) => {
+                    single_char != "\"" && single_char != "\\"
+                }
+                Some(JsonParserYieldReason::RegexEscapedCharAfterSlash(_)) => {
+                    "\"\\/bfnrt".contains(single_char)
+                }
+                Some(JsonParserYieldReason::RegexCharExponent(_)) => {
+                    single_char == "e" || single_char == "E"
+                }
+                Some(JsonParserYieldReason::RegexCharInHex(_)) => {
+                    "0123456789abcdefABCDEF".contains(single_char)
+                }
+                Some(JsonParserYieldReason::RegexCharInDigit(_)) => {
+                    "0123456789".contains(single_char)
+                }
+                Some(JsonParserYieldReason::RegexCharNumberSign(_)) => "+-".contains(single_char),
+                Some(JsonParserYieldReason::RegexCharWhitespace(_)) => {
+                    " \t\n\r".contains(single_char)
+                }
+                _ => false,
+            })
+            .map_err(|e| format!("Internal error: {:?}", e))?;
+        let unblock_reason_lowpri = runtime
+            .check_pending_reasons(|reason| match reason {
+                Some(JsonParserYieldReason::EmptyString) => true,
+                _ => false,
+            })
+            .map_err(|e| format!("Internal error: {:?}", e))?;
         let unblock_reason = unblock_reason_normal.or(unblock_reason_lowpri);
 
         let Some(unblock_reason) = unblock_reason else {
@@ -590,7 +612,9 @@ where
 
         // Note: This is technically wrong for LiteralTrue, LiteralFalse, LiteralNull. But it's enough for this example.
         println!("Debug, unblocking {:?}, str {}", unblock_reason, response);
-        runtime.unblock_futures(unblock_reason, response).map_err(|e| format!("Internal error: {:?}", e))?;
+        runtime
+            .unblock_futures(unblock_reason, response)
+            .map_err(|e| format!("Internal error: {:?}", e))?;
     }
 }
 
