@@ -13,12 +13,13 @@
 use crate::common::{PTRACE_EVENT_SECCOMP, SysAugArgs, SysAugError, display_err, rwlock_read};
 use crate::config::{SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config};
 use crate::handler_async::{AsyncNotifications, AsyncTraceeHandler};
-use executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
+use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::utsname::uname;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
+use pocker_ptrace::{is_trace_stop, is_still_alive, waitpid_hang};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::os::fd::RawFd;
@@ -32,7 +33,7 @@ use tracing::{Level, event, info, span};
 ///    * TraceeHandler focuses on handling actually "shared" states (between different threads / different tracees)
 ///    * TraceeHandler is aware of the threading model and make sure there is one thread per tracee
 ///    * TraceeHandler is unaware of what the next sysaug should do. AsyncTraceeHandler handles that.
-pub struct TraceeHandler<PtraceClient: executor::PtraceClient> {
+pub struct TraceeHandler<PtraceClient: pocker_executor::PtraceClient> {
     // --------- Readonly, Copy on Move, values ---------
     pub pid: Pid,
     pub ptrace_client: PtraceClient,
@@ -61,7 +62,7 @@ pub struct TraceeHandlerConsts {
     pub root_pid: Pid,
 }
 
-impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> TraceeHandler<PtraceClient> {
     pub fn new(
         pid: Pid,
         ptrace_client: PtraceClient,
@@ -102,9 +103,9 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
 
     fn set_ptrace_options(&self) -> Result<(), SysAugError> {
         let pid = self.pid;
-        let status = ptrace::waitpid_hang(pid)?;
+        let status = waitpid_hang(pid)?;
         event!(Level::TRACE, "child status {:?}", &status);
-        if !ptrace::is_trace_stop(&status) && !ptrace::is_still_alive(&status) {
+        if !is_trace_stop(&status) && !is_still_alive(&status) {
             return Err(SysAugError::TraceeCrashed);
         }
         self.ptrace_client
@@ -259,7 +260,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 // Send ptrace calls, resume tracee, until we have unblocked a future
                 // Also, use maybe_signal.take() so that the signal is only sent once
                 self._ptrace_request_next_syscall(maybe_signal.take(), &async_handlers.notifiers)?;
-                let wait_status = ptrace::waitpid_hang(pid)?;
+                let wait_status = waitpid_hang(pid)?;
                 event!(Level::TRACE, "child status {:?}", &wait_status);
 
                 let status = PtraceStatus {
@@ -267,7 +268,7 @@ impl<PtraceClient: executor::PtraceClient> TraceeHandler<PtraceClient> {
                 };
 
                 // Handle unexpected crashes
-                if !ptrace::is_trace_stop(&wait_status) && !ptrace::is_still_alive(&wait_status) {
+                if !is_trace_stop(&wait_status) && !is_still_alive(&wait_status) {
                     info!("Process {:?} crashed: {:?}.", &pid, &wait_status);
                     self.ptrace_client
                         .execute(move || sys::ptrace::detach(pid, None))?

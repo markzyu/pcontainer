@@ -15,10 +15,10 @@ use crate::common::{SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
 use nix::sys::signal::Signal;
 use nix::sys::wait::WaitStatus;
-use ptrace::{GenericPurposeRegs, MemHelpers};
+use pocker_ptrace::{GenericPurposeRegs, MemHelpers};
 use tracing::info;
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_waitpid(
         &self,
         orig_regs: GenericPurposeRegs,
@@ -55,11 +55,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 // Override syscall return value
                 regs.set_syscall_retval(override_retval);
                 self.ptrace_client
-                    .execute(move || ptrace::setregs(parent_pid, regs))??;
+                    .execute(move || pocker_ptrace::setregs(parent_pid, regs))??;
 
                 // Restore wait status to its value before syscall
                 self.ptrace_client.execute(move || {
-                    ptrace::write(parent_pid, wait_status_addr, orig_wait_status)
+                    pocker_ptrace::write(parent_pid, wait_status_addr, orig_wait_status)
                 })??;
 
                 info!(

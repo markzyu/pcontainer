@@ -18,14 +18,14 @@ use crate::common::{
 use crate::config::PERMS_IDS_SIZE;
 use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};
 use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
-use executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
+use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use ptrace::{
+use pocker_ptrace::{
     DIRECT_MEM_HELPERS, GenericPurposeRegs, MemHelpers, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
-    get_own_region_id, set_tracee_write_region_addr,
+    getevent, getregs, get_own_region_id, is_syscall_stop, setregs, set_syscall_num, set_tracee_write_region_addr,
 };
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -63,7 +63,7 @@ macro_rules! call_augment {
 
 /// This is the asynchronous event loop. It is protected from Rust's threadsafety constraints,
 /// (i.e. you don't need Arc/RwLock for internal states) because PtraceAsyncRuntime runs on a single, local thread.
-pub struct AsyncTraceeHandler<'a, PtraceClient: executor::PtraceClient> {
+pub struct AsyncTraceeHandler<'a, PtraceClient: pocker_executor::PtraceClient> {
     // --------- Readonly, Copy on Move, values ---------
     pub async_runtime: &'a PtraceAsyncRuntime,
     pub pid: Pid,
@@ -111,7 +111,7 @@ pub struct AsyncNotifications {
     pub transfer_to_gdb: RefCell<bool>,
 }
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     /// Returns: the tracee exit code
     pub async fn all_tracee_loops(&self) -> Result<u8, SysAugError> {
         // Event loops
@@ -194,7 +194,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             .map_err(SysAugError::AsyncRuntime)?;
 
         if !is_seccomp_ready {
-            if !ptrace::is_syscall_stop(&status.wait_status) {
+            if !is_syscall_stop(&status.wait_status) {
                 return Err(SysAugError::AsyncMisMatchSyscall(
                     "non-syscall stop while initializing seccomp",
                     status.clone(),
@@ -212,7 +212,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             }
             self.is_after_syscall_entry.replace(true);
             return Ok(status.clone());
-        } else if ptrace::is_syscall_stop(&status.wait_status) && expects_syscall_exit {
+        } else if is_syscall_stop(&status.wait_status) && expects_syscall_exit {
             if !is_legacy {
                 self.is_after_syscall_entry.replace(false);
                 return Ok(status.clone());
@@ -227,7 +227,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 .await
                 .map_err(SysAugError::AsyncRuntime)?;
 
-            if ptrace::is_syscall_stop(&status.wait_status) {
+            if is_syscall_stop(&status.wait_status) {
                 self.is_after_syscall_entry.replace(false);
                 return Ok(status.clone());
             }
@@ -315,7 +315,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                 // Android sometimes kills a process for using privileged syscalls like sysinfo()
                 // Instead of killing tracee, return -ENOSYS and let it resume
                 let siginfo = getsig_ans.map_err(SysAugError::PtraceGetSigInfo2)?;
-                let mut regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+                let mut regs = self.ptrace_client.execute(move || getregs(pid))??;
                 if siginfo.si_code > 0 {
                     // Signal was sent by kernel, so it's safe to assume a syscall just happened.
                     let retval = (-libc::ENOSYS) as usize;
@@ -336,7 +336,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                     // Otherwise, override return value to -ENOSYS
                     regs.set_syscall_retval(retval);
                     self.ptrace_client
-                        .execute(move || ptrace::setregs(pid, regs))??;
+                        .execute(move || setregs(pid, regs))??;
 
                     continue;
                 }
@@ -369,7 +369,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             ) {
                 let raw_pid =
                     self.ptrace_client
-                        .execute(move || ptrace::getevent(pid))?? as isize;
+                        .execute(move || getevent(pid))?? as isize;
                 if raw_pid > 0 {
                     let child_pid: Pid = Pid::from_raw(raw_pid as i32);
 
@@ -398,7 +398,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             if let WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_EXIT) = status.wait_status {
                 let rawret = self
                     .ptrace_client
-                    .execute(move || ptrace::getevent(pid))??;
+                    .execute(move || getevent(pid))??;
                 let retcode = (rawret as u32) >> 8;
                 info!("Exit status = {}", retcode);
                 self.ptrace_client
@@ -415,11 +415,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
     pub async fn do_resume_syscall(&self) -> Result<GenericPurposeRegs, SysAugError> {
         let pid = self.pid;
         self.wait_for_syscall().await?;
-        let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let regs = self.ptrace_client.execute(move || getregs(pid))??;
         event!(
             Level::TRACE,
             "syscall exit event, stack@{:x}, return {:#x} args {:#x} {:#x} {:#x}",
-            ptrace::stack_ptr(),
+            pocker_ptrace::stack_ptr(),
             regs.syscall_retval(),
             regs.arg0,
             regs.arg1,
@@ -436,7 +436,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let pid = self.pid;
         event!(Level::INFO, "Attempting to skip syscall");
         self.ptrace_client
-            .execute(move || ptrace::set_syscall_num(pid, NO_MOD_SYSCALL))??;
+            .execute(move || set_syscall_num(pid, NO_MOD_SYSCALL))??;
 
         let mut regs = self.do_resume_syscall().await?;
 
@@ -448,7 +448,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         );
         regs.set_syscall_retval(syscall_retval);
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid, regs))??;
+            .execute(move || setregs(pid, regs))??;
         Ok(())
     }
 
@@ -464,7 +464,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             // Wait for System Call Entry
             self.wait_for_syscall().await?;
             self.orig_syscall_num.replace(None);
-            let regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let regs = self.ptrace_client.execute(move || getregs(pid))??;
             let (maybe_syscall_info, syscall_name) = get_syscall(&regs.syscall_num);
             let which_aug = maybe_syscall_info.map(|x| &x.augment);
             let _span1 = span!(
@@ -485,7 +485,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             event!(
                 Level::TRACE,
                 "syscall entry event, stack@{:x}",
-                ptrace::stack_ptr()
+                pocker_ptrace::stack_ptr()
             );
 
             self.tracee_stack_seek(0)?;
@@ -516,7 +516,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
             // aarch64 doesn't work if we read regs right after execve()
             // Yet, x86_64 requires it...
-            let _new_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+            let _new_regs = self.ptrace_client.execute(move || getregs(pid))??;
             let (_new_syscall_info, _) = get_syscall(&_new_regs.syscall_num);
             #[cfg(not(any(target_arch = "aarch64")))]
             let which_aug = _new_syscall_info.map(|x| &x.augment);
@@ -553,7 +553,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         self.yielder_syscall.unblock();
         self.wait_for_syscall().await?;
 
-        let orig_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let orig_regs = self.ptrace_client.execute(move || getregs(pid))??;
         let mut regs = orig_regs.clone();
 
         let clone_orig_syscall_num = { self.orig_syscall_num.borrow().clone() };
@@ -579,9 +579,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         regs.arg5 = args[5];
 
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid, regs))??;
+            .execute(move || setregs(pid, regs))??;
         self.ptrace_client
-            .execute(move || ptrace::set_syscall_num(pid, syscall_num))??;
+            .execute(move || set_syscall_num(pid, syscall_num))??;
 
         // Wait for mmap to return
         event!(
@@ -591,7 +591,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         );
         self.yielder_syscall.unblock();
         self.wait_for_syscall().await?;
-        let result_regs = self.ptrace_client.execute(move || ptrace::getregs(pid))??;
+        let result_regs = self.ptrace_client.execute(move || getregs(pid))??;
 
         // Reset tracee to register state before system call
         // and decrement PC pointer to immediately rerun system call
@@ -606,9 +606,9 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             new_regs.pc
         );
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid, new_regs))??;
+            .execute(move || setregs(pid, new_regs))??;
         self.ptrace_client
-            .execute(move || ptrace::set_syscall_num(pid, orig_syscall_num))??;
+            .execute(move || set_syscall_num(pid, orig_syscall_num))??;
         Ok(result_regs)
     }
 

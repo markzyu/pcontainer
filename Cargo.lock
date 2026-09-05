@@ -213,20 +213,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
-name = "executor"
-version = "0.2.0"
-dependencies = [
- "futures-lite",
- "krsm",
- "lazy_static",
- "libc",
- "nix",
- "ptrace",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -500,14 +486,73 @@ name = "pocker"
 version = "0.2.0"
 dependencies = [
  "clap",
- "executor",
- "procfs",
- "ptrace",
- "sysaug",
+ "pocker-executor",
+ "pocker-procfs",
+ "pocker-ptrace",
+ "pocker-sysaug",
  "thiserror 1.0.69",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "pocker-executor"
+version = "0.2.0"
+dependencies = [
+ "futures-lite",
+ "krsm",
+ "lazy_static",
+ "libc",
+ "nix",
+ "pocker-ptrace",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-procfs"
+version = "0.2.0"
+dependencies = [
+ "flate2",
+ "nix",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-ptrace"
+version = "0.2.0"
+dependencies = [
+ "backtrace",
+ "lazy_static",
+ "libc",
+ "lru",
+ "nix",
+ "ntest",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-sysaug"
+version = "0.2.0"
+dependencies = [
+ "elf",
+ "futures-lite",
+ "krsm",
+ "lazy_static",
+ "libc",
+ "nix",
+ "pocker-executor",
+ "pocker-procfs",
+ "pocker-ptrace",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -533,30 +578,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "procfs"
-version = "0.2.0"
-dependencies = [
- "flate2",
- "nix",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "ptrace"
-version = "0.2.0"
-dependencies = [
- "backtrace",
- "lazy_static",
- "libc",
- "lru",
- "nix",
- "ntest",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -720,27 +741,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "sysaug"
-version = "0.2.0"
-dependencies = [
- "elf",
- "executor",
- "futures-lite",
- "krsm",
- "lazy_static",
- "libc",
- "nix",
- "procfs",
- "ptrace",
- "regex",
- "serde",
- "serde_json",
- "serde_regex",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]

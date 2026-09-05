@@ -6,7 +6,7 @@ You should just use PRoot instead. It has a history of proven stability and succ
 
 My project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
 
-Eventually, my goal is to be able to run Docker container on any mobile device, without needing root, by creating a configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
+Eventually, my goal is to be able to run selected OCI container on any mobile device, without needing root, by creating an accompanying configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
 
 ## Multi-threading mode 
 

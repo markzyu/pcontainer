@@ -13,10 +13,10 @@
 use crate::common::{PermsMode, SysAugError, SyscallInfo};
 use crate::config::walk_resf_syscall;
 use crate::handler_async::AsyncTraceeHandler;
-use ptrace::GenericPurposeRegs;
+use pocker_ptrace::GenericPurposeRegs;
 use tracing::{Level, event};
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_perms(
         &self,
         orig_regs: GenericPurposeRegs,
@@ -60,7 +60,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
                                 ptr_addr
                             );
                             self.ptrace_client
-                                .execute(move || ptrace::write(pid, ptr_addr, val))??;
+                                .execute(move || pocker_ptrace::write(pid, ptr_addr, val))??;
                         }
                     } else if let Some(val) = val.as_ref() {
                         event!(
@@ -110,7 +110,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         regs.set_syscall_retval(val);
         let pid = self.pid;
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid, regs))??;
+            .execute(move || pocker_ptrace::setregs(pid, regs))??;
         Ok(())
     }
 }

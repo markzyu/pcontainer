@@ -37,7 +37,7 @@ pub enum PtraceExecutorError {
     Attach(nix::Error),
 
     #[error("{0}")]
-    PtraceError(#[from] ptrace::PtraceError),
+    PtraceError(#[from] pocker_ptrace::PtraceError),
 
     #[error("Cannot transfer tracee. PTRACE_DETACH error: {0}")]
     TransferDetach(nix::Error),

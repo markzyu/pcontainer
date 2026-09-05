@@ -10,7 +10,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use executor::{PtraceFutureTypes, PtraceStatus};
+use pocker_executor::{PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncRuntimeError;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -22,16 +22,16 @@ use tracing::{Level, event};
 #[derive(Debug, Error)]
 pub enum SysAugError {
     #[error("Unexpected internal error from ptrace() executor: {0}")]
-    InternalExecutor(#[from] executor::PtraceExecutorError),
+    InternalExecutor(#[from] pocker_executor::PtraceExecutorError),
 
     #[error("Failed to parse waitpid result: {0}")]
     ParseWaitStatus(nix::Error),
 
     #[error("Procfs error: {0}")]
-    Procfs(#[from] procfs::ProcfsError),
+    Procfs(#[from] pocker_procfs::ProcfsError),
 
     #[error("Ptrace error: {0}")]
-    Ptrace(#[from] ptrace::PtraceError),
+    Ptrace(#[from] pocker_ptrace::PtraceError),
 
     #[error("PTRACE_DETACH error")]
     PtraceDetach(nix::Error),
