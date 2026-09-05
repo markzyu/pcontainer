@@ -17,7 +17,7 @@ This library aims to be a bare minimum abstraction of Rust compiler's ability to
 
 Please check out the example state machines in `krsm/examples`.
 
-## Caveat 1: Extra restraints on `async` syntax
+## Caveat 1: Extra constraints on `async` syntax
 
 Async code must be written as if it is a non-determinstics state machine (as if it's waiting on all "concurrent" branches of `futures_lite::future::or`).
 
