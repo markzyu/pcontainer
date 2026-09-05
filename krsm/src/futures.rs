@@ -180,7 +180,7 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
         })
     }
 
-    /// This method is not meant to be called from async. 
+    /// This method is not meant to be called from within async. 
     /// It's meant to help the caller of async runtime find out how to unblock the futures
     /// 
     /// The func callback can short circuit and end iteration early by returning true.
@@ -195,6 +195,34 @@ impl<YieldReason: Copy + EnumCount + Eq + Ord, YieldResponse: PartialEq>
             return None;
         };
         Some(reason.0)
+    }
+
+    /// This method is not meant to be called from within async. 
+    /// It's meant to help the caller of async runtime remove futures that must never
+    /// be unblocked.
+    /// 
+    /// The func callback must return `false` for any future they want to remove.
+    pub fn filter_valid_futures<F>(&self, mut func: F)
+        where F: FnMut(Option<YieldReason>) -> bool
+    {
+        let mut pending_futures = self.pending_futures.borrow_mut();
+        let end_idx = pending_futures.binary_search_by(|x| None.cmp(x)).unwrap_or(MAX_ENUM_SIZE);
+        let mut write_idx = 0;
+        for i in 0..end_idx {
+            if !func(pending_futures[i].map(|v| v.0)) {
+                continue;
+            }
+            if write_idx != i {
+                pending_futures[write_idx] = pending_futures[i];
+            }
+            write_idx += 1;
+        }
+
+        if write_idx < end_idx {
+            for i in write_idx..end_idx {
+                pending_futures[i] = None;
+            }
+        }
     }
 }
 
