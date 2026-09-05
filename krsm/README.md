@@ -17,7 +17,7 @@ This library aims to be a bare minimum abstraction of Rust compiler's ability to
 
 Please check out the example state machines in `krsm/examples`.
 
-## Caveat
+## Caveat 1
 
 Async code must be written as if it is a non-determinstics state machine (as if it's waiting on all "concurrent" branches of `futures_lite::future::or`).
 
@@ -30,6 +30,18 @@ As a result:
 * The downstream caller might need to "filter" out expired futures which were not prioritized in time.
 
 Thus, there is very little margin of error in the resulting code. And two versions code might look equivalent when only one of them is correct.
+
+## Caveat 2
+
+This crate is `no_std` and cannot allocate additional heap memory at runtime. And yet it provides tracking of the currently pending futures by reason type, which is an arbitrary enum provided by downstream.
+
+At any moment of an async future's execution, there is a limit on the maximum number of pending futures that it's allowed to wait on.
+
+This number is `MAX_PENDING` and can be controlled at compile time, through Rust const generics.
+
+Upon hitting this limit, all further async calls will fail due to `AsyncRuntimeError::TooManyPending`
+
+It's recommended that you minimize the number of possible `YieldReason` and cleanup any such reason that might expire using `AsyncRuntime.filter_valid_futures`
 
 ## License
 
