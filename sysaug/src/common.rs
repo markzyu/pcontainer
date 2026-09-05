@@ -10,8 +10,8 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 
-use pocker_executor::{PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncRuntimeError;
+use pocker_executor::{PtraceFutureTypes, PtraceStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::path::PathBuf;

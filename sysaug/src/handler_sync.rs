@@ -13,13 +13,13 @@
 use crate::common::{PTRACE_EVENT_SECCOMP, SysAugArgs, SysAugError, display_err, rwlock_read};
 use crate::config::{SysAugConfig, init_passthroughs_from_config, init_perms_ids_from_config};
 use crate::handler_async::{AsyncNotifications, AsyncTraceeHandler};
-use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::utsname::uname;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
-use pocker_ptrace::{is_trace_stop, is_still_alive, waitpid_hang};
+use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
+use pocker_ptrace::{is_still_alive, is_trace_stop, waitpid_hang};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::os::fd::RawFd;

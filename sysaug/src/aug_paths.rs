@@ -13,7 +13,10 @@
 use crate::PermType;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
-use pocker_ptrace::{GenericPurposeRegs, MemHelpers, read_bytes_to_structs, read_bytes_to_fixed_sized_objs, setregs, write_structs_to_tracee, write_fixed_sized_objs_to_tracee};
+use pocker_ptrace::{
+    GenericPurposeRegs, MemHelpers, read_bytes_to_fixed_sized_objs, read_bytes_to_structs, setregs,
+    write_fixed_sized_objs_to_tracee, write_structs_to_tracee,
+};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tracing::{Level, event};
@@ -415,9 +418,8 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
         });
 
         let max_size = stats.len() * std::mem::size_of::<T>();
-        ptrace_client.execute(move || {
-            write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats)
-        })??;
+        ptrace_client
+            .execute(move || write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats))??;
         Ok(())
     }
 }

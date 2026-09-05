@@ -18,14 +18,15 @@ use crate::common::{
 use crate::config::PERMS_IDS_SIZE;
 use crate::handler_sync::{TraceeHandler, TraceeHandlerConsts};
 use crate::syscalls::{BpfProgram, SECCOMP_FILTERS, SYSCALL_INSTRUCTION_SIZE, get_syscall};
-use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 use krsm::AsyncYielder;
 use nix::sys;
 use nix::sys::wait::WaitStatus;
 use nix::unistd::Pid;
+use pocker_executor::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 use pocker_ptrace::{
     DIRECT_MEM_HELPERS, GenericPurposeRegs, MemHelpers, SLOW_MEM_HELPERS, STACK_SAFE_ZONE_SIZE,
-    getevent, getregs, get_own_region_id, is_syscall_stop, setregs, set_syscall_num, set_tracee_write_region_addr,
+    get_own_region_id, getevent, getregs, is_syscall_stop, set_syscall_num,
+    set_tracee_write_region_addr, setregs,
 };
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -335,8 +336,7 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
 
                     // Otherwise, override return value to -ENOSYS
                     regs.set_syscall_retval(retval);
-                    self.ptrace_client
-                        .execute(move || setregs(pid, regs))??;
+                    self.ptrace_client.execute(move || setregs(pid, regs))??;
 
                     continue;
                 }
@@ -367,9 +367,7 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
                     | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_FORK)
                     | WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_VFORK)
             ) {
-                let raw_pid =
-                    self.ptrace_client
-                        .execute(move || getevent(pid))?? as isize;
+                let raw_pid = self.ptrace_client.execute(move || getevent(pid))?? as isize;
                 if raw_pid > 0 {
                     let child_pid: Pid = Pid::from_raw(raw_pid as i32);
 
@@ -396,9 +394,7 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
 
             // Tracee exited normally
             if let WaitStatus::PtraceEvent(_, _, libc::PTRACE_EVENT_EXIT) = status.wait_status {
-                let rawret = self
-                    .ptrace_client
-                    .execute(move || getevent(pid))??;
+                let rawret = self.ptrace_client.execute(move || getevent(pid))??;
                 let retcode = (rawret as u32) >> 8;
                 info!("Exit status = {}", retcode);
                 self.ptrace_client
@@ -447,8 +443,7 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
             regs.syscall_retval()
         );
         regs.set_syscall_retval(syscall_retval);
-        self.ptrace_client
-            .execute(move || setregs(pid, regs))??;
+        self.ptrace_client.execute(move || setregs(pid, regs))??;
         Ok(())
     }
 
@@ -578,8 +573,7 @@ impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceC
         regs.arg4 = args[4];
         regs.arg5 = args[5];
 
-        self.ptrace_client
-            .execute(move || setregs(pid, regs))??;
+        self.ptrace_client.execute(move || setregs(pid, regs))??;
         self.ptrace_client
             .execute(move || set_syscall_num(pid, syscall_num))??;
 
