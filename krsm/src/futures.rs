@@ -148,7 +148,10 @@ impl<YieldReason: Copy + Eq + Ord, YieldResponse: PartialEq, const MAX_PENDING: 
         };
     }
 
-    /// Create a new instance of pending future
+    /// Create a new instance of pending future.
+    ///
+    /// Your async code should have access to this method. This is the **primary method**
+    /// through which your async code yields back during an async step.
     pub async fn new_pending_future<'a>(
         &'a self,
         future_type: YieldReason,
