@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::io::Read;
-use strum::EnumCount;
+
+use krsm::AsyncRuntimeError;
 
 /// These could be waiting for literals or waiting for other basic BNF terms
 ///
 /// The `usize` field of these reasons are used to store an index, asserting
 /// where the literals/strings must show up in the parser input.
-#[derive(Clone, Copy, Debug, EnumCount, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum JsonParserYieldReason {
     LiteralArrayStart(usize),
     LiteralArrayEnd(usize),
@@ -65,6 +66,8 @@ struct JsonParser<'a> {
     offset: RefCell<usize>,
 }
 
+type JResult<T> = Result<T, krsm::AsyncRuntimeError>;
+
 impl<'a> JsonParser<'a> {
     fn new(runtime: &'a AsyncRuntime) -> Self {
         Self {
@@ -73,12 +76,12 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    async fn parse(&self) -> Json {
+    async fn parse(&self) -> JResult<Json> {
         self.parse_element().await
     }
 
     /// <value> ::= <object> | <array> | <string> | <number> | <boolean> | <null>
-    async fn parse_value(&self) -> Json {
+    async fn parse_value(&self) -> JResult<Json> {
         futures_lite::future::or(
             futures_lite::future::or(
                 self.parse_object(),
@@ -93,158 +96,158 @@ impl<'a> JsonParser<'a> {
     }
 
     /// <object> ::= "{" <whitespaces> "}" | "{" <members> "}"
-    async fn parse_object(&self) -> Json {
+    async fn parse_object(&self) -> JResult<Json> {
         let curr_offset = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralObjectStart(curr_offset))
-            .await;
+            .await?;
         let result = futures_lite::future::or(
-            async { Json::Object(Box::pin(self.parse_members()).await) },
+            async { Ok(Json::Object(Box::pin(self.parse_members()).await?)) },
             async {
-                self.parse_whitespaces().await;
-                Json::Object(HashMap::default())
+                self.parse_whitespaces().await?;
+                Ok(Json::Object(HashMap::default()))
             },
         )
-        .await;
+        .await?;
 
         let curr_offset2 = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralObjectEnd(curr_offset2))
-            .await;
-        result
+            .await?;
+        Ok(result)
     }
 
     /// <members> ::= <member> | <member> "," <members>
-    async fn parse_members(&self) -> HashMap<String, Json> {
-        let (key, value) = self.parse_member().await;
+    async fn parse_members(&self) -> JResult<HashMap<String, Json>> {
+        let (key, value) = self.parse_member().await?;
         let mut map = futures_lite::future::or(
             async {
                 let curr_offset = *self.offset.borrow();
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::LiteralComma(curr_offset))
-                    .await;
+                    .await?;
                 Box::pin(self.parse_members()).await
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::EmptyString)
-                    .await;
-                HashMap::new()
+                    .await?;
+                Ok(HashMap::new())
             },
         )
-        .await;
+        .await?;
         map.insert(key, value);
-        map
+        Ok(map)
     }
 
     /// <member> ::= <whitespaces> <string> <whitespaces> ":" <value>
-    async fn parse_member(&self) -> (String, Json) {
-        self.parse_whitespaces().await;
-        let key = self.parse_string().await;
-        self.parse_whitespaces().await;
+    async fn parse_member(&self) -> JResult<(String, Json)> {
+        self.parse_whitespaces().await?;
+        let key = self.parse_string().await?;
+        self.parse_whitespaces().await?;
         let curr_offset = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralColon(curr_offset))
-            .await;
-        let value = self.parse_element().await;
-        (key, value)
+            .await?;
+        let value = self.parse_element().await?;
+        Ok((key, value))
     }
 
     /// <array> ::= "[" <whitespaces> "]" | "[" <elements> "]"
-    async fn parse_array(&self) -> Json {
+    async fn parse_array(&self) -> JResult<Json> {
         let curr_offset = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralArrayStart(curr_offset))
-            .await;
+            .await?;
         let result =
-            futures_lite::future::or(async { Json::Array(self.parse_elements().await) }, async {
-                self.parse_whitespaces().await;
-                Json::Array(Vec::default())
+            futures_lite::future::or(async { Ok(Json::Array(self.parse_elements().await?)) }, async {
+                self.parse_whitespaces().await?;
+                Ok(Json::Array(Vec::default()))
             })
-            .await;
+            .await?;
 
         let curr_offset2 = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralArrayEnd(curr_offset2))
-            .await;
-        result
+            .await?;
+        Ok(result)
     }
 
     /// wrapper of parse_elements_reversed
-    async fn parse_elements(&self) -> Vec<Json> {
-        let mut list = self.parse_elements_reversed().await;
+    async fn parse_elements(&self) -> JResult<Vec<Json>> {
+        let mut list = self.parse_elements_reversed().await?;
         list.reverse();
-        list
+        Ok(list)
     }
 
     /// <elements> ::= <element> | <element> "," <elements>
-    async fn parse_elements_reversed(&self) -> Vec<Json> {
-        let item = self.parse_element().await;
+    async fn parse_elements_reversed(&self) -> JResult<Vec<Json>> {
+        let item = self.parse_element().await?;
         let mut list = futures_lite::future::or(
             async {
                 let curr_offset = *self.offset.borrow();
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::LiteralComma(curr_offset))
-                    .await;
+                    .await?;
                 Box::pin(self.parse_elements_reversed()).await
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::EmptyString)
-                    .await;
-                vec![]
+                    .await?;
+                Ok(vec![])
             },
         )
-        .await;
+        .await?;
         list.push(item);
-        list
+        Ok(list)
     }
 
     /// <element> ::= <whitespaces> <value> <whitespaces>
-    async fn parse_element(&self) -> Json {
-        self.parse_whitespaces().await;
-        let value = Box::pin(self.parse_value()).await;
-        self.parse_whitespaces().await;
-        value
+    async fn parse_element(&self) -> JResult<Json> {
+        self.parse_whitespaces().await?;
+        let value = Box::pin(self.parse_value()).await?;
+        self.parse_whitespaces().await?;
+        Ok(value)
     }
 
     /// Wrapper of parse_string (different return type)
-    async fn parse_string_value(&self) -> Json {
-        Json::String(self.parse_string().await)
+    async fn parse_string_value(&self) -> JResult<Json> {
+        Ok(Json::String(self.parse_string().await?))
     }
 
     /// <string> ::= '"' <characters> '"'
-    async fn parse_string(&self) -> String {
+    async fn parse_string(&self) -> JResult<String> {
         let curr_offset = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralStringStart(curr_offset))
-            .await;
+            .await?;
 
-        let mut reversed = self.parse_characters_reversed().await;
+        let mut reversed = self.parse_characters_reversed().await?;
         reversed.reverse();
         let result = reversed.into_iter().collect::<String>();
 
         let curr_offset2 = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralStringEnd(curr_offset2))
-            .await;
-        result
+            .await?;
+        Ok(result)
     }
 
     /// <characters> ::= "" | <character> | <character> <characters>
-    async fn parse_characters_reversed(&self) -> Vec<char> {
+    async fn parse_characters_reversed(&self) -> JResult<Vec<char>> {
         futures_lite::future::or(
             async {
-                let char = self.parse_character().await;
-                let mut list = Box::pin(self.parse_characters_reversed()).await;
+                let char = self.parse_character().await?;
+                let mut list = Box::pin(self.parse_characters_reversed()).await?;
                 list.push(char);
-                list
+                Ok(list)
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::EmptyString)
-                    .await;
-                vec![]
+                    .await?;
+                Ok(vec![])
             },
         )
         .await
@@ -256,7 +259,7 @@ impl<'a> JsonParser<'a> {
     }
 
     /// <character> ::= <regex_char_any_except_quote_or_slash> | <literal_slash> <regex_escaped_char_after_slash> | <literal_slash> "u" <hex> <hex> <hex> <hex>
-    async fn parse_character(&self) -> char {
+    async fn parse_character(&self) -> JResult<char> {
         let curr_offset = *self.offset.borrow();
         futures_lite::future::or(
             async {
@@ -265,20 +268,20 @@ impl<'a> JsonParser<'a> {
                     .new_pending_future(JsonParserYieldReason::RegexCharAnyExceptQuoteOrSlash(
                         curr_offset,
                     ))
-                    .await;
-                self.str_to_char(&str)
+                    .await?;
+                Ok(self.str_to_char(&str))
             },
             futures_lite::future::or(
                 async {
                     self.runtime
                         .new_pending_future(JsonParserYieldReason::LiteralSlash(curr_offset))
-                        .await;
+                        .await?;
                     let str = self
                         .runtime
                         .new_pending_future(JsonParserYieldReason::RegexEscapedCharAfterSlash(
                             curr_offset + 1,
                         ))
-                        .await;
+                        .await?;
                     let result_str = match str.as_str() {
                         "b" => "\x08".to_string(),
                         "f" => "\x0c".to_string(),
@@ -287,36 +290,36 @@ impl<'a> JsonParser<'a> {
                         "t" => "t".to_string(),
                         _ => str,
                     };
-                    self.str_to_char(&result_str)
+                    Ok(self.str_to_char(&result_str))
                 },
                 async {
                     self.runtime
                         .new_pending_future(JsonParserYieldReason::LiteralSlash(curr_offset))
-                        .await;
+                        .await?;
                     self.runtime
                         .new_pending_future(JsonParserYieldReason::LiteralHexEscapeChar(
                             curr_offset + 1,
                         ))
-                        .await;
+                        .await?;
                     let hex1 = self
                         .runtime
                         .new_pending_future(JsonParserYieldReason::RegexCharInHex(curr_offset + 2))
-                        .await;
+                        .await?;
                     let hex2 = self
                         .runtime
                         .new_pending_future(JsonParserYieldReason::RegexCharInHex(curr_offset + 3))
-                        .await;
+                        .await?;
                     let hex3 = self
                         .runtime
                         .new_pending_future(JsonParserYieldReason::RegexCharInHex(curr_offset + 4))
-                        .await;
+                        .await?;
                     let hex4 = self
                         .runtime
                         .new_pending_future(JsonParserYieldReason::RegexCharInHex(curr_offset + 5))
-                        .await;
+                        .await?;
                     let hex_str = format!("0x{}{}{}{}", hex1, hex2, hex3, hex4);
                     let hex_val = u32::from_str_radix(&hex_str, 16).unwrap();
-                    char::from_u32(hex_val).unwrap()
+                    Ok(char::from_u32(hex_val).unwrap())
                 },
             ),
         )
@@ -324,15 +327,15 @@ impl<'a> JsonParser<'a> {
     }
 
     /// <number> ::= <integer> <fraction> <exponent>
-    async fn parse_number(&self) -> Json {
-        let integer = self.parse_integer().await;
-        let fraction = self.parse_fraction().await;
-        let exponent = self.parse_exponent().await;
-        Json::Number(format!("{}{}{}", integer, fraction, exponent))
+    async fn parse_number(&self) -> JResult<Json> {
+        let integer = self.parse_integer().await?;
+        let fraction = self.parse_fraction().await?;
+        let exponent = self.parse_exponent().await?;
+        Ok(Json::Number(format!("{}{}{}", integer, fraction, exponent)))
     }
 
     /// <integer> ::= <sign> <digits> | <digits>
-    async fn parse_integer(&self) -> String {
+    async fn parse_integer(&self) -> JResult<String> {
         let curr_offset = *self.offset.borrow();
         let sign = futures_lite::future::or(
             self.runtime
@@ -340,44 +343,44 @@ impl<'a> JsonParser<'a> {
             self.runtime
                 .new_pending_future(JsonParserYieldReason::EmptyString),
         )
-        .await;
-        let digits = self.parse_digits().await;
-        format!("{}{}", sign, digits)
+        .await?;
+        let digits = self.parse_digits().await?;
+        Ok(format!("{}{}", sign, digits))
     }
 
     /// <digits> ::= <digit> | <digit> <digits>
-    async fn parse_digits(&self) -> String {
+    async fn parse_digits(&self) -> JResult<String> {
         let curr_offset = *self.offset.borrow();
         let digit = self
             .runtime
             .new_pending_future(JsonParserYieldReason::RegexCharInDigit(curr_offset))
-            .await;
+            .await?;
         futures_lite::future::or(
             async {
-                let digits = Box::pin(self.parse_digits()).await;
+                let digits = Box::pin(self.parse_digits()).await?;
                 let result = format!("{}{}", digit, digits);
-                result
+                Ok(result)
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::EmptyString)
-                    .await;
-                digit.clone()
+                    .await?;
+                Ok(digit.clone())
             },
         )
         .await
     }
 
     /// <fraction> ::= "." <digits> | ""
-    async fn parse_fraction(&self) -> String {
+    async fn parse_fraction(&self) -> JResult<String> {
         let curr_offset = *self.offset.borrow();
         futures_lite::future::or(
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::LiteralPeriod(curr_offset))
-                    .await;
-                let digits = self.parse_digits().await;
-                format!("{}{}", ".", digits)
+                    .await?;
+                let digits = self.parse_digits().await?;
+                Ok(format!("{}{}", ".", digits))
             },
             async {
                 self.runtime
@@ -389,16 +392,16 @@ impl<'a> JsonParser<'a> {
     }
 
     /// <exponent> ::= "e" <digits> | "E" <digits> | ""
-    async fn parse_exponent(&self) -> String {
+    async fn parse_exponent(&self) -> JResult<String> {
         let curr_offset = *self.offset.borrow();
         futures_lite::future::or(
             async {
                 let exp = self
                     .runtime
                     .new_pending_future(JsonParserYieldReason::RegexCharExponent(curr_offset))
-                    .await;
-                let digits = self.parse_digits().await;
-                format!("{}{}", exp, digits)
+                    .await?;
+                let digits = self.parse_digits().await?;
+                Ok(format!("{}{}", exp, digits))
             },
             async {
                 self.runtime
@@ -410,66 +413,68 @@ impl<'a> JsonParser<'a> {
     }
 
     /// <whitespaces> ::= "" | <regex_char_whitespace> <whitespaces>
-    async fn parse_whitespaces(&self) {
+    async fn parse_whitespaces(&self) -> JResult<()> {
         let curr_offset = *self.offset.borrow();
         futures_lite::future::or(
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::RegexCharWhitespace(curr_offset))
-                    .await;
-                Box::pin(self.parse_whitespaces()).await;
+                    .await?;
+                Box::pin(self.parse_whitespaces()).await?;
+                Ok::<(), AsyncRuntimeError>(())
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::EmptyString)
-                    .await;
+                    .await?;
+                Ok::<(), AsyncRuntimeError>(())
             },
         )
-        .await;
+        .await
     }
 
     /// <boolean> ::= "true" | "false"
-    async fn parse_boolean(&self) -> Json {
+    async fn parse_boolean(&self) -> JResult<Json> {
         let curr_offset = *self.offset.borrow();
         futures_lite::future::or(
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::LiteralTrue(curr_offset))
-                    .await;
-                Json::Boolean(true)
+                    .await?;
+                Ok(Json::Boolean(true))
             },
             async {
                 self.runtime
                     .new_pending_future(JsonParserYieldReason::LiteralFalse(curr_offset))
-                    .await;
-                Json::Boolean(false)
+                    .await?;
+                Ok(Json::Boolean(false))
             },
         )
         .await
     }
 
     /// <null> ::= "null"
-    async fn parse_null(&self) -> Json {
+    async fn parse_null(&self) -> JResult<Json> {
         let curr_offset = *self.offset.borrow();
         self.runtime
             .new_pending_future(JsonParserYieldReason::LiteralNull(curr_offset))
-            .await;
-        Json::Null
+            .await?;
+        Ok(Json::Null)
     }
 }
 
 fn run_parser<T, Fut>(full_str: &str, parser: &JsonParser, mut future: Fut) -> Result<T, String>
 where
     T: Debug,
-    Fut: Future<Output = T>,
+    Fut: Future<Output = JResult<T>>,
 {
     let mut index = 0;
     let runtime = parser.runtime;
     loop {
         parser.offset.replace(index);
         let result = unsafe { runtime.run_async_step(&mut future) }.unwrap();
-        if let Some(json) = result {
-            return Ok(json);
+        if let Some(result) = result {
+            return Ok(result.map_err(|e| format!("Internal error: {:?}", e))?);
         }
 
         // Async step yielded. Handle the yield reason by checking the type of the next character.
@@ -479,16 +484,16 @@ where
                 let unblock_reason = runtime.check_pending_reasons(|reason| match reason {
                     Some(JsonParserYieldReason::EmptyString) => true,
                     _ => false,
-                });
+                }).map_err(|e| format!("Internal error: {:?}", e))?;
                 if unblock_reason.is_none() {
                     break;
                 } else {
                     println!("Debug, unblocking EmptyString (exit loop)");
-                    runtime.unblock_futures(JsonParserYieldReason::EmptyString, "".to_string());
+                    runtime.unblock_futures(JsonParserYieldReason::EmptyString, "".to_string()).map_err(|e| format!("Internal error: {:?}", e))?;
                     let result = unsafe { runtime.run_async_step(&mut future).unwrap() };
                     println!("EXITLOOP {:?}", &result);
-                    if let Some(json) = result {
-                        return Ok(json);
+                    if let Some(result) = result {
+                        return Ok(result.map_err(|e| format!("Internal error: {:?}", e))?);
                     }
                 }
             }
@@ -521,7 +526,7 @@ where
             Some(JsonParserYieldReason::RegexCharNumberSign(j)) => j == index,
             Some(JsonParserYieldReason::RegexCharWhitespace(j)) => j == index,
             _ => true,
-        });
+        }).map_err(|e| format!("Internal error: {:?}", e))?;
 
         // Then, decide which future to unblock (normal > lowpri)
         let unblock_reason_normal = runtime.check_pending_reasons(|reason| match reason {
@@ -557,11 +562,11 @@ where
             Some(JsonParserYieldReason::RegexCharNumberSign(_)) => "+-".contains(single_char),
             Some(JsonParserYieldReason::RegexCharWhitespace(_)) => " \t\n\r".contains(single_char),
             _ => false,
-        });
+        }).map_err(|e| format!("Internal error: {:?}", e))?;
         let unblock_reason_lowpri = runtime.check_pending_reasons(|reason| match reason {
             Some(JsonParserYieldReason::EmptyString) => true,
             _ => false,
-        });
+        }).map_err(|e| format!("Internal error: {:?}", e))?;
         let unblock_reason = unblock_reason_normal.or(unblock_reason_lowpri);
 
         let Some(unblock_reason) = unblock_reason else {
@@ -585,7 +590,7 @@ where
 
         // Note: This is technically wrong for LiteralTrue, LiteralFalse, LiteralNull. But it's enough for this example.
         println!("Debug, unblocking {:?}, str {}", unblock_reason, response);
-        runtime.unblock_futures(unblock_reason, response);
+        runtime.unblock_futures(unblock_reason, response).map_err(|e| format!("Internal error: {:?}", e))?;
     }
 }
 

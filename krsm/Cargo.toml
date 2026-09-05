@@ -12,8 +12,4 @@ workspace = true
 
 [dependencies]
 futures-lite = { version = "2.6.1", default-features = false }
-strum = { version = "0.28.0", features = ["derive"], default-features = false }
 thiserror = { version = "2.0.20", default-features = false }
-
-[dev-dependencies]
-strum = { version = "0.28.0", features = ["derive"], default-features = false }

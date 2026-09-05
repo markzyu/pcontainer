@@ -10,11 +10,10 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 use nix::sys::wait::WaitStatus;
-use strum::{EnumCount, FromRepr};
 
 // TODO: Move this to sysaug crate (keep async runtime stuff in krsm only)
 
-#[derive(Copy, Clone, Debug, EnumCount, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PtraceFutureTypes {
     WaitForPtraceSeccomp,
     /// Warning: This can happen at both syscall-exit-stop and syscall-entry-stop

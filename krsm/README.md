@@ -8,26 +8,28 @@ This crate is a simple, single threaded, pinned async runtime for futures. This 
 * Does not interact with any system call through async I/O
 * Does not rely on the wakers to determine when to wake up the polling thread.
 
-Instead, KRSM lets the downstream define yields and wakers:
+Instead, KRSM lets the downstream define yields and take control of each individual polling step.
 
-* The downstream supplies an `YieldReasons` type with `Eq` trait, whose different values describe different types of yields.
-  * The async future can only yield due to one of these `YieldReasons`
-* The downstream can choose to block itself if needed, but the runtime never blocks.
-* The downstream **must** manage its own lifecycle for real suspends and real wakes. KRSM cannot enforce anything here.
 
-And the downstream can define a state machine using asynchronous syntax:
+## Goal
 
-* The async code can directly describe business logics using awaits
-* The async code can create temporary states across awaits and reuse them within the scope of an async function
-* The async code can define helper function and even recursive ones (if you can afford `Box::pin`)
-* The async code can call basic `futures_lite` helpers such as `zip()` and `or()`, as long as they don't use the `std` feature.
-* The async code must not make use of wakers, and thus, must not call real libraries with async I/O (such as `async_std` and `tokio`)
+This library aims to be a bare minimum abstraction of Rust compiler's ability to translate async functions into pollable state machines. The goal is to write huge, single-threaded, determinstic state machines using asynchronous descriptions.
 
-And the downstream can use the KRSM runtime to drive the state machine, no matter how large and convoluted, without a human ever needing to translate them into switch-cases:
+Please check out the example state machines in `krsm/examples`.
 
-1. The downstream polls an async logic for one single turn until it yields
-2. The downstream examines which `YieldReasons` had been blocking the async code, and try to unblock at least one of them
-3. The downstream notifie when such an unblock is completed, and loops back to step 1 
+## Caveat
+
+Async code must be written as if it is a non-determinstics state machine (as if it's waiting on all "concurrent" branches of `futures_lite::future::or`).
+
+But in reality, this async runtime is meant to **only execute one of those** possible transitions per turn.
+
+As a result:
+
+* Unblocking multiple futures in one turn can lead to undefined behaviors and is forbidden.
+* The downstream caller must properly prioritize the pending futures, to choose only one when unblocking the state machine.
+* The downstream caller might need to "filter" out expired futures which were not prioritized in time.
+
+Thus, there is very little margin of error in the resulting code. And two versions code might look equivalent when only one of them is correct.
 
 ## License
 
