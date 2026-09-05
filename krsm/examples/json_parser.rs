@@ -4,11 +4,12 @@ use std::fmt::Debug;
 use std::future::Future;
 use strum::EnumCount;
 
-#[allow(dead_code)]
 /// These could be waiting for literals or waiting for other basic BNF terms
+/// 
+/// The `usize` field of these reasons are used to store an index, asserting
+/// where the literals/strings must show up in the parser input.
 #[derive(Clone, Copy, Debug, EnumCount, PartialEq, Eq, PartialOrd, Ord)]
 enum JsonParserYieldReason {
-  EmptyString,
   LiteralArrayStart(usize),
   LiteralArrayEnd(usize),
   LiteralObjectStart(usize),
@@ -29,8 +30,9 @@ enum JsonParserYieldReason {
   RegexCharInHex(usize),
   RegexCharInDigit(usize),
   RegexCharNumberSign(usize),
-  RegexCharOneToNine(usize),
-  RegexCharWhitespace(usize)
+  RegexCharWhitespace(usize),
+  // Note: empty string doesn't have a index here: Technically every index can have an empty string
+  EmptyString,
 }
 
 type JsonParserYieldResponse = String;
@@ -231,7 +233,6 @@ impl<'a> JsonParser<'a> {
         list
       },
       async {
-        let curr_offset = *self.offset.borrow();
         let future_empty = self.runtime.future_builder(JsonParserYieldReason::EmptyString);
         future_empty.build().await;
         vec![]
@@ -467,13 +468,12 @@ where
       Some(JsonParserYieldReason::RegexCharInHex(j)) => j == index,
       Some(JsonParserYieldReason::RegexCharInDigit(j)) => j == index,
       Some(JsonParserYieldReason::RegexCharNumberSign(j)) => j == index,
-      Some(JsonParserYieldReason::RegexCharOneToNine(j)) => j == index,
       Some(JsonParserYieldReason::RegexCharWhitespace(j)) => j == index,
       _ => true
     });
     
-    // Then, decide which future to unblock
-    let unblock_reason = runtime.check_pending_reasons(|reason| match reason {
+    // Then, decide which future to unblock (normal > lowpri)
+    let unblock_reason_normal = runtime.check_pending_reasons(|reason| match reason {
       Some(JsonParserYieldReason::LiteralArrayStart(_)) => single_char == "[",
       Some(JsonParserYieldReason::LiteralArrayEnd(_)) => single_char == "]",
       Some(JsonParserYieldReason::LiteralObjectStart(_)) => single_char == "{",
@@ -494,11 +494,14 @@ where
       Some(JsonParserYieldReason::RegexCharInHex(_)) => "0123456789abcdefABCDEF".contains(single_char),
       Some(JsonParserYieldReason::RegexCharInDigit(_)) => "0123456789".contains(single_char),
       Some(JsonParserYieldReason::RegexCharNumberSign(_)) => "+-".contains(single_char),
-      Some(JsonParserYieldReason::RegexCharOneToNine(_)) => "123456789".contains(single_char),
       Some(JsonParserYieldReason::RegexCharWhitespace(_)) => " \t\n\r".contains(single_char),
+      _ => false,
+    });
+    let unblock_reason_lowpri = runtime.check_pending_reasons(|reason| match reason {
       Some(JsonParserYieldReason::EmptyString) => true,
       _ => false,
     });
+    let unblock_reason = unblock_reason_normal.or(unblock_reason_lowpri);
 
     let Some(unblock_reason) = unblock_reason else {
       return Err(format!("Unexpected character: {}", single_char));
