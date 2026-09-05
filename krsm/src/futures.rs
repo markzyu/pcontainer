@@ -249,8 +249,12 @@ impl<YieldReason: Copy + Eq + Ord, YieldResponse: PartialEq, const MAX_PENDING: 
     }
 
     /// This method is not meant to be called from within async.
+    /// 
     /// It's meant to help the caller of async runtime remove futures that must never
-    /// be unblocked.
+    /// be unblocked:
+    /// 
+    /// * If your `YieldReason` is a simple C-like enum, there is no need to call this function.
+    /// * Otherwise, you should call this function once per async step, to avoid `AsyncRuntimeError::TooManyPending`
     ///
     /// The func callback must return `false` for any future they want to remove.
     pub fn filter_valid_futures<F>(&self, mut func: F) -> Result<()>
