@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
+use std::io::Read;
 use strum::EnumCount;
 
 /// These could be waiting for literals or waiting for other basic BNF terms
@@ -533,7 +534,7 @@ where
 
 fn main() -> std::io::Result<()> {
   let mut input = String::new();
-  std::io::stdin().read_line(&mut input)?;
+  std::io::stdin().read_to_string(&mut input)?;
   let runtime = AsyncRuntime::new().unwrap();
   let parser = JsonParser::new(&runtime);
   let future = parser.parse();
