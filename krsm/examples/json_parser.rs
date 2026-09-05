@@ -52,8 +52,11 @@ enum Json {
 
 /// This is a state machine that is written in the exact same way as a BNF grammar.
 /// 
-/// Use futures_lite::future::or with caution about the order of futures. It short circuits.
-/// Use EmptyString as an escape hatch out of greedy matchers.
+/// The following rules must be followed when wrting async code:
+/// 
+/// * List the futures `futures_lite::future::or` in the exact order of shortcircuit
+/// * Make sure every future in `futures_lite::future::or` has at least one `await`
+/// * Use EmptyString as an escape hatch when there is nothing to await on
 struct JsonParser<'a> {
   runtime: &'a AsyncRuntime,
 
@@ -176,22 +179,22 @@ impl<'a> JsonParser<'a> {
 
   /// <elements> ::= <element> | <element> "," <elements>
   async fn parse_elements_reversed(&self) -> Vec<Json> {
-    futures_lite::future::or(
+    let item = self.parse_element().await;
+    let mut list = futures_lite::future::or(
       async {
-        let item = self.parse_element().await;
-
         let curr_offset = *self.offset.borrow();
         let future_comma = self.runtime.future_builder(JsonParserYieldReason::LiteralComma(curr_offset));
         future_comma.build().await;
-        let mut list = Box::pin(self.parse_elements_reversed()).await;
-        list.push(item);
-        list
+        Box::pin(self.parse_elements_reversed()).await
       },
       async {
-        let item = self.parse_element().await;
-        vec![item]
+        let future_empty = self.runtime.future_builder(JsonParserYieldReason::EmptyString);
+        future_empty.build().await;
+        vec![]
       }
-    ).await
+    ).await;
+    list.push(item);
+    list
   }
 
   /// <element> ::= <whitespaces> <value> <whitespaces>
@@ -585,8 +588,8 @@ mod tests {
     let runtime = AsyncRuntime::new().unwrap();
     let parser = JsonParser::new(&runtime);
     let future = parser.parse_member();
-    let result = run_parser("\"ab\\nc\":\"def\"", &parser, future).unwrap();
-    assert_eq!(result, ("ab\nc".to_string(), Json::String("def".to_string())));
+    let result = run_parser("  \"ab\\nc\":\"d ef\" ", &parser, future).unwrap();
+    assert_eq!(result, ("ab\nc".to_string(), Json::String("d ef".to_string())));
   }
 
   #[test]
@@ -597,5 +600,15 @@ mod tests {
     let future = parser.parse_object();
     let result = run_parser("{\"name\":\"John\",\"age\":30}", &parser, future).unwrap();
     assert_eq!(result, Json::Object(HashMap::from([("name".to_string(), Json::String("John".to_string())), ("age".to_string(), Json::Number("30".to_string()))])));
+  }
+
+  #[test]
+  fn test_array_parsing() {
+    let runtime = AsyncRuntime::new().unwrap();
+    let parser = JsonParser::new(&runtime);
+
+    let future = parser.parse();
+    let result = run_parser(" [12  , 3   ] ", &parser, future).unwrap();
+    assert_eq!(result, Json::Array(vec![Json::Number("12".to_string()), Json::Number("3".to_string())]));
   }
 }
