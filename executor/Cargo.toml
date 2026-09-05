@@ -1,5 +1,6 @@
 [package]
-name = "executor"
+name = "pocker-executor"
+description = "The executor crate of pocker -- a multithreaded incomplete rewrite of proot"
 version = "0.2.0"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
 license = "GPL-3.0-or-later"
@@ -12,7 +13,7 @@ workspace = true
 
 [dependencies]
 krsm = {path = "../krsm"}
-ptrace = {path = "../ptrace"}
+pocker-ptrace = {path = "../ptrace"}
 futures-lite = "2.6.1"
 lazy_static = "1.4.0"
 libc = "0.2.189"

@@ -6,11 +6,11 @@ You should just use PRoot instead. It has a history of proven stability and succ
 
 My project is still in its early stage. And it barely works right now. Basic shell commands work but `apt-get` is broken.
 
-Eventually, my goal is to be able to run Docker container on any mobile device, without needing root, by creating a configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
+Eventually, my goal is to be able to run selected OCI container on any mobile device, without needing root, by creating an accompanying configuration file that tells the ptrace how to glue the file system back together. But there is a long way to go.
 
 ## Multi-threading mode 
 
-By default, pcontainer will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
+By default, pocker will try to run ptrace() syscalls on dedicated threads (one thread per tracee process)
 
 ![Multi-threading mode](MultiThreadingMode.png)
 
@@ -18,7 +18,7 @@ But this requires the permission for PTRACE_ATTACH. And on some systems, this pe
 
 ## Fallback mode
 
-If the host OS does not permit PTRACE_ATTACH, pcontainer will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
+If the host OS does not permit PTRACE_ATTACH, pocker will try to cumulate ptrace() syscalls on main thread from all tracee processes, and offload each tracee's own event loop and calculations to other threads. (Main thread is busy executing ptrace() calls while other threads queue ptrace actions)
 
 ![Fallback threading mode](FallbackThreadingMode.png)
 
@@ -72,11 +72,11 @@ Here are some (outdated) instructions about Android cross-compilation without Te
   ```
 - Run `cargo build --target=armv7-unknown-linux-gnueabihf --release`
 - **Android permissions**
-  - The terminal emulator must request specific permissions to unlock the ability to execute `./dockify`. The exact permission name is unknown.
+  - The terminal emulator must request specific permissions to unlock the ability to execute `./pocker`. The exact permission name is unknown.
   - Older Android versions work better with https://f-droid.org/en/packages/org.galexander.sshd/
   - [Android 10 and above require executables to be codesigned](https://github.com/greenaddress/abcore/issues/97)
     - Termux is the only solution that works well in this situation. [Here is a page from their discussion.](https://github.com/termux/termux-app/issues/1072)
-    - But apparently, IT'S EASIER IF `dockify` IS CODE SIGNED AS part of the readonly APK.
+    - But apparently, IT'S EASIER IF `pocker` IS CODE SIGNED AS part of the readonly APK.
 
 ## AI Usage
 
@@ -86,6 +86,10 @@ I don't use AI to directly generate large chunks of code in this repository. I h
 
 Since commit `c52081394cb4949304004b2167e65a6960051cc2`, I've disabled AI code completion for Rust and text files, because the suggestions are getting too noisy.
 
+## Prior project names
+
+This project has existed for many years and had used other names such as `pcontainer` and `dockify`
+
 ## License
 
 Copyright (c) 2026 Zhongzhi Yu
@@ -93,5 +97,5 @@ Copyright (c) 2026 Zhongzhi Yu
 This project is licensed under the GNU General Public License v3.0 (GPLv3) - 
 see [COPYING](COPYING) for details
 
-Additionally, for this krsm crate, and that crate only, you can choose to use
+Additionally, for the krsm crate, and that crate only, you can choose to use
 the [MIT License](krsm/LICENSE) instead

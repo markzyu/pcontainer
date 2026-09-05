@@ -1,10 +1,10 @@
 [package]
 name = "krsm"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
 description = "This crate is a simple, single threaded, pinned async runtime for futures"
 license = "MIT or GPL-3.0-or-later"
-repository = "https://github.com/markzyu/pcontainer/edit/master/krsm/"
+repository = "https://github.com/markzyu/pocker/tree/master/krsm/"
 edition = "2024"
 
 [lints]

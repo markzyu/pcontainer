@@ -4,11 +4,11 @@ if [ -z "$TERMUX_VERSION" ]; then
   exit 1
 fi
 
-REPO_DIR="$HOME/pcontainer"
+REPO_DIR="$HOME/pocker"
 
 pkg install -y jq termux-api git rust python
 rm -rf "$REPO_DIR"
-git clone https://github.com/markzyu/pcontainer.git "$REPO_DIR"
+git clone https://github.com/markzyu/pocker.git "$REPO_DIR"
 if ! [ -e "$HOME/.bashrc" ] && ! [ -L "$HOME/.bashrc" ]; then
   ln -s "$REPO_DIR/scripts/.bashrc" ~/.bashrc
 fi

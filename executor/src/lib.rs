@@ -17,6 +17,7 @@ pub use crate::common::{PtraceExecutorError, PtraceRequest, SharedBool};
 pub use crate::futures::{PtraceAsyncRuntime, PtraceFutureTypes, PtraceStatus};
 
 use nix::{sys, unistd};
+use pocker_ptrace as ptrace;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};

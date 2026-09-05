@@ -12,9 +12,9 @@
 
 use crate::common::{SysAugError, SyscallInfo};
 use crate::handler_async::AsyncTraceeHandler;
-use ptrace::GenericPurposeRegs;
+use pocker_ptrace::GenericPurposeRegs;
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_clone(
         &self,
         mut regs: GenericPurposeRegs,
@@ -25,7 +25,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         regs.arg0 |= libc::CLONE_PTRACE as usize;
         regs.arg0 &= !(libc::CLONE_UNTRACED as usize);
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid2, regs))??;
+            .execute(move || pocker_ptrace::setregs(pid2, regs))??;
 
         self.do_resume_syscall().await?;
         Ok(())

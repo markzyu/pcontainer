@@ -1,5 +1,6 @@
 [package]
-name = "dockify"
+name = "pocker"
+description = "A multithreaded incomplete rewrite of proot, from scratch, just for fun. (The p stands for ptrace)"
 version = "0.2.0"
 authors = ["Zhongzhi Yu <7296488+markzyu@users.noreply.github.com>"]
 license = "GPL-3.0-or-later"
@@ -11,10 +12,10 @@ workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-executor = {path = "../executor"}
-procfs = {path = "../procfs"}
-ptrace = {path = "../ptrace"}
-sysaug = {path = "../sysaug"}
+pocker-executor = {path = "../executor"}
+pocker-procfs = {path = "../procfs"}
+pocker-ptrace = {path = "../ptrace"}
+pocker-sysaug = {path = "../sysaug"}
 clap = { version = "4", features = ["derive"] }
 thiserror = "1.0.25"
 tracing = "0.1.26"

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;

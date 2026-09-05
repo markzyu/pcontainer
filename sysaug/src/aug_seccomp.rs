@@ -12,10 +12,10 @@
 
 use crate::common::{PR_SET_SECCOMP, SECCOMP_SET_MODE_FILTER, SysAugError, SyscallInfo};
 use crate::handler_async::AsyncTraceeHandler;
-use ptrace::GenericPurposeRegs;
+use pocker_ptrace::GenericPurposeRegs;
 use tracing::{Level, event};
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_seccomp(
         &self,
         regs: GenericPurposeRegs,

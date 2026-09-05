@@ -21,7 +21,7 @@ use tracing::{Level, event};
 
 // Common helper functions used by aug_*.rs
 // Calculate real path of file based on its path in rootfs
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     // -----------------------------------------------------------------------------
     // ------------------------ RootFS Metadata (Perms, etc) -----------------------
     // -----------------------------------------------------------------------------

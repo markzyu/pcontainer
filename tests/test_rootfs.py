@@ -44,13 +44,13 @@ class TestRootFs(t.TestCase):
     def _setup_untar_in_container(self, tar_name, **kwargs):
         ans = c.run_script(
             f"""
-            echo "[PCONTAINER] [CREATING STAGING FROM TAR]" >&2
+            echo "[POCKER] [CREATING STAGING FROM TAR]" >&2
             cd {STAGING} && tar xpf ../{tar_name};
             if [ $? -ne 0 ]; then
-                echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
+                echo "[POCKER] [ERROR CREATING STAGING FROM TAR]" >&2
                 exit $?
             fi
-            echo "[PCONTAINER] [CREATED STAGING FROM TAR]" >&2
+            echo "[POCKER] [CREATED STAGING FROM TAR]" >&2
             """.encode(),
             rootfs=True,
             root=True,
@@ -61,13 +61,13 @@ class TestRootFs(t.TestCase):
     def _create_tar_from_container(self, dir, tar_name, **kwargs):
         ans = c.run_script(
             f"""
-            echo "[PCONTAINER] [CREATING TAR]" >&2
+            echo "[POCKER] [CREATING TAR]" >&2
             umask 0077 && cd {dir} && rm -f ../{tar_name} && tar cf ../{tar_name} .
             if [ $? -ne 0 ]; then
-                echo "[PCONTAINER] [ERROR CREATING STAGING FROM TAR]" >&2
+                echo "[POCKER] [ERROR CREATING STAGING FROM TAR]" >&2
                 exit $?
             fi
-            echo "[PCONTAINER] [CREATED TAR]" >&2
+            echo "[POCKER] [CREATED TAR]" >&2
             """.encode(),
             rootfs=True,
             **kwargs,

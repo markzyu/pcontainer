@@ -198,21 +198,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
-name = "dockify"
-version = "0.2.0"
-dependencies = [
- "clap",
- "executor",
- "procfs",
- "ptrace",
- "sysaug",
- "thiserror 1.0.69",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "elf"
 version = "0.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -226,20 +211,6 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
-
-[[package]]
-name = "executor"
-version = "0.2.0"
-dependencies = [
- "futures-lite",
- "krsm",
- "lazy_static",
- "libc",
- "nix",
- "ptrace",
- "thiserror 1.0.69",
- "tracing",
-]
 
 [[package]]
 name = "fastrand"
@@ -342,7 +313,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "krsm"
-version = "0.2.2"
+version = "0.3.1"
 dependencies = [
  "futures-lite",
  "thiserror 2.0.20",
@@ -511,6 +482,80 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pocker"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "pocker-executor",
+ "pocker-procfs",
+ "pocker-ptrace",
+ "pocker-sysaug",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "pocker-executor"
+version = "0.2.0"
+dependencies = [
+ "futures-lite",
+ "krsm",
+ "lazy_static",
+ "libc",
+ "nix",
+ "pocker-ptrace",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-procfs"
+version = "0.2.0"
+dependencies = [
+ "flate2",
+ "nix",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-ptrace"
+version = "0.2.0"
+dependencies = [
+ "backtrace",
+ "lazy_static",
+ "libc",
+ "lru",
+ "nix",
+ "ntest",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "pocker-sysaug"
+version = "0.2.0"
+dependencies = [
+ "elf",
+ "futures-lite",
+ "krsm",
+ "lazy_static",
+ "libc",
+ "nix",
+ "pocker-executor",
+ "pocker-procfs",
+ "pocker-ptrace",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -533,30 +578,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "procfs"
-version = "0.2.0"
-dependencies = [
- "flate2",
- "nix",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "ptrace"
-version = "0.2.0"
-dependencies = [
- "backtrace",
- "lazy_static",
- "libc",
- "lru",
- "nix",
- "ntest",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -720,27 +741,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "sysaug"
-version = "0.2.0"
-dependencies = [
- "elf",
- "executor",
- "futures-lite",
- "krsm",
- "lazy_static",
- "libc",
- "nix",
- "procfs",
- "ptrace",
- "regex",
- "serde",
- "serde_json",
- "serde_regex",
- "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]

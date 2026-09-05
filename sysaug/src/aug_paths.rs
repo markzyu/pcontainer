@@ -13,7 +13,10 @@
 use crate::PermType;
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
-use ptrace::{GenericPurposeRegs, MemHelpers};
+use pocker_ptrace::{
+    GenericPurposeRegs, MemHelpers, read_bytes_to_fixed_sized_objs, read_bytes_to_structs, setregs,
+    write_fixed_sized_objs_to_tracee, write_structs_to_tracee,
+};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use tracing::{Level, event};
@@ -21,7 +24,7 @@ use tracing::{Level, event};
 /// Per Linux inode.7 documentation, stx_mode needs a mask, if we only want to manipulate chmod
 const FILE_PERMS_MASK: usize = 0o7777;
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_paths(
         &self,
         mut orig_regs: GenericPurposeRegs,
@@ -106,11 +109,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Handle filefd_position (This overwrites all other save_paths)
         if let Some(position) = syscall.filefd_position {
             save_paths[0] = Some(
-                procfs::getfd_path(pid, read_args[position as usize] as isize)?
+                pocker_procfs::getfd_path(pid, read_args[position as usize] as isize)?
                     .unwrap_or("".into()),
             );
             event!(Level::INFO, "filefd path {:?}", &save_paths[0]);
-            // There is no need to calc_real_path, because pcontainer cannot override real fds
+            // There is no need to calc_real_path, because pocker cannot override real fds
         }
 
         // Handle getdents (make the buffer seem smaller)
@@ -159,7 +162,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         if need_write_regs {
             // Update registers, before real syscall
-            ptrace_client.execute(move || ptrace::setregs(pid, orig_regs))??;
+            ptrace_client.execute(move || setregs(pid, orig_regs))??;
         }
 
         let regs = self.do_resume_syscall().await?;
@@ -302,11 +305,11 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             let possible_args = [&regs.arg0, &regs.arg1, &regs.arg2];
             let dirfd = *possible_args[dirfd_reg as usize] as libc::c_int;
             if dirfd != libc::AT_FDCWD {
-                return Ok(procfs::getfd_path(self.pid, dirfd as isize)?);
+                return Ok(pocker_procfs::getfd_path(self.pid, dirfd as isize)?);
             }
         }
         // Otherwise, use cwd of tracee
-        Ok(Some(procfs::getcwd(self.pid)?))
+        Ok(Some(pocker_procfs::getcwd(self.pid)?))
     }
 
     async fn replace_getdents_result<T>(
@@ -324,7 +327,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
         let mut dirents: Vec<T> = ptrace_client
-            .execute(move || ptrace::read_bytes_to_structs(pid, addr, list_size, mem_helpers))??;
+            .execute(move || read_bytes_to_structs(pid, addr, list_size, mem_helpers))??;
         event!(Level::DEBUG, "Intercepting {} dir entries", dirents.len());
 
         let mut is_delete: Vec<bool> = Vec::new();
@@ -359,7 +362,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
 
         let num_dirents = dirents.len();
         let num_bytes = ptrace_client
-            .execute(move || ptrace::write_structs_to_tracee(pid, addr, buf_size, dirents, 2))??;
+            .execute(move || write_structs_to_tracee(pid, addr, buf_size, dirents, 2))??;
         event!(
             Level::DEBUG,
             "Returning {} dir entries, {} bytes",
@@ -370,7 +373,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         // Restore buffer size value so program doesn't reuse wrong values crash
         regs.arg2 *= 2;
         regs.set_syscall_retval(num_bytes);
-        ptrace_client.execute(move || ptrace::setregs(pid, regs))??;
+        ptrace_client.execute(move || setregs(pid, regs))??;
         Ok(())
     }
 
@@ -385,7 +388,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         let pid = self.pid;
         let ptrace_client = &self.ptrace_client;
         let mut stats: Vec<T> = ptrace_client
-            .execute(move || ptrace::read_bytes_to_fixed_sized_objs(pid, addr, 1, mem_helpers))??;
+            .execute(move || read_bytes_to_fixed_sized_objs(pid, addr, 1, mem_helpers))??;
         event!(
             Level::INFO,
             "Intercepting {} stat entries for {:?}.",
@@ -415,14 +418,13 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
         });
 
         let max_size = stats.len() * std::mem::size_of::<T>();
-        ptrace_client.execute(move || {
-            ptrace::write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats)
-        })??;
+        ptrace_client
+            .execute(move || write_fixed_sized_objs_to_tracee(pid, addr, max_size, stats))??;
         Ok(())
     }
 }
 
-trait IDirent: ptrace::CStruct + std::fmt::Debug {
+trait IDirent: pocker_ptrace::CStruct + std::fmt::Debug {
     fn get_name(&mut self) -> &mut [u8];
 }
 
@@ -466,10 +468,10 @@ impl IDirent for Dirent64 {
         &mut self.name
     }
 }
-impl ptrace::CStruct for Dirent64 {
+impl pocker_ptrace::CStruct for Dirent64 {
     type H = Dirent64Header;
 }
-impl ptrace::CHeader for Dirent64Header {
+impl pocker_ptrace::CHeader for Dirent64Header {
     fn item_size_deducer(&self) -> usize {
         self.reclen.into()
     }
@@ -484,10 +486,10 @@ impl IDirent for Dirent {
         &mut self.name
     }
 }
-impl ptrace::CStruct for Dirent {
+impl pocker_ptrace::CStruct for Dirent {
     type H = DirentHeader;
 }
-impl ptrace::CHeader for DirentHeader {
+impl pocker_ptrace::CHeader for DirentHeader {
     fn item_size_deducer(&self) -> usize {
         self.reclen.into()
     }

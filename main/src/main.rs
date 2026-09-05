@@ -11,11 +11,11 @@
 // GNU General Public License for more details.
 
 use clap::Parser;
-use executor::PtraceServer;
+use pocker_executor::PtraceServer;
+use pocker_sysaug::{PermsMode, RAW_SYSCALL_INFOS, SysAugArgs, display_err};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use sysaug::{PermsMode, RAW_SYSCALL_INFOS, SysAugArgs, display_err};
 use thiserror::Error;
 use tracing::{Level, event};
 
@@ -56,7 +56,7 @@ pub struct CLIArgs {
     #[arg(long)]
     pub sudo: bool,
 
-    /// Do not start a pcontainer. Instead, print the list of known syscalls
+    /// Do not start a pocker container. Instead, print the list of known syscalls
     #[arg(long)]
     pub show_syscalls: bool,
 
@@ -84,13 +84,13 @@ pub struct CLIArgs {
 #[derive(Debug, Error)]
 pub enum CLIError {
     #[error("Unexpected internal error from ptrace() executor: {0}")]
-    InternalExecutor(#[from] executor::PtraceExecutorError),
+    InternalExecutor(#[from] pocker_executor::PtraceExecutorError),
 
     #[error("Ptrace error: {0}")]
-    Ptrace(#[from] ptrace::PtraceError),
+    Ptrace(#[from] pocker_ptrace::PtraceError),
 
     #[error("Syscall error: {0}")]
-    SysAugErr(#[from] sysaug::SysAugError),
+    SysAugErr(#[from] pocker_sysaug::SysAugError),
 
     #[error("Invalid command line arguments: {0}")]
     ParseArgs(String),
@@ -151,12 +151,12 @@ fn actual_main() -> Result<(), CLIError> {
     }
 
     let retcode = if args.fix_attach {
-        let (ptrace_client, ptrace_loop) = executor::new_main_thread_executor();
+        let (ptrace_client, ptrace_loop) = pocker_executor::new_main_thread_executor();
         let join = launch_ptrace(&args, ptrace_client)?;
         ptrace_loop.serve()?;
         join.join().map_err(|_| CLIError::UnableToComplete)?
     } else {
-        launch_ptrace(&args, executor::new_local_executor())?
+        launch_ptrace(&args, pocker_executor::new_local_executor())?
             .join()
             .map_err(|_| CLIError::UnableToComplete)?
     };
@@ -176,14 +176,14 @@ fn canonicalize_clone(maybe_path: &Option<PathBuf>) -> Result<Option<PathBuf>, C
     }
 }
 
-fn launch_ptrace<PtraceClient: executor::PtraceClient>(
+fn launch_ptrace<PtraceClient: pocker_executor::PtraceClient>(
     args: &CLIArgs,
     ptrace_client: PtraceClient,
 ) -> Result<thread::JoinHandle<Option<u8>>, CLIError> {
     // Spawn first tracee
     let (pid1, shared_fd, mmap_addr) = {
         let mut cmd = std::process::Command::new(&args.cmd);
-        ptrace::start(&mut cmd, args.fix_attach)?
+        pocker_ptrace::start(&mut cmd, args.fix_attach)?
     };
     event!(Level::INFO, "First tracee pid: {:?}", pid1);
 
@@ -207,7 +207,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
         gdb_at: args.gdb_at,
         use_native_loader: args.use_native_loader,
     };
-    let states = sysaug::TraceeHandlerConsts {
+    let states = pocker_sysaug::TraceeHandlerConsts {
         args: args2,
         root_pid: pid1,
         ..Default::default()
@@ -215,7 +215,7 @@ fn launch_ptrace<PtraceClient: executor::PtraceClient>(
 
     // Start tracee handler thread
     let ptrace_client2 = ptrace_client.clone();
-    let new_tracee_handler = sysaug::TraceeHandler::new(
+    let new_tracee_handler = pocker_sysaug::TraceeHandler::new(
         pid1,
         ptrace_client,
         Some(Arc::new(states)),

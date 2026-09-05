@@ -20,10 +20,10 @@ HEADER_TEXT="// Copyright ${YEAR} ${OWNER}
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details."
 
-FILES=$(find "$REPO_DIR"/*/src -type f -name "*.rs")
+FILES=$(find "$REPO_DIR"/*/src -type f -name "*.rs" | grep -v "krsm/src/")
 
 for FILE in $FILES; do
-  if grep -q "Copyright (C)" "$FILE"; then
+  if grep -q "Copyright ${YEAR}" "$FILE"; then
     echo "Skipping (already has header): $FILE"
   else
     echo "Adding header to: $FILE"

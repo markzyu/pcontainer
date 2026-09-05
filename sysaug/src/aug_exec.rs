@@ -12,7 +12,7 @@
 
 use crate::common::{PathAction, SysAugError, SyscallInfo};
 use crate::handler_async::{AsyncTraceeHandler, get_mem_helper};
-use ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
+use pocker_ptrace::{GenericPurposeRegs, MemHelpers, USIZE_SIZE};
 use std::io::{BufRead, Read, Seek};
 use tracing::{Level, event};
 
@@ -29,7 +29,7 @@ macro_rules! exec_setid {
     }};
 }
 
-impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
+impl<PtraceClient: pocker_executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> {
     pub async fn augment_sys_exec(
         &self,
         mut regs: GenericPurposeRegs,
@@ -41,7 +41,7 @@ impl<PtraceClient: executor::PtraceClient> AsyncTraceeHandler<'_, PtraceClient> 
             return Ok(());
         }
         self.ptrace_client
-            .execute(move || ptrace::setregs(pid, regs))??;
+            .execute(move || pocker_ptrace::setregs(pid, regs))??;
         self.do_resume_syscall().await?;
         Ok(())
     }
